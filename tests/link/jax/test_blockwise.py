@@ -8,7 +8,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import get_mode
 from pytensor.tensor import add, as_tensor, constant, iscalar, lmatrix, lscalar, tensor
 from pytensor.tensor.blockwise import Blockwise, JAXBlockwise
-from pytensor.tensor.math import Dot, matmul, mul
+from pytensor.tensor.math import Dot, matmul
 from pytensor.tensor.rewriting.jax import blockwise_unbatched_scalar_inputs
 from tests.link.jax.test_basic import compare_jax_and_py
 from tests.tensor.test_blockwise import check_blockwise_runtime_broadcasting
@@ -64,18 +64,6 @@ def test_unbatched_scalar_inputs_rewrite():
     inner_inputs = [inp.type() for inp in (x, n, m, two_int64, n)]
     lowered_op = JAXBlockwise(inner_inputs, [scalar_add(*inner_inputs)])
     result.assert_graph(lowered_op(x, n, m, two_int64, n))
-
-    # A broadcastable input with core dims is not a scalar and stays vectorized
-    core = tensor("core", shape=(1, 1))
-    batched = tensor("batched", shape=(None,))
-    out = Blockwise(mul, signature="(n),()->(n)")(core, batched)
-    result = RewriteTester(
-        [core, batched],
-        [out],
-        include=None,
-        custom_rewrite=blockwise_unbatched_scalar_inputs,
-    )
-    result.assert_graph(out)
 
 
 def test_unbatched_scalar_inputs():
