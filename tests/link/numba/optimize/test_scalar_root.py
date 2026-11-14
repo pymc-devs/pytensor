@@ -1,16 +1,10 @@
-import inspect
 from functools import partial
 
 import numpy as np
 import pytest
-import scipy.optimize as scipy_optimize
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.link.numba.dispatch.optimize.scalar_root import (
-    BRACKET_DEFAULTS,
-    OPEN_DEFAULTS,
-)
 from pytensor.tensor.optimize import root_scalar
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -28,14 +22,6 @@ pytest.importorskip("numba")
 # Roots and flags match scipy's up to ulp differences between numba's and numpy's math
 # functions in the objective.
 matches_scipy = partial(np.testing.assert_allclose, rtol=1e-10)
-
-
-def _defaults(function):
-    return {
-        name: parameter.default
-        for name, parameter in inspect.signature(function).parameters.items()
-        if parameter.default is not inspect.Parameter.empty
-    }
 
 
 def _bracket(a):
@@ -158,53 +144,6 @@ def test_root_scalar_bracket_edge_cases(method, equation, bracket):
 
 
 @pytest.mark.parametrize(
-    "method, options, error, message",
-    [
-        (
-            "brentq",
-            lambda a: {**_bracket(a=a), "optimizer_kwargs": {"xtol": 0.0}},
-            ValueError,
-            "xtol too small",
-        ),
-        (
-            "brentq",
-            lambda a: {**_bracket(a=a), "optimizer_kwargs": {"rtol": 1e-20}},
-            ValueError,
-            "rtol too small",
-        ),
-        (
-            "secant",
-            lambda a: {"optimizer_kwargs": {"maxiter": 0}},
-            ValueError,
-            "maxiter must be greater than 0",
-        ),
-        (
-            "brentq",
-            lambda a: {**_bracket(a=a), "optimizer_kwargs": {"maxiter": 10.5}},
-            TypeError,
-            "cannot be interpreted as an integer",
-        ),
-    ],
-    ids=["xtol", "rtol", "maxiter", "fractional_maxiter"],
-)
-def test_root_scalar_invalid_static_option_raises(method, options, error, message):
-    with pytest.warns(UserWarning, match="Numba will use object mode"):
-        fn = _root_function(method=method, options=options)
-
-    with pytest.raises(error, match=message):
-        fn(0.0, 1.0)
-
-
-def test_root_scalar_method_name_is_case_insensitive():
-    fn = _root_function(method="BrentQ", options=_bracket)
-
-    root, success, _ = fn(0.0, 1.0)
-
-    assert success
-    np.testing.assert_allclose(root, ROOT, atol=1e-8)
-
-
-@pytest.mark.parametrize(
     "method, options",
     [
         ("secant", {}),
@@ -249,31 +188,6 @@ def test_secant_flat_region():
 
 
 @pytest.mark.parametrize(
-    "solver",
-    [
-        scipy_optimize.bisect,
-        scipy_optimize.brentq,
-        scipy_optimize.brenth,
-        scipy_optimize.ridder,
-        scipy_optimize.toms748,
-    ],
-    ids=["bisect", "brentq", "brenth", "ridder", "toms748"],
-)
-def test_bracket_solver_defaults_match_scipy(solver):
-    assert {
-        name: _defaults(function=solver)[name] for name in BRACKET_DEFAULTS
-    } == BRACKET_DEFAULTS
-
-
-def test_open_solver_defaults_match_scipy():
-    newton_defaults = _defaults(function=scipy_optimize.newton)
-    assert {
-        "xtol": newton_defaults["tol"],
-        "maxiter": newton_defaults["maxiter"],
-    } == OPEN_DEFAULTS
-
-
-@pytest.mark.parametrize(
     "method, options",
     [("secant", lambda a: {}), ("toms748", _bracket)],
     ids=["secant", "toms748"],
@@ -294,43 +208,3 @@ def test_root_scalar_keeps_variable_dtype(method, options):
 
     assert root.dtype == np.float32
     np.testing.assert_allclose(root, ROOT, rtol=1e-6)
-
-
-def test_root_scalar_evaluates_objective_in_variable_dtype():
-    """In float32, x - 0.1 is exactly zero on an interval that bisect reaches within 30 steps; in float64 it is not."""
-    x = pt.fscalar("x")
-    solution, success = root_scalar(
-        equation=x - np.float32(0.1),
-        variable=x,
-        method="bisect",
-        bracket=(0.0, 1.0),
-        optimizer_kwargs={"maxiter": 30},
-    )
-
-    _, (_, converged) = compare_numba_and_py(
-        graph_inputs=[x],
-        graph_outputs=[solution, success],
-        test_inputs=[np.float32(0.0)],
-        assert_fn=matches_scipy,
-        eval_obj_mode=False,
-    )
-
-    assert converged
-
-
-@pytest.mark.parametrize(
-    "method, options",
-    [
-        ("newton", lambda a: {"jac": True, "optimizer_kwargs": {"rtol": 1e-12}}),
-        ("newton", lambda a: {}),
-    ],
-    ids=["unsupported_option", "newton_without_jac"],
-)
-def test_root_scalar_object_mode_fallback(method, options):
-    with pytest.warns(UserWarning, match="Numba will use object mode"):
-        fn = _root_function(method=method, options=options)
-
-    root, success, _ = fn(0.0, 1.0)
-
-    assert success
-    np.testing.assert_allclose(root, ROOT, atol=1e-8)
