@@ -23,6 +23,7 @@ from pytensor.graph import (
 )
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
+from pytensor.graph.traversal import graph_inputs
 from pytensor.printing import debugprint
 from pytensor.tensor import (
     add,
@@ -57,8 +58,10 @@ from pytensor.tensor.rewriting.subtensor import (
 from pytensor.tensor.rewriting.subtensor_lift import (
     _diag_indices,
     extract_diag_lift_pass,
+    local_adv_inc_subtensor_of_inc_subtensor,
     local_advanced_subtensor_of_dot,
     local_subtensor_make_vector,
+    local_subtensor_of_adv_subtensor,
     local_subtensor_of_batch_dims,
     local_subtensor_of_expand_dims,
     local_subtensor_shape_constant,
@@ -67,7 +70,6 @@ from pytensor.tensor.shape import Shape_i, SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
-    AdvancedSubtensor,
     Subtensor,
 )
 from tests.unittest_tools import RewriteTester, assert_equal_computations
@@ -1147,54 +1149,282 @@ def test_local_subtensor_shape_constant():
 
 
 @pytest.mark.parametrize(
-    "original_fn, supported",
+    "original_fn, expected_fn",
     [
-        # Use non-constant-step index permutations ([2, 0, 1] not [1, 0]) so
-        # ``local_adv_idx_to_slice`` doesn't rewrite the
-        # AdvancedSubtensor to a Subtensor before this rewrite gets a chance
-        # to fire.
-        (lambda x: x[:, [2, 0, 1]][0], True),
-        (lambda x: x[:, [2, 0, 1], [0, 0, 0]][1:], True),
-        (lambda x: x[:, [[2, 0], [0, 1]]][1:], True),
-        (lambda x: x[:, None, [2, 0, 1]][0], True),
-        # Not supported, basic indexing on advanced indexing dim
-        (lambda x: x[[0, 1]][0], False),
-        # Not supported, basic indexing on the right of advanced indexing
-        (lambda x: x[[0, 1]][:, 0], False),
+        # Basic indices on the left of the advanced indices
+        (
+            lambda x, iv, jv, im: x[:, [2, 0, 1]][0],
+            lambda x, iv, jv, im: x[0][[2, 0, 1]],
+        ),
+        (
+            lambda x, iv, jv, im: x[:, [2, 0, 1], [0, 0, 0]][1:],
+            lambda x, iv, jv, im: x[1:][:, [2, 0, 1], [0, 0, 0]],
+        ),
+        (
+            lambda x, iv, jv, im: x[:, [[2, 0], [0, 1]]][1:],
+            lambda x, iv, jv, im: x[1:][:, [[2, 0], [0, 1]]],
+        ),
+        (
+            lambda x, iv, jv, im: x[:, None, [2, 0, 1]][0],
+            lambda x, iv, jv, im: x[:, None][0][:, [2, 0, 1]],
+        ),
+        # Basic indices on the right of the advanced indices
+        (lambda x, iv, jv, im: x[iv][:, 1:3], lambda x, iv, jv, im: x[:, 1:3][iv]),
+        (lambda x, iv, jv, im: x[iv][:, -1], lambda x, iv, jv, im: x[:, -1][iv]),
+        (
+            lambda x, iv, jv, im: x[:, iv][:, :, 2:],
+            lambda x, iv, jv, im: x[:, :, 2:][:, iv],
+        ),
+        (
+            lambda x, iv, jv, im: x[iv, jv][:, 1],
+            lambda x, iv, jv, im: x[:, :, 1][iv, jv],
+        ),
+        (
+            lambda x, iv, jv, im: x[im][:, :, :, ::-1],
+            lambda x, iv, jv, im: x[:, :, ::-1][im],
+        ),
+        # Basic index on the advanced dim: indexes a vector index directly
+        (lambda x, iv, jv, im: x[iv][1:, 1:], lambda x, iv, jv, im: x[:, 1:][iv[1:]]),
+        (lambda x, iv, jv, im: x[iv][::-1], lambda x, iv, jv, im: x[iv[::-1]]),
+        (
+            lambda x, iv, jv, im: x[:, iv][1, 2, 2],
+            lambda x, iv, jv, im: x[1, :, 2][iv[2]],
+        ),
+        (
+            lambda x, iv, jv, im: x[[0, 1]][0],
+            lambda x, iv, jv, im: x[pt.as_tensor([0, 1])[0]],
+        ),
+        # Basic indices on any of the advanced dims of a matrix index
+        (
+            lambda x, iv, jv, im: x[im][1:, :, 1:],
+            lambda x, iv, jv, im: x[:, 1:][im[1:, :]],
+        ),
+        (
+            lambda x, iv, jv, im: x[:, im][1, -1],
+            lambda x, iv, jv, im: x[1][im[-1]],
+        ),
+        (
+            lambda x, iv, jv, im: x[im][:, 1, ::-1],
+            lambda x, iv, jv, im: x[:, ::-1][im[:, 1]],
+        ),
+        (
+            lambda x, iv, jv, im: x[im][::-1, 0, 1:, -1],
+            lambda x, iv, jv, im: x[:, 1:, -1][im[::-1, 0]],
+        ),
+        # Multiple indices broadcast before selecting their shared dimensions
+        (
+            lambda x, iv, jv, im: x[iv[:, None], jv][:, -1, 1:],
+            lambda x, iv, jv, im: (lambda a, b: x[:, :, 1:][a[:, -1], b[:, -1]])(
+                *pt.broadcast_arrays(iv[:, None], jv)
+            ),
+        ),
+        # Several clients: disjoint reads, static size bounds, or basic views
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:2] * adv[2:4])(x[iv]),
+            lambda x, iv, jv, im: x[iv[:2]] * x[iv[2:4]],
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 1:3])(x[[0, 1]]),
+            lambda x, iv, jv, im: x[:, :2][[0, 1]] * x[:, 1:3][[0, 1]],
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:, :4] * adv[:, 1:])(x[[0, 1]]),
+            None,
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[1] * adv[1:])(x[iv]),
+            lambda x, iv, jv, im: x[iv[1]] * x[iv[1:]],
+        ),
+        (
+            lambda x, iv, jv, im: (lambda adv: adv[:, :2] * adv[:, 1:3])(x[iv]),
+            lambda x, iv, jv, im: x[:, :2][iv] * x[:, 1:3][iv],
+        ),
+        (lambda x, iv, jv, im: (lambda adv: adv[:2] * adv[1:3])(x[iv]), None),
+        (lambda x, iv, jv, im: (lambda adv: adv[:, :1] * adv.sum())(x[iv]), None),
         # Not implemented, complex flavors of advanced indexing
-        (lambda x: x[:, 5:, [0, 1]][0], False),
-        (lambda x: x[:, :, np.array([True, False, False])][0], False),
-        (lambda x: x[[0, 1], :, [0, 1]][:, 0], False),
+        (lambda x, iv, jv, im: x[:, 1:, jv][0], None),
+        (lambda x, iv, jv, im: x[x[:, 0, 0] > 0][:, 1:], None),
+        (lambda x, iv, jv, im: x[iv, :, jv][:, 1:], None),
     ],
 )
-def test_local_subtensor_of_adv_subtensor(original_fn, supported):
+def test_local_subtensor_of_adv_subtensor(original_fn, expected_fn):
     rng = np.random.default_rng(257)
     x = pt.tensor3("x", shape=(7, 5, 3))
-    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+    iv, jv, im = pt.lvector("iv"), pt.lvector("jv"), pt.lmatrix("im")
+    test_values = {
+        x: rng.normal(size=x.type.shape).astype(x.dtype),
+        iv: np.array([3, 0, 0, 2]),
+        jv: np.array([1, 2, 2, 0]),
+        im: np.array([[1, 4], [4, 0]]),
+    }
 
-    out = original_fn(x)
-    opt_out = rewrite_graph(
-        out,
-        include=("canonicalize", "local_subtensor_of_adv_subtensor"),
-        exclude=(
-            "local_advanced_read_of_write_constant_indices",
-            "local_adv_idx_to_slice",
+    out = original_fn(x, iv, jv, im)
+    result = RewriteTester(
+        [x, iv, jv, im],
+        [out],
+        include=None,
+        custom_rewrite=local_subtensor_of_adv_subtensor,
+    )
+    result.assert_graph(out if expected_fn is None else expected_fn(x, iv, jv, im))
+    result.assert_eval(*(test_values[inp] for inp in (x, iv, jv, im)))
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[:, 1:3].inc(g)),
+            lambda z, y, g, v, iv: z[iv].inc(y)[iv, 1:3].inc(g),
         ),
+        (
+            lambda z, y, g, v, iv: z[iv, :].inc(y[:, 1].inc(v)),
+            lambda z, y, g, v, iv: z[iv, :].inc(y)[iv, 1].inc(v),
+        ),
+        # Basic index on the advanced dim
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[1:, 1:3].inc(g[1:])),
+            lambda z, y, g, v, iv: z[iv].inc(y)[iv[1:], 1:3].inc(g[1:]),
+        ),
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[1, 1:].inc(v)),
+            lambda z, y, g, v, iv: z[iv].inc(y)[iv[1], 1:].inc(v),
+        ),
+        # Increment into zeros: nothing else to write
+        (
+            lambda z, y, g, v, iv: z[iv].inc(pt.zeros((3, 4))[:, 1:3].inc(g)),
+            lambda z, y, g, v, iv: z[iv, 1:3].inc(g),
+        ),
+        # Not an increment
+        (lambda z, y, g, v, iv: z[iv].inc(y[:, 1:3].set(g)), None),
+        (lambda z, y, g, v, iv: z[iv].set(y[:, 1:3].inc(g)), None),
+        # Inner increment has other clients
+        (
+            lambda z, y, g, v, iv: (lambda y_inc: z[iv].inc(y_inc) + y_inc.sum())(
+                y[:, 1:3].inc(g)
+            ),
+            None,
+        ),
+        # Inner increment is broadcast by the outer one, along a sliced dim
+        (
+            lambda z, y, g, v, iv: z[iv].inc(
+                pt.matrix("y_bcast", shape=(None, 1))[:, 0:1].inc(g[:, :1])
+            ),
+            None,
+        ),
+        (
+            lambda z, y, g, v, iv: z[iv].inc(
+                pt.matrix("y_row", shape=(1, None))[:1, 1:3].inc(g[:1])
+            ),
+            None,
+        ),
+        # Inner increment is broadcast by the outer one, from the left
+        (
+            lambda z, y, g, v, iv: pt.tensor3("z3")[iv].inc(
+                pt.matrix("y_low")[:, 0:1].inc(pt.matrix("g_low"))
+            ),
+            None,
+        ),
+        # Inner increment happens in a narrower dtype
+        (
+            lambda z, y, g, v, iv: z[iv].inc(
+                pt.fmatrix("y_f32")[:, 1:3].inc(pt.fmatrix("g_f32"))
+            ),
+            None,
+        ),
+    ],
+)
+def test_local_adv_inc_subtensor_of_inc_subtensor(original_fn, expected_fn):
+    rng = np.random.default_rng(257)
+    z, y, g = pt.matrix("z"), pt.matrix("y"), pt.matrix("g")
+    v, iv = pt.vector("v"), pt.lvector("iv")
+    test_shapes = {
+        "z": (5, 4),
+        "y": (3, 4),
+        "g": (3, 2),
+        "v": (3,),
+        "y_bcast": (3, 1),
+        "y_row": (1, 4),
+        "z3": (5, 2, 2),
+        "y_low": (2, 2),
+        "g_low": (2, 1),
+        "y_f32": (3, 4),
+        "g_f32": (3, 2),
+    }
+
+    out = original_fn(z, y, g, v, iv)
+    inputs = [inp for inp in graph_inputs([out]) if not isinstance(inp, Constant)]
+    result = RewriteTester(
+        inputs,
+        [out],
+        include=None,
+        custom_rewrite=local_adv_inc_subtensor_of_inc_subtensor,
     )
-    toposort = FunctionGraph(outputs=[opt_out], clone=False).toposort()
-    [idx_subtensor] = [
-        i for i, node in enumerate(toposort) if isinstance(node.op, Subtensor)
-    ]
-    [idx_adv_subtensor] = [
-        i for i, node in enumerate(toposort) if isinstance(node.op, AdvancedSubtensor)
-    ]
-    swapped = idx_subtensor < idx_adv_subtensor
-    correct = swapped if supported else not swapped
-    assert correct, debugprint(opt_out, print_type=True)
-    np.testing.assert_allclose(
-        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
-        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    result.assert_graph(out if expected_fn is None else expected_fn(z, y, g, v, iv))
+    # Repeated indices, so that increments must accumulate
+    result.assert_eval(
+        *(
+            np.array([4, 0, 0])
+            if inp is iv
+            else rng.normal(size=test_shapes[inp.name]).astype(inp.dtype)
+            for inp in inputs
+        )
     )
+
+
+@pytest.mark.parametrize("index_shapes", [((2, 3),), ((2, 1), (1, 3))])
+def test_local_adv_inc_subtensor_of_inc_subtensor_matrix_indices(index_shapes):
+    rng = np.random.default_rng(257)
+    z = pt.tensor("z", shape=(5,) * len(index_shapes) + (4,))
+    y, g = pt.tensor3("y"), pt.matrix("g")
+    indices = [
+        pt.tensor(f"idx{i}", dtype="int64", shape=shape)
+        for i, shape in enumerate(index_shapes)
+    ]
+    out = z[tuple(indices)].inc(y[:, 1, 1:3].inc(g))
+    broadcast_indices = pt.broadcast_arrays(*indices) if len(indices) > 1 else indices
+    expected = (
+        z[tuple(indices)]
+        .inc(y)[(*[idx[:, 1] for idx in broadcast_indices], slice(1, 3))]
+        .inc(g)
+    )
+    result = RewriteTester(
+        [z, y, g, *indices],
+        [out],
+        include=None,
+        custom_rewrite=local_adv_inc_subtensor_of_inc_subtensor,
+    )
+    result.assert_graph(expected)
+    result.assert_eval(
+        rng.normal(size=z.type.shape),
+        rng.normal(size=(2, 3, 4)),
+        rng.normal(size=(2, 2)),
+        *(rng.integers(0, 5, size=shape) for shape in index_shapes),
+    )
+
+
+def test_sliced_gather_gradient_does_not_materialize_the_gather():
+    rng = np.random.default_rng(0)
+    x = pt.matrix("x", shape=(7, 12))
+    idx = rng.integers(0, 7, 50)
+    gathered = x[idx]
+    blocks = [
+        (slice(None), slice(0, 2)),
+        (slice(None), slice(2, 7)),
+        (slice(10, None), slice(7, 12)),
+    ]
+    cost = sum(((gathered[b] - k) ** 2).sum() for k, b in enumerate(blocks))
+    outs = [cost, pt.grad(cost, x)]
+    f = function([x], outs, mode=mode_opt)
+    assert not any(
+        getattr(o.type, "shape", None) == (50, 12)
+        for n in f.maker.fgraph.apply_nodes
+        for o in n.outputs
+    )
+    x_test = rng.normal(size=(7, 12))
+    for res, ref in zip(
+        f(x_test), function([x], outs, mode=NO_OPTIMIZATION_MODE)(x_test)
+    ):
+        np.testing.assert_allclose(res, ref)
 
 
 @pytest.mark.parametrize(
