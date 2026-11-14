@@ -211,7 +211,14 @@ import ``pytensor`` and print the config variable, as in:
     Python floats become ``config.floatX`` instead of ``float64`` (NumPy scalars
     and arrays typed as ``float64`` are left alone). Unlike NumPy, a Python
     scalar can still upcast an array: ``fvector() + 1.5`` is ``float64`` when
-    ``floatX`` is ``'float64'``.
+    ``floatX`` is ``'float64'``. Python integers become ``int64`` under any
+    ``floatX``.
+
+    With ``floatX='float32'``, an operation that mixes dtypes stays ``float32``
+    where NumPy would give ``float64``, unless an input is
+    ``float64``: ``fvector() + ivector()`` and ``fvector() + 2`` are ``float32``.
+    Float functions of integers are not covered, so ``pt.sqrt(2)`` is ``float64``.
+    See :ref:`libdoc_tensor_autocasting`.
 
     The ``'custom'`` value corresponds to the rules originally used in PyTensor:
     a Python number gets the narrowest dtype that represents it exactly, so

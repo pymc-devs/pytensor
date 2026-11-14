@@ -323,14 +323,20 @@ A Python number can still upcast the variable it is combined with. With
 ``floatX='float64'``, ``pt.fvector() * 2`` is ``float64``, ``pt.ivector() + 1`` is
 ``int64``, and a ``float16`` variable plus a Python number is ``float64``. To keep
 the variable's dtype, use a typed constant such as ``np.float32(2)`` or
-``pt.constant(1, dtype=x.dtype)``, or set ``floatX='float32'`` for
-single-precision work. This matters where dtypes must match, as in the initial
-states of :func:`pytensor.scan`, the init and update of a ``ScalarLoop``, and the
-two branches of ``ifelse``.
+``pt.constant(1, dtype=x.dtype)``. This matters where dtypes must match, as in the
+initial states of :func:`pytensor.scan`, the init and update of a ``ScalarLoop``,
+and the two branches of ``ifelse``.
 
-Constants such as ``pt.sqrt(2.0)`` follow ``floatX``. Code that also runs under
-``cast_policy='custom'`` can compute them in Python (``math.sqrt(2)``), which
-follows ``floatX`` under both policies.
+With ``floatX='float32'``, a ``float32`` variable stays ``float32`` when combined
+with any Python number, integers included, unless another input is ``float64``.
+Integer variables still become ``int64`` (``pt.ivector() + 1``), and a ``float16``
+variable plus a Python number is ``float32``.
+
+Constants such as ``pt.sqrt(2.0)`` follow ``floatX``. A float function of a Python
+integer does not: ``pt.sqrt(2)`` is ``float64`` under any ``floatX``, because
+``int64`` inputs give ``float64``, and it upcasts a ``float32`` expression it is
+part of. Write ``pt.sqrt(2.0)``, or compute the constant in Python
+(``math.sqrt(2)``), which follows ``floatX`` under both policies.
 
 .. note::
 
