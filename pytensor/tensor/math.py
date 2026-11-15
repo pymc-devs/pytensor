@@ -3842,6 +3842,7 @@ def prod(
 
 
 class MulWithoutZeros(BinaryScalarOp):
+    name = "mul_without_zeros"
     # "identity" here is zero, as in Reduce we don't want to start
     # with reducing (1, something_else): this leads to the erroneous
     # case where a vector of zeros is reduced by binary reductions
@@ -3868,7 +3869,7 @@ class MulWithoutZeros(BinaryScalarOp):
         return (1,)
 
 
-mul_without_zeros = MulWithoutZeros(ps.upcast_out, name="mul_without_zeros")
+mul_without_zeros = MulWithoutZeros()
 
 
 class ProdWithoutZeros(FixedOpCAReduce):

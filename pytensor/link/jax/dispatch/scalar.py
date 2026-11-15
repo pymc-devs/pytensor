@@ -39,7 +39,7 @@ from pytensor.scalar.math import (
 )
 
 
-def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: str | None = None) -> Callable:
+def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: str) -> Callable:
     try:
         import tensorflow_probability.substrates.jax.math as tfp_jax_math
     except ModuleNotFoundError:
@@ -48,8 +48,6 @@ def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: str | None = None) -> Calla
             "Implementation is available if tfp-nightly is installed"
         )
 
-    if jax_op_name is None:
-        jax_op_name = op.name
     return typing.cast(Callable, getattr(tfp_jax_math, jax_op_name))
 
 
@@ -265,7 +263,7 @@ def jax_funcify_Erfinv(op, **kwargs):
 
 @jax_funcify.register(BetaIncInv)
 def jax_funcify_from_tfp(op, **kwargs):
-    tfp_jax_op = try_import_tfp_jax_op(op)
+    tfp_jax_op = try_import_tfp_jax_op(op, jax_op_name="betaincinv")
 
     return tfp_jax_op
 
@@ -275,7 +273,7 @@ def jax_funcify_Erfcx(op, **kwargs):
     if hasattr(jax.scipy.special, "erfcx"):
         return jax.scipy.special.erfcx
     # jax < 0.11 has no native erfcx
-    return try_import_tfp_jax_op(op)
+    return try_import_tfp_jax_op(op, jax_op_name="erfcx")
 
 
 @jax_funcify.register(Erfcinv)

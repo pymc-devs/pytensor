@@ -4,6 +4,7 @@ from typing import Literal, cast
 import numpy as np
 
 from pytensor.graph.basic import Constant
+from pytensor.scalar.basic import resolve_weak_dtypes
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     TensorVariable,
@@ -366,6 +367,10 @@ class Pad(TensorSymbolicOp):
     """Pad an array, with the padding graph built from the input types."""
 
     __props__ = ("pad_mode", "reflect_type", "has_stat_length", "static_pad_width")
+
+    def resolve_dtypes(self, input_dtypes):
+        # Widths and lengths have integer dtypes independently of padded values.
+        return tuple(resolve_weak_dtypes((dtype,))[0] for dtype in input_dtypes), None
 
     def __init__(
         self,

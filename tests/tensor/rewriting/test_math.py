@@ -203,9 +203,8 @@ def inputs(xbc=(0, 0), ybc=(0, 0), zbc=(0, 0)):
     return x, y, z
 
 
-def _autocast_int_dtype():
-    """dtype the active cast_policy gives a small Python int literal."""
-    return "int8" if config.cast_policy == "custom" else "int64"
+def _elemwise_int_dtype(x):
+    return "int8" if config.cast_policy == "custom" else x.dtype
 
 
 def test_add_canonizer_problem0():
@@ -367,22 +366,14 @@ class TestAlgebraicCanonizer:
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
+                "float32",
             ),
             (
                 fx * fy * fz * 2,
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
+                "float32",
             ),
             # (2+fx+fy+fz,(fx,fy,fz),(fxv,fyv,fzv),1,'float32'),
             # (2*fx*fy*fz,(fx,fy,fz),(fxv,fyv,fzv),1,'float32'),
@@ -391,22 +382,14 @@ class TestAlgebraicCanonizer:
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
+                "float32",
             ),
             (
                 2 * fx * fy * fz * 2,
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
+                "float32",
             ),
             # (fx*fy*2*(fx+fy+fz),(fx,fy,fz),(fxv,fyv,fzv),2,'float32'),
             # (fx*fy*(2+fx+fy+fz),(fx,fy,fz),(fxv,fyv,fzv),2,'float32'),
@@ -415,11 +398,7 @@ class TestAlgebraicCanonizer:
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 2,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
+                "float32",
             ),
             # check with broadcast of row
             # (fx+fy+fz+fv,(fx,fy,fz,fv),(fxv,fyv,fzv,fvv),1,'float32'),
@@ -787,33 +766,21 @@ class TestAlgebraicCanonizer:
                     ((2.0 * fx) / (4.0 * fy)),
                     [fx, fy],
                     [fxv, fyv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
                 (((2.0 * dv) / (4.0 * dy)), [dv, dy], [dvv, dyv], "float64"),
                 (
                     ((2.0 * fv) / (4.0 * fy)),
                     [fv, fy],
                     [fvv, fyv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
                 (((2.0 * dx) / (4.0 * dv)), [dx, dv], [dxv, dvv], "float64"),
                 (
                     ((2.0 * fx) / (4.0 * fv)),
                     [fx, fv],
                     [fxv, fvv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
             ]
         ):
@@ -840,22 +807,14 @@ class TestAlgebraicCanonizer:
                     (2 * fx) / 2,
                     [fx],
                     [fxv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
                 ((2 * dv) / 2, [dv], [dvv], "float64"),
                 (
                     (2 * fv) / 2,
                     [fv],
                     [fvv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
             ]
         ):
@@ -895,33 +854,21 @@ class TestAlgebraicCanonizer:
                     (2 * fx) / (3 * abs(fx)),
                     [fx],
                     [0.5 - fxv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
                 ((2 * dx) / (3 * abs(dx)), [dx], [0.1 * dxv], "float64"),
                 (
                     (2 * fx) / (3 * abs(fx)),
                     [fx],
                     [0.1 * fxv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
                 ((2 * dv) / (3 * abs(dv)), [dv], [0.5 - dvv], "float64"),
                 (
                     (2 * fv) / (3 * abs(fv)),
                     [fv],
                     [0.5 - fvv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
+                    "float32",
                 ),
             ]
         ):
@@ -2069,7 +2016,7 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=_autocast_int_dtype()),
+                    x >= np.zeros((1, 1), dtype=_elemwise_int_dtype(x)),
                     pt.log1p(x),
                     np.array([[np.nan]], dtype=np.float32),
                 )
@@ -2094,7 +2041,7 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=_autocast_int_dtype()),
+                    x >= np.zeros((1, 1), dtype=_elemwise_int_dtype(x)),
                     pt.log1p(-x),
                     np.array([[np.nan]], dtype=np.float32),
                 )
@@ -2117,7 +2064,7 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x <= np.array([[0]], dtype=_autocast_int_dtype()),
+                    x <= np.zeros((1, 1), dtype=_elemwise_int_dtype(x)),
                     x,
                     np.array([[np.nan]], dtype=np.float32),
                 )
@@ -2363,7 +2310,7 @@ class TestSqrSqrt:
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
-            ge(x, np.zeros((1, 1), dtype=_autocast_int_dtype())),
+            ge(x, np.zeros((1, 1), dtype=_elemwise_int_dtype(x))),
             x,
             np.full((1, 1), np.nan, dtype=out.type.dtype),
         )
@@ -2385,7 +2332,7 @@ class TestSqrSqrt:
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
-            ge(x, np.zeros((1,), dtype=_autocast_int_dtype())),
+            ge(x, np.zeros((1,), dtype=_elemwise_int_dtype(x))),
             x,
             np.full((1,), np.nan, dtype=dtype),
         )
@@ -4669,9 +4616,7 @@ class TestSigmoidRewrites:
         xd = dscalar()
 
         # Test `exp_over_1_plus_exp`
-        f = pytensor.function(
-            [x], np.float32(1) - exp(x) / (np.float32(1) + exp(x)), mode=m
-        )
+        f = pytensor.function([x], 1 - exp(x) / (1 + exp(x)), mode=m)
         # FIXME: PatternNodeRewriter does not copy stack trace
         #  (see https://github.com/Theano/Theano/issues/4581)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
@@ -4680,7 +4625,7 @@ class TestSigmoidRewrites:
         # Test `inv_1_plus_exp`
         f = pytensor.function(
             [x],
-            np.float32(1) - pt.fill(x, np.float32(1.0)) / (np.float32(1) + exp(-x)),
+            1 - pt.fill(x, np.float32(1.0)) / (1 + exp(-x)),
             mode=m,
         )
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
@@ -4957,7 +4902,7 @@ def test_local_logit_sigmoid():
     """Test that graphs of the form ``logit(sigmoid(x))`` and ``sigmoid(logit(x))`` get rewritten to ``x``."""
 
     def logit_fn(x):
-        return log(x / (np.float32(1) - x))
+        return log(x / (1 - x))
 
     x = fmatrix()
 

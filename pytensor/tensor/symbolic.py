@@ -1,13 +1,28 @@
 from pytensor.compile.builders import OpFromGraph, SymbolicOp
-from pytensor.tensor.basic import as_tensor_variable
+from pytensor.scalar.basic import (
+    _resolve_float_dtypes,
+    resolve_weak_dtypes,
+)
+from pytensor.tensor.utils import as_tensor_variables
 
 
 class TensorSymbolicOp(SymbolicOp):
-    """SymbolicOp that converts inputs via ``as_tensor_variable``."""
+    """SymbolicOp that resolves input dtypes before converting tensor arguments."""
 
-    @staticmethod
-    def filter_inputs(*inputs):
-        return tuple(as_tensor_variable(inp) for inp in inputs)
+    def resolve_dtypes(self, input_dtypes):
+        """Resolve input conversions; output dtypes are inferred by the inner graph."""
+        return resolve_weak_dtypes(input_dtypes), None
+
+    def filter_inputs(self, *inputs):
+        return as_tensor_variables(*inputs, resolve_dtypes=self.resolve_dtypes)
+
+
+def resolve_float_dtypes(self, input_dtypes):
+    inputs = resolve_weak_dtypes(input_dtypes)
+    if any(dtype.startswith(("float", "complex")) for dtype in inputs):
+        return inputs, None
+    inputs, _ = _resolve_float_dtypes(self, input_dtypes)
+    return inputs, None
 
 
 class FusibleSymbolicOpDerivative(OpFromGraph):

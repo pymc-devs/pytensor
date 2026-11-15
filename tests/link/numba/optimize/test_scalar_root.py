@@ -156,10 +156,14 @@ def test_root_scalar_bracket_edge_cases(method, equation, bracket):
     ids=["float32", "root_near_1e10"],
 )
 def test_root_scalar_open_methods_match_scipy(method, options, dtype, equation, x0):
-    """scipy iterates in the variable's dtype and stops when the iterate stops moving."""
+    """Compare convergence at a tolerance supported by the variable's dtype."""
     x = pt.scalar("x", dtype=dtype)
     solution, success = root_scalar(
-        equation=equation(x), variable=x, method=method, **options
+        equation=equation(x),
+        variable=x,
+        method=method,
+        optimizer_kwargs={"xtol": 1e-6} if dtype == "float32" else None,
+        **options,
     )
 
     compare_numba_and_py(

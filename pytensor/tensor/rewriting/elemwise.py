@@ -30,7 +30,6 @@ from pytensor.graph.rewriting.reachability import (
     ancestor_bitsets,
     update_ancestors_after_contraction_bits,
 )
-from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.traversal import toposort, walk_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.scalar import (
@@ -39,11 +38,14 @@ from pytensor.scalar import (
     Mul,
     ScalarOp,
     get_scalar_type,
-    upcast_out,
-    upgrade_to_float,
 )
 from pytensor.scalar import cast as scalar_cast
 from pytensor.scalar import constant as scalar_constant
+from pytensor.scalar.basic import (
+    TrueDiv,
+    _resolve_float_dtypes,
+    _resolve_float_no_complex_dtypes,
+)
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.basic import constant as tensor_constant
@@ -513,12 +515,7 @@ def local_useless_dimshuffle_makevector(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter(
-    [
-        elemwise_of(OpPattern(ScalarOp, output_types_preference=upgrade_to_float)),
-        elemwise_of(OpPattern(ScalarOp, output_types_preference=upcast_out)),
-    ]
-)
+@node_rewriter([Elemwise])
 def local_upcast_elemwise_constant_inputs(fgraph, node):
     """This explicitly upcasts constant inputs to elemwise Ops, when
     those Ops do implicit upcasting anyway.
@@ -526,7 +523,16 @@ def local_upcast_elemwise_constant_inputs(fgraph, node):
     Rationale: it helps merge things like (1-x) and (1.0 - x).
 
     """
-    if len(node.outputs) > 1:
+    if (
+        type(node.op.scalar_op).resolve_dtypes
+        not in (
+            ScalarOp.resolve_dtypes,
+            _resolve_float_dtypes,
+            _resolve_float_no_complex_dtypes,
+            TrueDiv.resolve_dtypes,
+        )
+        or len(node.outputs) > 1
+    ):
         return None
 
     # this is the kind of op that we can screw with the input

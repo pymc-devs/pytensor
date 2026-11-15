@@ -9,8 +9,49 @@ from numpy.lib.array_utils import normalize_axis_tuple
 
 import pytensor
 from pytensor.graph import FunctionGraph, Variable
+from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.utils import hash_from_code
+
+
+def as_tensor_variables(*inputs, resolve_dtypes=None):
+    """Convert inputs together, preserving NumPy's weak Python scalar promotion.
+
+    Explicitly typed inputs keep their dtype. Under ``numpy+floatX``, Python
+    int, float and complex literals take their precision from the other inputs.
+    Without a typed input, constants follow the usual casting policy.
+    ``resolve_dtypes`` determines the operation's input conversions before any
+    literal is materialized. Without it, ordinary numeric promotion is used.
+    """
+    if len(inputs) < 2 or not any(type(inp) in (int, float, complex) for inp in inputs):
+        return [as_tensor_variable(inp) for inp in inputs]
+    if pytensor.config.cast_policy == "custom":
+        return [as_tensor_variable(inp) for inp in inputs]
+
+    weak_inputs = {}
+    tensors = []
+    for i, inp in enumerate(inputs):
+        if type(inp) in (int, float, complex):
+            weak_inputs[i] = inp
+            tensors.append(None)
+        else:
+            tensors.append(as_tensor_variable(inp))
+
+    dtypes = [inp.dtype for inp in tensors if inp is not None]
+    if not dtypes:
+        return [as_tensor_variable(inp) for inp in inputs]
+
+    input_dtypes = tuple(
+        type(inp) if i in weak_inputs else tensors[i].dtype
+        for i, inp in enumerate(inputs)
+    )
+    if resolve_dtypes is None:
+        resolved = pytensor.scalar.resolve_weak_dtypes(input_dtypes)
+    else:
+        resolved, _ = resolve_dtypes(input_dtypes)
+    for i, inp in weak_inputs.items():
+        tensors[i] = as_tensor_variable(np.asarray(inp, dtype=resolved[i]))
+    return tensors
 
 
 def hash_from_ndarray(data) -> str:

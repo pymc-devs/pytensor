@@ -527,12 +527,12 @@ def test_debugprint_lazy_ifelse():
             ← Mul [id D]
                ├─ i0 [id E]
                └─ ExpandDims{axis=0} [id F]
-                  └─ 2 [id G]
+                  └─ 2.0 [id G]
          false_branch:
             ← Mul [id H]
                ├─ i0 [id E]
                └─ ExpandDims{axis=0} [id I]
-                  └─ 3 [id J]
+                  └─ 3.0 [id J]
         """
     )
 
@@ -560,7 +560,7 @@ def test_debugprint_blockwise_opfromgraph():
          ← Add [id H]
             ├─ i0 [id I]
             └─ ExpandDims{axis=0} [id J]
-               └─ 1 [id K]
+               └─ 1.0 [id K]
         """
     )
 
@@ -590,7 +590,7 @@ def test_debugprint_blockwise_scan():
         Scan{inner, while_loop=False, inplace=none} [id D]
          ← Add [id H]
             ├─ i0 [id I] -> [id F]
-            └─ 1 [id J]
+            └─ 1.0 [id J]
         """
     )
 
@@ -624,13 +624,13 @@ AddOne{inline=False} [id A]
  ← Add [id E]
     ├─ i0 [id F]
     └─ ExpandDims{axis=0} [id G]
-       └─ 1 [id H]
+       └─ 1.0 [id H]
 
 Relu{inline=False} [id B, C]
  ← Maximum [id I]
     ├─ i0 [id F]
     └─ ExpandDims{axis=0} [id J]
-       └─ 0 [id K]
+       └─ 0.0 [id K]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
@@ -684,20 +684,20 @@ A{inline=False} [id B]
     ├─ Relu{inline=False} [id F]
     │  └─ i0 [id G]
     └─ ExpandDims{axis=0} [id H]
-       └─ 1 [id I]
+       └─ 1.0 [id I]
 
 B{inline=False} [id D]
  ← Mul [id J]
     ├─ Relu{inline=False} [id F]
     │  └─ ···
     └─ ExpandDims{axis=0} [id K]
-       └─ 2 [id L]
+       └─ 2.0 [id L]
 
 Relu{inline=False} [id F]
  ← Maximum [id M]
     ├─ i0 [id G]
     └─ ExpandDims{axis=0} [id N]
-       └─ 0 [id O]
+       └─ 0.0 [id O]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):

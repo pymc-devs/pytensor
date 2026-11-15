@@ -15,8 +15,11 @@ from pytensor.scalar.basic import (
     BinaryScalarOp,
     ScalarOp,
     UnaryScalarOp,
+    _resolve_float_dtypes,
+    _resolve_float_no_complex_dtypes,
     as_scalar,
     complex_types,
+    discrete_dtypes,
     discrete_types,
     eq,
     exp,
@@ -31,11 +34,10 @@ from pytensor.scalar.basic import (
     log1p,
     maximum,
     reciprocal,
+    resolve_weak_dtypes,
     switch,
     true_div,
     upcast,
-    upgrade_to_float,
-    upgrade_to_float_no_complex,
 )
 from pytensor.scalar.basic import abs as scalar_abs
 from pytensor.scalar.loop import ScalarLoop
@@ -50,6 +52,10 @@ C_CODE_PATH = Path(__file__).parent / "c_code"
 
 
 class Erf(UnaryScalarOp):
+    name = "erf"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     nfunc_spec = ("scipy.special.erf", 1, 1)
@@ -82,10 +88,14 @@ class Erf(UnaryScalarOp):
         return f"{z} = erf(({cast}){x});"
 
 
-erf = Erf(upgrade_to_float, name="erf")
+erf = Erf()
 
 
 class Erfc(UnaryScalarOp):
+    name = "erfc"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
+
     monotonic_decreasing = True
     non_negative = True
     nfunc_spec = ("scipy.special.erfc", 1, 1)
@@ -119,7 +129,7 @@ class Erfc(UnaryScalarOp):
 
 
 # special.erfc don't support complex. Why?
-erfc = Erfc(upgrade_to_float_no_complex, name="erfc")
+erfc = Erfc()
 
 
 class Erfcx(UnaryScalarOp):
@@ -136,6 +146,10 @@ class Erfcx(UnaryScalarOp):
     running on GPU an optimization will replace it with a gpu version.
 
     """
+
+    name = "erfcx"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
 
     monotonic_decreasing = True
     nfunc_spec = ("scipy.special.erfcx", 1, 1)
@@ -179,10 +193,14 @@ class Erfcx(UnaryScalarOp):
         raise NotImplementedError("type not supported", type)
 
 
-erfcx = Erfcx(upgrade_to_float_no_complex, name="erfcx")
+erfcx = Erfcx()
 
 
 class Erfinv(UnaryScalarOp):
+    name = "erfinv"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     """
@@ -227,10 +245,14 @@ class Erfinv(UnaryScalarOp):
         raise NotImplementedError()
 
 
-erfinv = Erfinv(upgrade_to_float_no_complex, name="erfinv")
+erfinv = Erfinv()
 
 
 class Erfcinv(UnaryScalarOp):
+    name = "erfcinv"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
+
     monotonic_decreasing = True
     nfunc_spec = ("scipy.special.erfcinv", 1, 1)
 
@@ -263,7 +285,7 @@ class Erfcinv(UnaryScalarOp):
         raise NotImplementedError()
 
 
-erfcinv = Erfcinv(upgrade_to_float_no_complex, name="erfcinv")
+erfcinv = Erfcinv()
 
 
 class NdtriExp(UnaryScalarOp):
@@ -272,6 +294,10 @@ class NdtriExp(UnaryScalarOp):
     exponent of x, `ndtri(exp(x))`, in a way that remains accurate for very
     negative x, where `exp(x)` underflows.
     """
+
+    name = "ndtri_exp"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
 
     monotonic_increasing = True
     nfunc_spec = ("scipy.special.ndtri_exp", 1, 1)
@@ -300,10 +326,14 @@ class NdtriExp(UnaryScalarOp):
         raise NotImplementedError()
 
 
-ndtri_exp = NdtriExp(upgrade_to_float_no_complex, name="ndtri_exp")
+ndtri_exp = NdtriExp()
 
 
 class Owens_t(BinaryScalarOp):
+    name = "owens_t"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     nfunc_spec = ("scipy.special.owens_t", 2, 1)
 
     def impl(self, h, a):
@@ -325,10 +355,14 @@ class Owens_t(BinaryScalarOp):
         raise NotImplementedError()
 
 
-owens_t = Owens_t(upgrade_to_float, name="owens_t")
+owens_t = Owens_t()
 
 
 class Gamma(UnaryScalarOp):
+    name = "gamma"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     nfunc_spec = ("scipy.special.gamma", 1, 1)
 
     def impl(self, x):
@@ -355,7 +389,7 @@ class Gamma(UnaryScalarOp):
         raise NotImplementedError("only floating point is implemented")
 
 
-gamma = Gamma(upgrade_to_float, name="gamma")
+gamma = Gamma()
 
 
 class GammaLn(UnaryScalarOp):
@@ -363,6 +397,10 @@ class GammaLn(UnaryScalarOp):
     Log gamma function.
 
     """
+
+    name = "gammaln"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.gammaln", 1, 1)
 
@@ -395,7 +433,7 @@ class GammaLn(UnaryScalarOp):
         return f"""{z} = lgamma(({cast}){x});"""
 
 
-gammaln = GammaLn(upgrade_to_float, name="gammaln")
+gammaln = GammaLn()
 
 
 class Psi(UnaryScalarOp):
@@ -403,6 +441,10 @@ class Psi(UnaryScalarOp):
     Derivative of log gamma function.
 
     """
+
+    name = "psi"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.psi", 1, 1)
 
@@ -491,7 +533,7 @@ class Psi(UnaryScalarOp):
         raise NotImplementedError("only floating point is implemented")
 
 
-psi = Psi(upgrade_to_float, name="psi")
+psi = Psi()
 
 
 class TriGamma(UnaryScalarOp):
@@ -499,6 +541,10 @@ class TriGamma(UnaryScalarOp):
     Second derivative of log gamma function.
 
     """
+
+    name = "tri_gamma"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
 
     def impl(self, x):
         return special.polygamma(1, x)
@@ -576,7 +622,7 @@ class TriGamma(UnaryScalarOp):
 
 
 # Scipy polygamma does not support complex inputs: https://github.com/scipy/scipy/issues/7410
-tri_gamma = TriGamma(upgrade_to_float_no_complex, name="tri_gamma")
+tri_gamma = TriGamma()
 
 
 class PolyGamma(BinaryScalarOp):
@@ -588,16 +634,18 @@ class PolyGamma(BinaryScalarOp):
      the default elemwise inplace won't work, as it always tries to store the results in the first input.
     """
 
+    name = "polygamma"
+
     nfunc_spec = ("scipy.special.polygamma", 2, 1)
 
-    @staticmethod
-    def output_types_preference(n_type, x_type):
-        if n_type not in discrete_types:
+    def resolve_dtypes(self, input_dtypes):
+        order, value = (resolve_weak_dtypes((dtype,))[0] for dtype in input_dtypes)
+        if order not in discrete_dtypes:
             raise TypeError(
-                f"Polygamma order parameter must be discrete, got {n_type} dtype"
+                f"Polygamma order parameter must be discrete, got {order} dtype"
             )
-        # Scipy doesn't support it
-        return upgrade_to_float_no_complex(x_type)
+        _, (output,) = _resolve_float_no_complex_dtypes(self, (value,))
+        return (order, value), (output,)
 
     def impl(self, n, x):
         return special.polygamma(n, x)
@@ -616,13 +664,17 @@ class PolyGamma(BinaryScalarOp):
         raise NotImplementedError()
 
 
-polygamma = PolyGamma(name="polygamma")
+polygamma = PolyGamma()
 
 
 class GammaInc(BinaryScalarOp):
     """
     Compute the regularized lower gamma function (P).
     """
+
+    name = "gammainc"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.gammainc", 2, 1)
 
@@ -663,13 +715,17 @@ class GammaInc(BinaryScalarOp):
             return v
 
 
-gammainc = GammaInc(upgrade_to_float, name="gammainc")
+gammainc = GammaInc()
 
 
 class GammaIncC(BinaryScalarOp):
     """
     Compute the regularized upper gamma function (Q).
     """
+
+    name = "gammaincc"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.gammaincc", 2, 1)
 
@@ -710,13 +766,17 @@ class GammaIncC(BinaryScalarOp):
             return v
 
 
-gammaincc = GammaIncC(upgrade_to_float, name="gammaincc")
+gammaincc = GammaIncC()
 
 
 class GammaIncInv(BinaryScalarOp):
     """
     Inverse to the regularized lower incomplete gamma function.
     """
+
+    name = "gammaincinv"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.gammaincinv", 2, 1)
 
@@ -735,13 +795,17 @@ class GammaIncInv(BinaryScalarOp):
         raise NotImplementedError()
 
 
-gammaincinv = GammaIncInv(upgrade_to_float, name="gammaincinv")
+gammaincinv = GammaIncInv()
 
 
 class GammaIncCInv(BinaryScalarOp):
     """
     Inverse to the regularized upper incomplete gamma function.
     """
+
+    name = "gammainccinv"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.gammainccinv", 2, 1)
 
@@ -760,7 +824,7 @@ class GammaIncCInv(BinaryScalarOp):
         raise NotImplementedError()
 
 
-gammainccinv = GammaIncCInv(upgrade_to_float, name="gammainccinv")
+gammainccinv = GammaIncCInv()
 
 
 def _make_scalar_loop(n_steps, init, constant, inner_loop_fn, name, loop_op=ScalarLoop):
@@ -936,6 +1000,10 @@ class Jv(BinaryScalarOp):
     Bessel function of the first kind of order v (real).
     """
 
+    name = "jv"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     nfunc_spec = ("scipy.special.jv", 2, 1)
 
     def impl(self, v, x):
@@ -953,10 +1021,14 @@ class Jv(BinaryScalarOp):
         raise NotImplementedError()
 
 
-jv = Jv(upgrade_to_float, name="jv")
+jv = Jv()
 
 
 class J1(UnaryScalarOp):
+    name = "j1"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     """
     Bessel function of the first kind of order 1.
@@ -981,13 +1053,17 @@ class J1(UnaryScalarOp):
         raise NotImplementedError("only floating point is implemented")
 
 
-j1 = J1(upgrade_to_float, name="j1")
+j1 = J1()
 
 
 class J0(UnaryScalarOp):
     """
     Bessel function of the first kind of order 0.
     """
+
+    name = "j0"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.j0", 1, 1)
 
@@ -1008,10 +1084,14 @@ class J0(UnaryScalarOp):
         raise NotImplementedError("only floating point is implemented")
 
 
-j0 = J0(upgrade_to_float, name="j0")
+j0 = J0()
 
 
 class I1(UnaryScalarOp):
+    name = "i1"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     """
@@ -1032,13 +1112,17 @@ class I1(UnaryScalarOp):
         raise NotImplementedError()
 
 
-i1 = I1(upgrade_to_float, name="i1")
+i1 = I1()
 
 
 class I0(UnaryScalarOp):
     """
     Modified Bessel function of the first kind of order 0.
     """
+
+    name = "i0"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.i0", 1, 1)
 
@@ -1054,13 +1138,17 @@ class I0(UnaryScalarOp):
         raise NotImplementedError()
 
 
-i0 = I0(upgrade_to_float, name="i0")
+i0 = I0()
 
 
 class Ive(BinaryScalarOp):
     """
     Exponentially scaled modified Bessel function of the first kind of order v (real).
     """
+
+    name = "ive"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.ive", 2, 1)
 
@@ -1081,11 +1169,15 @@ class Ive(BinaryScalarOp):
         raise NotImplementedError()
 
 
-ive = Ive(upgrade_to_float, name="ive")
+ive = Ive()
 
 
 class Kve(BinaryScalarOp):
     """Exponentially scaled modified Bessel function of the second kind of real order v."""
+
+    name = "kve"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("scipy.special.kve", 2, 1)
 
@@ -1109,13 +1201,17 @@ class Kve(BinaryScalarOp):
         raise NotImplementedError()
 
 
-kve = Kve(upgrade_to_float, name="kve")
+kve = Kve()
 
 
 class Sigmoid(UnaryScalarOp):
     """
     Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit
     """
+
+    name = "sigmoid"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     monotonic_increasing = True
     non_negative = True
@@ -1161,7 +1257,7 @@ class Sigmoid(UnaryScalarOp):
             return v
 
 
-sigmoid = Sigmoid(upgrade_to_float, name="sigmoid")
+sigmoid = Sigmoid()
 
 
 class Softplus(UnaryScalarOp):
@@ -1179,6 +1275,8 @@ class Softplus(UnaryScalarOp):
     .. [Machler2012] Martin Mächler (2012).
         "Accurately computing `\log(1-\exp(- \mid a \mid))` Assessed by the Rmpfr package"
     """
+
+    resolve_dtypes = _resolve_float_dtypes
 
     monotonic_increasing = True
     non_negative = True
@@ -1216,7 +1314,7 @@ class Softplus(UnaryScalarOp):
             return v
 
 
-softplus = Softplus(upgrade_to_float)
+softplus = Softplus()
 
 
 class Log1mexp(UnaryScalarOp):
@@ -1233,6 +1331,8 @@ class Log1mexp(UnaryScalarOp):
     .. [Machler2012] Martin Mächler (2012).
         "Accurately computing `\log(1-\exp(- \mid a \mid))` Assessed by the Rmpfr package"
     """
+
+    resolve_dtypes = _resolve_float_dtypes
 
     monotonic_decreasing = True
 
@@ -1263,13 +1363,17 @@ class Log1mexp(UnaryScalarOp):
             raise NotImplementedError("only floating point is implemented")
 
 
-log1mexp = Log1mexp(upgrade_to_float)
+log1mexp = Log1mexp()
 
 
 class BetaInc(ScalarOp):
     """
     Regularized incomplete beta function
     """
+
+    name = "betainc"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
 
     nin = 3
     nfunc_spec = ("scipy.special.betainc", 3, 1)
@@ -1311,7 +1415,7 @@ class BetaInc(ScalarOp):
         return (2,)
 
 
-betainc = BetaInc(upgrade_to_float_no_complex, name="betainc")
+betainc = BetaInc()
 
 
 def betainc_grad(p, q, x, wrtp: bool):
@@ -1530,6 +1634,10 @@ class BetaIncInv(ScalarOp):
     Inverse of the regularized incomplete beta function.
     """
 
+    name = "betaincinv"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
+
     nfunc_spec = ("scipy.special.betaincinv", 3, 1)
 
     def impl(self, a, b, x):
@@ -1551,7 +1659,7 @@ class BetaIncInv(ScalarOp):
         raise NotImplementedError()
 
 
-betaincinv = BetaIncInv(upgrade_to_float_no_complex, name="betaincinv")
+betaincinv = BetaIncInv()
 
 
 def betaln(a, b):
@@ -1567,6 +1675,10 @@ class Hyp2F1(ScalarOp):
     Gaussian hypergeometric function ``2F1(a, b; c; z)``.
 
     """
+
+    name = "hyp2f1"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nin = 4
     nfunc_spec = ("scipy.special.hyp2f1", 4, 1)
@@ -1589,7 +1701,7 @@ class Hyp2F1(ScalarOp):
         raise NotImplementedError()
 
 
-hyp2f1 = Hyp2F1(upgrade_to_float, name="hyp2f1")
+hyp2f1 = Hyp2F1()
 
 
 def _unsafe_sign(x):

@@ -200,32 +200,35 @@ import ``pytensor`` and print the config variable, as in:
 
 .. attribute:: cast_policy
 
-    String value: either ``'numpy+floatX'`` or ``'custom'``
+    String value: ``'numpy+floatX'`` (default) or ``'custom'``.
 
-    Default: ``'numpy+floatX'``
+    Controls how Python values acquire dtypes when constructing a graph.
 
-    This specifies how data types are implicitly determined by PyTensor during the
-    creation of constants or in the results of arithmetic operations.
+    Under ``'numpy+floatX'``, a standalone Python integer becomes ``int64`` and
+    a standalone Python float becomes ``floatX``. NumPy scalars and arrays keep
+    their explicit dtype.
 
-    The ``'numpy+floatX'`` setting mimics NumPy casting rules, except that
-    Python floats become ``config.floatX`` instead of ``float64`` (NumPy scalars
-    and arrays typed as ``float64`` are left alone). Unlike NumPy, a Python
-    scalar can still upcast an array: ``fvector() + 1.5`` is ``float64`` when
-    ``floatX`` is ``'float64'``. Python integers become ``int64`` under any
-    ``floatX``.
+    In arithmetic expressions, Python numbers are weakly typed: the operation
+    resolves their precision from its typed operands.
+    Thus ``fvector() + 2.0`` stays ``float32`` and ``ivector() + 1`` stays
+    ``int32``. Integer literals that cannot fit the dtype selected for integer
+    arithmetic raise ``OverflowError``. Operations that require floating-point
+    arithmetic resolve a floating dtype before converting the literal.
 
-    With ``floatX='float32'``, an operation that mixes dtypes stays ``float32``
-    where NumPy would give ``float64``, unless an input is
-    ``float64``: ``fvector() + ivector()`` and ``fvector() + 2`` are ``float32``.
-    Float functions of integers are not covered, so ``pt.sqrt(2)`` is ``float64``.
-    See :ref:`libdoc_tensor_autocasting`.
+    With ``floatX='float32'``, numeric promotion also favors ``float32`` over
+    ``float64`` when no operand is explicitly ``float64``. For example,
+    ``fvector() + ivector()`` is ``float32``. Operations retain their own output
+    rules: floating-point functions, reductions, linear algebra, and random
+    variables determine their output dtype separately.
 
-    The ``'custom'`` value corresponds to the rules originally used in PyTensor:
-    a Python number gets the narrowest dtype that represents it exactly, so
-    ``2`` becomes ``int8`` and ``2.5`` becomes ``float32``. These rules can be
-    partially customized (see the in-code help of
-    ``pytensor.scalar.basic.NumpyAutocaster``). This policy will be deprecated
-    in the future.
+    The legacy ``'custom'`` policy chooses constant dtypes from their values:
+    small Python integers become ``int8``, and exactly representable Python
+    floats can become ``float32``. Its floating-point rounding rules can be
+    customized with ``pytensor.scalar.basic.autocast_float``. This policy will
+    be deprecated in the future.
+
+    See :ref:`libdoc_tensor_autocasting` for examples and the distinction between
+    a Python literal and an already typed symbolic constant.
 
 .. attribute:: mode
 
