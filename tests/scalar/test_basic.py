@@ -505,7 +505,7 @@ def test_scalar_hash_default_output_type_preference():
 
     new_eq = EQ()
     old_eq = EQ()
-    del old_eq.output_types_preference  # mimic old Op
+    old_eq.output_types_preference = None  # mimic an old pickle
     assert new_eq == old_eq
     assert hash(new_eq) == hash(old_eq)
 

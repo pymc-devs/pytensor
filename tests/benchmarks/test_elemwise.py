@@ -1,8 +1,27 @@
 import numpy as np
+import pytest
 from scipy.special import expit
 
 from pytensor import function, shared
-from pytensor.tensor import exp, grad, matrix, sigmoid, softplus, vector
+from pytensor.tensor import exp, grad, matrix, scalar, sigmoid, softplus, vector
+from pytensor.tensor.special import LogAddExp
+
+
+@pytest.mark.parametrize("input_kind", ["unary", "typed", "literal"])
+def test_elemwise_graph_creation(benchmark, input_kind):
+    x = vector("x", dtype="float32")
+    if input_kind == "unary":
+        benchmark(exp, x)
+    else:
+        other = vector("y", dtype="float32") if input_kind == "typed" else 2
+        benchmark(lambda: x + other)
+
+
+def test_symbolic_graph_creation(benchmark):
+    x = vector("x", dtype="float32")
+    y = scalar("y", dtype="float32")
+    op = LogAddExp(input_types=[x.type, y.type])
+    benchmark(op, x, 2)
 
 
 def _test_simple_elemwise_benchmark(mode, benchmark):

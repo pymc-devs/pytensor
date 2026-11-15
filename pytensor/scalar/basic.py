@@ -12,7 +12,6 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 
 import builtins
 import math
-from collections.abc import Callable
 from itertools import chain
 from textwrap import dedent
 from typing import Any
@@ -29,7 +28,7 @@ from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import applys_between
 from pytensor.graph.type import HasDataType, HasShape
-from pytensor.graph.utils import MetaObject, MethodNotDefined
+from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.type import CType
 from pytensor.printing import pprint
@@ -795,6 +794,7 @@ continuous_types: _ScalarTypes = float_types + complex_types
 all_types: _ScalarTypes = discrete_types + continuous_types
 
 discrete_dtypes = tuple(t.dtype for t in discrete_types)
+integer_dtypes = tuple(t.dtype for t in integer_types)
 
 
 class _scalar_py_operators:
@@ -1022,122 +1022,114 @@ complexs64 = apply_across_args(complex64)
 complexs128 = apply_across_args(complex128)
 
 
-def upcast_out(*types) -> tuple[ScalarType]:
-    dtype = ScalarType.upcast(*types)
-    return (get_scalar_type(dtype),)
+def _float_dtype(dtype):
+    if dtype in ("bool", "int8", "int16", "uint8", "uint16"):
+        return "float32"
+    if dtype in ("int32", "int64", "uint32", "uint64"):
+        return "float64"
+    return dtype
 
 
-def upcast_out_nobool(*types) -> tuple[ScalarType]:
-    type = upcast_out(*types)
-    if type[0] == bool:
-        raise TypeError("bool output not supported")
-    return type
-
-
-def upcast_out_min8(*types) -> tuple[ScalarType]:
-    type = upcast_out(*types)
-    if type[0] == bool:
-        return (int8,)
-    return type
+def _real_dtype(dtype):
+    if dtype == "complex64":
+        return "float32"
+    if dtype == "complex128":
+        return "float64"
+    return dtype
 
 
 def upgrade_to_float(*types) -> tuple[ScalarType]:
-    """
-    Upgrade any int types to float32 or float64 to avoid losing precision.
-
-    """
-    conv: dict[ScalarType, ScalarType] = {
-        bool: float32,
-        int8: float32,
-        int16: float32,
-        int32: float64,
-        int64: float64,
-        uint8: float32,
-        uint16: float32,
-        uint32: float64,
-        uint64: float64,
-    }
-    up = ScalarType.upcast(*[conv.get(type, type) for type in types])
-    return (get_scalar_type(up),)
+    """Choose a floating dtype for tensor functions that accept integer inputs."""
+    dtypes = tuple(_float_dtype(t.dtype) for t in types)
+    dtype = dtypes[0] if len(dtypes) == 1 else upcast(*dtypes)
+    return (get_scalar_type(dtype),)
 
 
-def upgrade_to_float64(*types) -> tuple[ScalarType]:
-    """
-    Upgrade any int and float32 to float64 to do as SciPy.
+def resolve_weak_dtypes(input_dtypes):
+    """Resolve Python scalar type markers against explicitly typed operands."""
+    if all(isinstance(dtype, str) for dtype in input_dtypes):
+        return input_dtypes
+    strong = [dtype for dtype in input_dtypes if isinstance(dtype, str)]
+    if not strong:
+        defaults = {
+            int: "int64",
+            builtins.float: config.floatX,
+            builtins.complex: "complex128",
+        }
+        return tuple(defaults[dtype] for dtype in input_dtypes)
+    dtype = strong[0] if len(strong) == 1 else upcast(*strong)
+    if builtins.complex in input_dtypes:
+        weak_dtype = (
+            "complex64"
+            if dtype in ("float16", "float32", "complex64")
+            else "complex128"
+        )
+    elif builtins.float in input_dtypes and dtype in discrete_dtypes:
+        weak_dtype = config.floatX
+    elif dtype == "bool":
+        weak_dtype = "int64"
+    else:
+        weak_dtype = dtype
+    return tuple(
+        dtype if isinstance(dtype, str) else weak_dtype for dtype in input_dtypes
+    )
 
-    """
-    return (get_scalar_type("float64"),)
+
+def _resolve_numeric_dtypes(input_dtypes):
+    inputs = resolve_weak_dtypes(input_dtypes)
+    dtype = inputs[0] if len(inputs) == 1 else upcast(*inputs)
+    return inputs, (dtype,)
 
 
-def same_out(type: ScalarType) -> tuple[ScalarType]:
-    return (type,)
+def _resolve_numeric_bool_to_int8_dtypes(self, input_dtypes):
+    inputs, (output,) = _resolve_numeric_dtypes(input_dtypes)
+    return inputs, ("int8" if output == "bool" else output,)
 
 
-def same_out_nobool(type: ScalarType) -> tuple[ScalarType]:
-    if type == bool:
+def _resolve_real_dtypes(self, input_dtypes):
+    inputs = resolve_weak_dtypes(input_dtypes)
+    return inputs, (_real_dtype(inputs[0]),)
+
+
+def _resolve_float_only_dtypes(self, input_dtypes):
+    inputs = resolve_weak_dtypes(input_dtypes)
+    if inputs[0] not in ("float16", "float32", "float64"):
+        raise TypeError("only float types are supported")
+    return inputs, inputs
+
+
+def _resolve_nonbool_dtypes(self, input_dtypes):
+    inputs = resolve_weak_dtypes(input_dtypes)
+    if inputs[0] == "bool":
         raise TypeError("bool input not supported")
-    return (type,)
+    return inputs, inputs
 
 
-def same_out_min8(type: ScalarType) -> tuple[ScalarType]:
-    if type == bool:
-        return (int8,)
-    return (type,)
+def _resolve_float_dtypes(self, input_dtypes):
+    if len(input_dtypes) == 1 and input_dtypes[0] in (
+        "float16",
+        "float32",
+        "float64",
+        "complex64",
+        "complex128",
+    ):
+        return input_dtypes, input_dtypes
+    inputs = resolve_weak_dtypes(input_dtypes)
+    floats = tuple(_float_dtype(dtype) for dtype in inputs)
+    output = floats[0] if len(floats) == 1 else upcast(*floats)
+    if inputs is not input_dtypes:
+        inputs = tuple(
+            dtype if isinstance(given, str) else output
+            for given, dtype in zip(input_dtypes, inputs, strict=True)
+        )
+    return inputs, (output,)
 
 
-def upcast_out_no_complex(*types) -> tuple[ScalarType]:
-    if any(type in complex_types for type in types):
-        raise TypeError("complex type are not supported")
-    return (get_scalar_type(dtype=ScalarType.upcast(*types)),)
-
-
-def same_out_float_only(type) -> tuple[ScalarType]:
-    if type not in float_types:
-        raise TypeError("only float type are supported")
-    return (type,)
-
-
-class specific_out(MetaObject):
-    __props__ = ("spec",)
-
-    def __init__(self, *spec):
-        self.spec = spec
-
-    def __call__(self, *types):
-        return self.spec
-
-
-def int_out(*types):
-    return (int64,)
-
-
-def float_out(*types):
-    return (float64,)
-
-
-def upgrade_to_float_no_complex(*types):
-    """
-    Don't accept complex, otherwise call upgrade_to_float().
-
-    """
-    for type in types:
-        if type in complex_types:
-            raise TypeError("complex argument not supported")
-    return upgrade_to_float(*types)
-
-
-def same_out_nocomplex(type):
-    if type in complex_types:
+def _resolve_float_no_complex_dtypes(self, input_dtypes):
+    inputs, outputs = _resolve_float_dtypes(self, input_dtypes)
+    if any(dtype.startswith("complex") for dtype in inputs):
         raise TypeError("complex argument not supported")
-    return (type,)
-
-
-def real_out(type):
-    if type == complex64:
-        return (float32,)
-    if type == complex128:
-        return (float64,)
-    return (type,)
+    return inputs, outputs
 
 
 def _cast_to_promised_scalar_dtype(x, dtype):
@@ -1154,17 +1146,15 @@ class ScalarOp(COp):
     nin = -1
     nout = 1
 
-    def __init__(self, output_types_preference=None, name=None):
-        self.name = name
-        if output_types_preference is not None:
-            if not isinstance(output_types_preference, Callable):
-                raise TypeError(
-                    f"Expected a callable for the 'output_types_preference' argument to {self.__class__}. "
-                    f"(got: {output_types_preference})"
-                )
-            self.output_types_preference = output_types_preference
-        elif not hasattr(self, "output_types_preference"):
-            self.output_types_preference = None
+    name: str | None = None
+
+    def resolve_dtypes(self, input_dtypes):
+        """Return input and output dtype tuples, accepting weak Python scalar types.
+
+        Concrete dtypes are strings. Python int, float and complex type objects
+        describe weak literals. Explicitly typed operands retain their dtype.
+        """
+        return _resolve_numeric_dtypes(input_dtypes)
 
     def make_node(self, *inputs):
         if self.nin >= 0:
@@ -1174,7 +1164,8 @@ class ScalarOp(COp):
                     f"(got {len(inputs)}({inputs}), expected {self.nin})"
                 )
         inputs = [as_scalar(input) for input in inputs]
-        outputs = [t() for t in self.output_types([input.type for input in inputs])]
+        _, output_dtypes = self.resolve_dtypes(tuple(input.dtype for input in inputs))
+        outputs = [get_scalar_type(dtype)() for dtype in output_dtypes]
         if len(outputs) != self.nout:
             inputs_str = (", ".join(str(input) for input in inputs),)
             raise TypeError(
@@ -1182,28 +1173,6 @@ class ScalarOp(COp):
                 f"Expected {self.nout}, got {len(outputs)}."
             )
         return Apply(self, inputs, outputs)
-
-    def output_types(self, types):
-        if self.output_types_preference is not None:
-            variables = self.output_types_preference(*types)
-            if not isinstance(variables, list | tuple) or any(
-                not isinstance(x, CType) for x in variables
-            ):
-                raise TypeError(
-                    "output_types_preference should return a list or a tuple of types",
-                    self.output_types_preference,
-                    variables,
-                )
-            if len(variables) != self.nout:
-                variables_str = ", ".join(str(type) for type in variables)
-                raise TypeError(
-                    "Not the right number of outputs types produced for "
-                    f"{self}({variables_str}) by {self.output_types_preference}. "
-                    f"Expected {self.nout}, got {len(variables)}."
-                )
-            return variables
-        else:
-            raise NotImplementedError(f"Cannot calculate the output types for {self}")
 
     def perform(self, node, inputs, output_storage):
         if self.nout == 1:
@@ -1230,12 +1199,10 @@ class ScalarOp(COp):
         raise MethodNotDefined("pullback", type(self), self.__class__.__name__)
 
     def __eq__(self, other):
-        return type(self) is type(other) and getattr(
-            self, "output_types_preference", None
-        ) == getattr(other, "output_types_preference", None)
+        return type(self) is type(other)
 
     def __hash__(self):
-        return hash((type(self), getattr(self, "output_types_preference", None)))
+        return hash(type(self))
 
     def __str__(self):
         if hasattr(self, "name") and self.name:
@@ -1352,22 +1319,8 @@ class BinaryScalarOp(ScalarOp):
 
 
 class LogicalComparison(BinaryScalarOp):
-    def __init__(self, *args, **kwargs):
-        BinaryScalarOp.__init__(self, *args, **kwargs)
-        # This is for compat with old pickles.
-        self.bool = True
-
-    def __eq__(self, other):
-        return BinaryScalarOp.__eq__(self, other) and getattr(
-            self, "bool", False
-        ) == getattr(other, "bool", False)
-
-    def __hash__(self):
-        # bool should always be True
-        return BinaryScalarOp.__hash__(self)
-
-    def output_types(self, *input_dtypes):
-        return [bool] if getattr(self, "bool", False) else [int8]
+    def resolve_dtypes(self, input_dtypes):
+        return resolve_weak_dtypes(input_dtypes), ("bool",)
 
     def pullback(self, inputs, outputs, output_gradients):
         x, y = inputs
@@ -1388,22 +1341,7 @@ class FixedLogicalComparison(UnaryScalarOp):
 
     """
 
-    def __init__(self, *args, **kwargs):
-        UnaryScalarOp.__init__(self, *args, **kwargs)
-        # This is for compat with old pickles
-        self.bool = True
-
-    def __eq__(self, other):
-        return UnaryScalarOp.__eq__(self, other) and getattr(
-            self, "bool", False
-        ) == getattr(other, "bool", False)
-
-    def __hash__(self):
-        # bool should always be True
-        return UnaryScalarOp.__hash__(self)
-
-    def output_types(self, *input_dtypes):
-        return [bool] if getattr(self, "bool", False) else [int8]
+    resolve_dtypes = LogicalComparison.resolve_dtypes
 
     def pullback(self, inputs, outputs, output_gradients):
         (x,) = inputs
@@ -1621,45 +1559,42 @@ class Switch(ScalarOp):
 
         return (condition_grad, first_part, second_part)
 
-    def output_types(self, types):
-        (_cond_t, ift_t, iff_t) = types
-        return upcast_out(ift_t, iff_t)
+    def resolve_dtypes(self, input_dtypes):
+        cond, *branches = input_dtypes
+        inputs, outputs = super().resolve_dtypes(tuple(branches))
+        return (*resolve_weak_dtypes((cond,)), *inputs), outputs
 
 
 switch = Switch()
 
-####################
-# BIT-WISE OPERATORS
-####################
-
 
 class UnaryBitOp(UnaryScalarOp):
-    def output_types(self, *input_types):
-        for i in input_types[0]:
-            if i not in discrete_types:
-                raise TypeError(
-                    "input to a BitOp must have type (u)int8, "
-                    f"(u)int16, (u)int32 or (u)int64 or bool not {i}"
-                )
-        return upcast_out(*input_types[0])
+    def resolve_dtypes(self, input_dtypes):
+        inputs, outputs = super().resolve_dtypes(input_dtypes)
+        allowed = (
+            discrete_dtypes
+            if True or all(dtype == "bool" for dtype in inputs)
+            else integer_dtypes
+        )
+        if any(dtype not in allowed for dtype in inputs):
+            raise TypeError(f"Integer inputs required for {self}, got {inputs}")
+        return inputs, outputs
 
     def pullback(self, inputs, outputs, output_gradients):
         return [inputs[0].zeros_like(dtype=config.floatX)]
 
 
 class BinaryBitOp(BinaryScalarOp):
-    def output_types(self, *input_types):
-        t0, t1 = input_types[0]
-        if t0 == bool and t1 == bool:
-            return [bool]
-        for i in input_types[0]:
-            if i not in integer_types:
-                raise TypeError(
-                    "input to a BitOp must have type (u)int8, "
-                    "(u)int16, (u)int32 or (u)int64 or "
-                    f"be all bools not {i}"
-                )
-        return upcast_out(*input_types[0])
+    def resolve_dtypes(self, input_dtypes):
+        inputs, outputs = super().resolve_dtypes(input_dtypes)
+        allowed = (
+            discrete_dtypes
+            if False or all(dtype == "bool" for dtype in inputs)
+            else integer_dtypes
+        )
+        if any(dtype not in allowed for dtype in inputs):
+            raise TypeError(f"Integer inputs required for {self}, got {inputs}")
+        return inputs, outputs
 
     def pullback(self, inputs, outputs, output_gradients):
         a, b = inputs
@@ -1787,7 +1722,7 @@ class Maximum(BinaryScalarOp):
         return (gx, gy)
 
 
-maximum = Maximum(upcast_out)
+maximum = Maximum()
 
 # Backward compatibility
 ScalarMaximum = Maximum
@@ -1832,7 +1767,7 @@ class Minimum(BinaryScalarOp):
         return (gx, gy)
 
 
-minimum = Minimum(upcast_out)
+minimum = Minimum()
 
 # Backward compatibility
 ScalarMinimum = Minimum
@@ -1840,6 +1775,8 @@ scalar_minimum = minimum
 
 
 class Add(ScalarOp):
+    name = "add"
+
     identity = 0
     commutative = True
     associative = True
@@ -1877,10 +1814,12 @@ class Add(ScalarOp):
         return retval
 
 
-add = Add(upcast_out, name="add")
+add = Add()
 
 
 class Mul(ScalarOp):
+    name = "mul"
+
     identity = 1
     commutative = True
     associative = True
@@ -1905,7 +1844,9 @@ class Mul(ScalarOp):
 
         # The following 3 lines verify that gz is complex when the
         # output is complex. The rest of this function make this supposition.
-        output_type = self.output_types([i.type for i in inputs])[0]
+        output_type = get_scalar_type(
+            self.resolve_dtypes(tuple(i.dtype for i in inputs))[1][0]
+        )
         if output_type in complex_types:
             if gz.type not in complex_types:
                 raise TypeError(
@@ -1938,10 +1879,18 @@ class Mul(ScalarOp):
         return retval
 
 
-mul = Mul(upcast_out, name="mul")
+mul = Mul()
 
 
 class Sub(BinaryScalarOp):
+    name = "sub"
+
+    def resolve_dtypes(self, input_dtypes):
+        inputs, outputs = _resolve_numeric_dtypes(input_dtypes)
+        if outputs == ("bool",):
+            raise TypeError("bool output not supported")
+        return inputs, outputs
+
     nfunc_spec = ("subtract", 2, 1)
 
     def impl(self, x, y):
@@ -1969,17 +1918,23 @@ class Sub(BinaryScalarOp):
         return first_part, second_part
 
 
-sub = Sub(upcast_out_nobool, name="sub")
+sub = Sub()
 
 
 class TrueDiv(BinaryScalarOp):
+    name = "true_div"
+
     nfunc_spec = ("true_divide", 2, 1)
 
-    def output_types(self, types):
-        if all(t in discrete_types for t in types):
-            return [get_scalar_type(config.floatX)]
-        else:
-            return super().output_types(types)
+    def resolve_dtypes(self, input_dtypes):
+        inputs = resolve_weak_dtypes(input_dtypes)
+        if all(dtype in discrete_dtypes for dtype in inputs):
+            inputs = tuple(
+                dtype if isinstance(given, str) else config.floatX
+                for given, dtype in zip(input_dtypes, inputs, strict=True)
+            )
+            return inputs, (config.floatX,)
+        return super().resolve_dtypes(input_dtypes)
 
     def impl(self, x, y):
         x = np.asarray(x)
@@ -2030,10 +1985,12 @@ class TrueDiv(BinaryScalarOp):
         return first_part, second_part
 
 
-true_div = TrueDiv(upcast_out, name="true_div")
+true_div = TrueDiv()
 
 
 class IntDiv(BinaryScalarOp):
+    name = "int_div"
+
     nfunc_spec = ("floor_divide", 2, 1)
     complex_error = ComplexError(
         "PyTensor does not support integer division (//) on "
@@ -2127,7 +2084,7 @@ class IntDiv(BinaryScalarOp):
         return [inp.zeros_like(dtype=config.floatX) for inp in inputs]
 
 
-int_div = IntDiv(upcast_out, name="int_div")
+int_div = IntDiv()
 
 
 floor_div = int_div
@@ -2142,6 +2099,8 @@ def mod_check(x, y):
 
 
 class Mod(BinaryScalarOp):
+    name = "mod"
+
     nfunc_spec = ("mod", 2, 1)
     complex_error = ComplexError(
         "PyTensor does not support the mod operator (%) on "
@@ -2251,10 +2210,14 @@ class Mod(BinaryScalarOp):
         return [gz, -(x // y) * gz]
 
 
-mod = Mod(upcast_out, name="mod")
+mod = Mod()
 
 
 class Pow(BinaryScalarOp):
+    name = "pow"
+
+    resolve_dtypes = _resolve_numeric_bool_to_int8_dtypes
+
     nfunc_spec = ("power", 2, 1)
 
     def impl(self, x, y):
@@ -2336,10 +2299,18 @@ class Pow(BinaryScalarOp):
         raise MethodNotDefined()
 
 
-pow = Pow(upcast_out_min8, name="pow")
+pow = Pow()
 
 
 class Clip(ScalarOp):
+    name = "clip"
+
+    def resolve_dtypes(self, input_dtypes):
+        inputs, outputs = _resolve_numeric_dtypes(input_dtypes)
+        if any(dtype.startswith("complex") for dtype in inputs):
+            raise TypeError("complex types are not supported")
+        return inputs, outputs
+
     nin = 3
     # The numpy.clip don't work correctly when the min is bigger then the max,
     # So we do not use nfunc_spec = ('clip', 3, 1)
@@ -2375,13 +2346,15 @@ class Clip(ScalarOp):
 
 # Don't allow complex even if numpy do
 # As there is no mathematical reason for this function on complex
-clip = Clip(upcast_out_no_complex, name="clip")
+clip = Clip()
 
 
 class Second(BinaryScalarOp):
-    @staticmethod
-    def output_types_preference(_first_type, second_type):
-        return [second_type]
+    name = "second"
+
+    def resolve_dtypes(self, input_dtypes):
+        inputs = tuple(resolve_weak_dtypes((dtype,))[0] for dtype in input_dtypes)
+        return inputs, (inputs[1],)
 
     def impl(self, x, y):
         return y
@@ -2411,10 +2384,12 @@ class Second(BinaryScalarOp):
             return disconnected_type(), y.zeros_like(dtype=config.floatX)
 
 
-second = Second(name="second")
+second = Second()
 
 
 class Identity(UnaryScalarOp):
+    name = "identity"
+
     preserves_zero = True
     monotonic_increasing = True
 
@@ -2435,17 +2410,22 @@ class Identity(UnaryScalarOp):
             return (x.zeros_like(dtype=config.floatX),)
 
 
-identity = Identity(same_out, name="identity")
+identity = Identity()
 
 
 # CASTING OPERATIONS
 class Cast(UnaryScalarOp):
-    def __init__(self, o_type, name=None):
+    __props__ = ("o_type",)
+
+    def __init__(self, o_type):
         if not isinstance(o_type, ScalarType):
             raise TypeError(o_type)
-        super().__init__(specific_out(o_type), name=name)
+        super().__init__()
         self.o_type = o_type
         self.ctor = np.dtype(o_type.dtype).type
+
+    def resolve_dtypes(self, input_dtypes):
+        return resolve_weak_dtypes(input_dtypes), (self.o_type.dtype,)
 
     def __str__(self):
         return f"{self.__class__.__name__}{{{self.o_type.dtype}}}"
@@ -2476,20 +2456,20 @@ class Cast(UnaryScalarOp):
             return s
 
 
-convert_to_bool: Cast = Cast(bool, name="convert_to_bool")
-convert_to_int8: Cast = Cast(int8, name="convert_to_int8")
-convert_to_int16: Cast = Cast(int16, name="convert_to_int16")
-convert_to_int32: Cast = Cast(int32, name="convert_to_int32")
-convert_to_int64: Cast = Cast(int64, name="convert_to_int64")
-convert_to_uint8: Cast = Cast(uint8, name="convert_to_uint8")
-convert_to_uint16: Cast = Cast(uint16, name="convert_to_uint16")
-convert_to_uint32: Cast = Cast(uint32, name="convert_to_uint32")
-convert_to_uint64: Cast = Cast(uint64, name="convert_to_uint64")
-convert_to_float16: Cast = Cast(float16, name="convert_to_float16")
-convert_to_float32: Cast = Cast(float32, name="convert_to_float32")
-convert_to_float64: Cast = Cast(float64, name="convert_to_float64")
-convert_to_complex64: Cast = Cast(complex64, name="convert_to_complex64")
-convert_to_complex128: Cast = Cast(complex128, name="convert_to_complex128")
+convert_to_bool: Cast = Cast(bool)
+convert_to_int8: Cast = Cast(int8)
+convert_to_int16: Cast = Cast(int16)
+convert_to_int32: Cast = Cast(int32)
+convert_to_int64: Cast = Cast(int64)
+convert_to_uint8: Cast = Cast(uint8)
+convert_to_uint16: Cast = Cast(uint16)
+convert_to_uint32: Cast = Cast(uint32)
+convert_to_uint64: Cast = Cast(uint64)
+convert_to_float16: Cast = Cast(float16)
+convert_to_float32: Cast = Cast(float32)
+convert_to_float64: Cast = Cast(float64)
+convert_to_complex64: Cast = Cast(complex64)
+convert_to_complex128: Cast = Cast(complex128)
 
 _cast_mapping = {
     "bool": convert_to_bool,
@@ -2529,19 +2509,11 @@ def cast(x, dtype):
 
 
 class Abs(UnaryScalarOp):
+    resolve_dtypes = _resolve_real_dtypes
+
     preserves_zero = True
     non_negative = True
     nfunc_spec = ("abs", 1, 1)
-
-    def make_node(self, x):
-        inputs = [as_scalar(input) for input in [x]]
-        if inputs[0].type == complex64:
-            outputs = [float32()]
-        elif inputs[0].type == complex128:
-            outputs = [float64()]
-        else:
-            outputs = [t() for t in self.output_types([input.type for input in inputs])]
-        return Apply(self, inputs, outputs)
 
     def impl(self, x):
         return np.abs(x)
@@ -2577,20 +2549,18 @@ class Abs(UnaryScalarOp):
         raise NotImplementedError("type not supported", type)
 
 
-abs = Abs(same_out)
+abs = Abs()
 
 
 class Sign(UnaryScalarOp):
+    name = "sign"
+
+    resolve_dtypes = _resolve_nonbool_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
 
     nfunc_spec = ("sign", 1, 1)
-
-    @staticmethod
-    def _output_types_preference(x):
-        if x == bool:
-            raise TypeError(x)
-        return same_out(x)
 
     def impl(self, x):
         # casting to output type is handled by filter
@@ -2619,7 +2589,7 @@ class Sign(UnaryScalarOp):
         if type in int_types:
             return f"{z} = ({x} >= 0) ? ({x} == 0) ? 0 : 1 : -1;"
         if type in complex_types:
-            real_type = real_out(type)[0].dtype_specs()[1]
+            real_type = get_scalar_type(_real_dtype(type.dtype)).dtype_specs()[1]
             hypot = "hypotf" if type == complex64 else "hypot"
             # Scoped so that fused Composites with several Signs don't redeclare locals
             return f"""
@@ -2660,10 +2630,14 @@ class Sign(UnaryScalarOp):
             return s
 
 
-sign = Sign(name="sign", output_types_preference=Sign._output_types_preference)
+sign = Sign()
 
 
 class Ceil(UnaryScalarOp):
+    name = "ceil"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
 
@@ -2689,10 +2663,14 @@ class Ceil(UnaryScalarOp):
         return f"{z} = ceil(({cast}){x});"
 
 
-ceil = Ceil(upgrade_to_float_no_complex, name="ceil")
+ceil = Ceil()
 
 
 class Floor(UnaryScalarOp):
+    name = "floor"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
 
@@ -2718,10 +2696,14 @@ class Floor(UnaryScalarOp):
         return f"{z} = floor(({cast}){x});"
 
 
-floor = Floor(upgrade_to_float_no_complex, name="floor")
+floor = Floor()
 
 
 class Trunc(UnaryScalarOp):
+    name = "trunc"
+
+    resolve_dtypes = _resolve_float_no_complex_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
 
@@ -2741,10 +2723,12 @@ class Trunc(UnaryScalarOp):
         return f"{z} = {x} >= 0? floor({x}): -floor(-{x});"
 
 
-trunc = Trunc(upgrade_to_float_no_complex, name="trunc")
+trunc = Trunc()
 
 
 class RoundHalfToEven(UnaryScalarOp):
+    resolve_dtypes = _resolve_float_only_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
 
@@ -2809,7 +2793,7 @@ class RoundHalfToEven(UnaryScalarOp):
         """
 
 
-round_half_to_even = RoundHalfToEven(same_out_float_only)
+round_half_to_even = RoundHalfToEven()
 
 
 def round_half_away_from_zero_(a):
@@ -2836,6 +2820,8 @@ def round_half_away_from_zero_vec(a):
 
 
 class RoundHalfAwayFromZero(UnaryScalarOp):
+    resolve_dtypes = _resolve_float_only_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
 
@@ -2869,10 +2855,14 @@ class RoundHalfAwayFromZero(UnaryScalarOp):
             raise NotImplementedError("The output should be float32 or float64")
 
 
-round_half_away_from_zero = RoundHalfAwayFromZero(same_out_float_only)
+round_half_away_from_zero = RoundHalfAwayFromZero()
 
 
 class Neg(UnaryScalarOp):
+    name = "neg"
+
+    resolve_dtypes = _resolve_nonbool_dtypes
+
     preserves_zero = True
     monotonic_decreasing = True
     # We can use numpy.negative here, because even if it gives unexpected
@@ -2900,7 +2890,7 @@ class Neg(UnaryScalarOp):
         return f"{z} = -{x};"
 
 
-neg = Neg(same_out_nobool, name="neg")
+neg = Neg()
 
 pprint.assign(add, printing.OperatorPrinter("+", -2, "either"))
 pprint.assign(mul, printing.OperatorPrinter("*", -1, "either"))
@@ -2914,6 +2904,10 @@ pprint.assign(mod, printing.OperatorPrinter("%", -1, "left"))
 
 class Reciprocal(UnaryScalarOp):
     """Multiplicative inverse."""
+
+    name = "reciprocal"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     nfunc_spec = ("reciprocal", 1, 1)
 
@@ -2941,7 +2935,7 @@ class Reciprocal(UnaryScalarOp):
         return f"{z} = 1.0 / {x};"
 
 
-reciprocal = Reciprocal(upgrade_to_float, name="reciprocal")
+reciprocal = Reciprocal()
 
 
 class Log(UnaryScalarOp):
@@ -2949,6 +2943,10 @@ class Log(UnaryScalarOp):
     log base e.
 
     """
+
+    name = "log"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     monotonic_increasing = True
     nfunc_spec = ("log", 1, 1)
@@ -2988,7 +2986,7 @@ class Log(UnaryScalarOp):
         return f"{z} = log(({cast}){x});"
 
 
-log = Log(upgrade_to_float, name="log")
+log = Log()
 
 
 class Log2(UnaryScalarOp):
@@ -2996,6 +2994,10 @@ class Log2(UnaryScalarOp):
     log base 2.
 
     """
+
+    name = "log2"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     monotonic_increasing = True
     nfunc_spec = ("log2", 1, 1)
@@ -3032,7 +3034,7 @@ class Log2(UnaryScalarOp):
         return f"{z} = log2(({cast}){x});"
 
 
-log2 = Log2(upgrade_to_float, name="log2")
+log2 = Log2()
 
 
 class Log10(UnaryScalarOp):
@@ -3040,6 +3042,10 @@ class Log10(UnaryScalarOp):
     log base 10.
 
     """
+
+    name = "log10"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     monotonic_increasing = True
     nfunc_spec = ("log10", 1, 1)
@@ -3076,10 +3082,14 @@ class Log10(UnaryScalarOp):
         return f"{z} = log10(({cast}){x});"
 
 
-log10 = Log10(upgrade_to_float, name="log10")
+log10 = Log10()
 
 
 class Log1p(UnaryScalarOp):
+    name = "log1p"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     """
@@ -3119,10 +3129,14 @@ class Log1p(UnaryScalarOp):
         return f"{z} = log1p(({cast}){x});"
 
 
-log1p = Log1p(upgrade_to_float, name="log1p")
+log1p = Log1p()
 
 
 class Exp(UnaryScalarOp):
+    name = "exp"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     monotonic_increasing = True
     non_negative = True
     nfunc_spec = ("exp", 1, 1)
@@ -3159,10 +3173,14 @@ class Exp(UnaryScalarOp):
         return f"{z} = exp(({cast}){x});"
 
 
-exp = Exp(upgrade_to_float, name="exp")
+exp = Exp()
 
 
 class Exp2(UnaryScalarOp):
+    name = "exp2"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     monotonic_increasing = True
     non_negative = True
     nfunc_spec = ("exp2", 1, 1)
@@ -3197,10 +3215,14 @@ class Exp2(UnaryScalarOp):
         return f"{z} = exp2(({cast}){x});"
 
 
-exp2 = Exp2(upgrade_to_float, name="exp2")
+exp2 = Exp2()
 
 
 class Expm1(UnaryScalarOp):
+    name = "expm1"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     nfunc_spec = ("expm1", 1, 1)
@@ -3238,10 +3260,12 @@ class Expm1(UnaryScalarOp):
         return (5,)
 
 
-expm1 = Expm1(upgrade_to_float, name="expm1")
+expm1 = Expm1()
 
 
 class Sqr(UnaryScalarOp):
+    name = "sqr"
+
     preserves_zero = True
     non_negative = True
     nfunc_spec = ("square", 1, 1)
@@ -3268,10 +3292,14 @@ class Sqr(UnaryScalarOp):
         return f"{z} = {x} * {x};"
 
 
-sqr = Sqr(same_out, name="sqr")
+sqr = Sqr()
 
 
 class Sqrt(UnaryScalarOp):
+    name = "sqrt"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
 
@@ -3307,10 +3335,14 @@ class Sqrt(UnaryScalarOp):
         return f"{z} = sqrt(({cast}){x});"
 
 
-sqrt = Sqrt(upgrade_to_float, name="sqrt")
+sqrt = Sqrt()
 
 
 class Cos(UnaryScalarOp):
+    name = "cos"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     nfunc_spec = ("cos", 1, 1)
     amd_float32 = "amd_vrsa_cosf"
     amd_float64 = "amd_vrda_cos"
@@ -3345,10 +3377,14 @@ class Cos(UnaryScalarOp):
         return f"{z} = cos(({cast}){x});"
 
 
-cos = Cos(upgrade_to_float, name="cos")
+cos = Cos()
 
 
 class ArcCos(UnaryScalarOp):
+    name = "arccos"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     monotonic_decreasing = True
     nfunc_spec = ("arccos", 1, 1)
 
@@ -3382,10 +3418,14 @@ class ArcCos(UnaryScalarOp):
         return f"{z} = acos(({cast}){x});"
 
 
-arccos = ArcCos(upgrade_to_float, name="arccos")
+arccos = ArcCos()
 
 
 class Sin(UnaryScalarOp):
+    name = "sin"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     nfunc_spec = ("sin", 1, 1)
     amd_float32 = "amd_vrsa_sinf"
@@ -3421,10 +3461,14 @@ class Sin(UnaryScalarOp):
         return f"{z} = sin(({cast}){x});"
 
 
-sin = Sin(upgrade_to_float, name="sin")
+sin = Sin()
 
 
 class ArcSin(UnaryScalarOp):
+    name = "arcsin"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     nfunc_spec = ("arcsin", 1, 1)
@@ -3459,10 +3503,14 @@ class ArcSin(UnaryScalarOp):
         return f"{z} = asin(({cast}){x});"
 
 
-arcsin = ArcSin(upgrade_to_float, name="arcsin")
+arcsin = ArcSin()
 
 
 class Tan(UnaryScalarOp):
+    name = "tan"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     nfunc_spec = ("tan", 1, 1)
 
@@ -3496,10 +3544,14 @@ class Tan(UnaryScalarOp):
         return f"{z} = tan(({cast}){x});"
 
 
-tan = Tan(upgrade_to_float, name="tan")
+tan = Tan()
 
 
 class ArcTan(UnaryScalarOp):
+    name = "arctan"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     nfunc_spec = ("arctan", 1, 1)
@@ -3534,10 +3586,14 @@ class ArcTan(UnaryScalarOp):
         return f"{z} = atan(({cast}){x});"
 
 
-arctan = ArcTan(upgrade_to_float, name="arctan")
+arctan = ArcTan()
 
 
 class ArcTan2(BinaryScalarOp):
+    name = "arctan2"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     nfunc_spec = ("arctan2", 2, 1)
 
     def impl(self, y, x):
@@ -3580,7 +3636,7 @@ class ArcTan2(BinaryScalarOp):
         return f"{z} = atan2(({cast}){y}, ({cast}){x});"
 
 
-arctan2 = ArcTan2(upgrade_to_float, name="arctan2")
+arctan2 = ArcTan2()
 
 
 class Cosh(UnaryScalarOp):
@@ -3588,6 +3644,10 @@ class Cosh(UnaryScalarOp):
     cosh(x) = (exp(x) + exp(-x)) / 2.
 
     """
+
+    name = "cosh"
+
+    resolve_dtypes = _resolve_float_dtypes
 
     non_negative = True
 
@@ -3623,10 +3683,14 @@ class Cosh(UnaryScalarOp):
         return f"{z} = cosh(({cast}){x});"
 
 
-cosh = Cosh(upgrade_to_float, name="cosh")
+cosh = Cosh()
 
 
 class ArcCosh(UnaryScalarOp):
+    name = "arccosh"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     monotonic_increasing = True
     nfunc_spec = ("arccosh", 1, 1)
 
@@ -3660,10 +3724,14 @@ class ArcCosh(UnaryScalarOp):
         return f"{z} = acosh(({cast}){x});"
 
 
-arccosh = ArcCosh(upgrade_to_float, name="arccosh")
+arccosh = ArcCosh()
 
 
 class Sinh(UnaryScalarOp):
+    name = "sinh"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     """
@@ -3703,10 +3771,14 @@ class Sinh(UnaryScalarOp):
         return f"{z} = sinh(({cast}){x});"
 
 
-sinh = Sinh(upgrade_to_float, name="sinh")
+sinh = Sinh()
 
 
 class ArcSinh(UnaryScalarOp):
+    name = "arcsinh"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     nfunc_spec = ("arcsinh", 1, 1)
@@ -3741,10 +3813,14 @@ class ArcSinh(UnaryScalarOp):
         return f"{z} = asinh(({cast}){x});"
 
 
-arcsinh = ArcSinh(upgrade_to_float, name="arcsinh")
+arcsinh = ArcSinh()
 
 
 class Tanh(UnaryScalarOp):
+    name = "tanh"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     """
@@ -3785,10 +3861,14 @@ class Tanh(UnaryScalarOp):
         return f"{z} = tanh(({cast}){x});"
 
 
-tanh = Tanh(upgrade_to_float, name="tanh")
+tanh = Tanh()
 
 
 class ArcTanh(UnaryScalarOp):
+    name = "arctanh"
+
+    resolve_dtypes = _resolve_float_dtypes
+
     preserves_zero = True
     monotonic_increasing = True
     nfunc_spec = ("arctanh", 1, 1)
@@ -3823,10 +3903,14 @@ class ArcTanh(UnaryScalarOp):
         return f"{z} = atanh(({cast}){x});"
 
 
-arctanh = ArcTanh(upgrade_to_float, name="arctanh")
+arctanh = ArcTanh()
 
 
 class Real(UnaryScalarOp):
+    name = "real"
+
+    resolve_dtypes = _resolve_real_dtypes
+
     preserves_zero = True
     """
     Extract the real coordinate of a complex number.
@@ -3852,10 +3936,14 @@ class Real(UnaryScalarOp):
         raise NotImplementedError()
 
 
-real = Real(real_out, name="real")
+real = Real()
 
 
 class Imag(UnaryScalarOp):
+    name = "imag"
+
+    resolve_dtypes = _resolve_real_dtypes
+
     preserves_zero = True
     nfunc_spec = ("imag", 1, 1)
 
@@ -3876,22 +3964,28 @@ class Imag(UnaryScalarOp):
         raise NotImplementedError()
 
 
-imag = Imag(real_out, name="imag")
+imag = Imag()
 
 
 class Complex(BinaryScalarOp):
-    @staticmethod
-    def output_types_preference(x, y):
-        if x in complex_types:
-            raise TypeError(x)
-        if y in complex_types:
-            raise TypeError(y)
+    name = "complex"
 
-        up = ScalarType.upcast(x, y)
-        if up in ("float64", "int64", "uint64", "int32", "uint32"):
-            return [complex128]
-        else:
-            return [complex64]
+    def resolve_dtypes(self, input_dtypes):
+        inputs = resolve_weak_dtypes(input_dtypes)
+        if any(dtype.startswith("complex") for dtype in inputs):
+            raise TypeError("Complex components must be real")
+        dtype = upcast(*inputs)
+        output = (
+            "complex128"
+            if dtype in ("float64", "int64", "uint64", "int32", "uint32")
+            else "complex64"
+        )
+        component = "float64" if output == "complex128" else "float32"
+        inputs = tuple(
+            dtype if isinstance(given, str) else component
+            for given, dtype in zip(input_dtypes, inputs, strict=True)
+        )
+        return inputs, (output,)
 
     def impl(self, x, y):
         return builtins.complex(x, y)
@@ -3905,10 +3999,14 @@ class Complex(BinaryScalarOp):
         raise NotImplementedError()
 
 
-complex = Complex(name="complex")
+complex = Complex()
 
 
 class Conj(UnaryScalarOp):
+    name = "conj"
+
+    resolve_dtypes = _resolve_numeric_bool_to_int8_dtypes
+
     preserves_zero = True
     nfunc_spec = ("conj", 1, 1)
 
@@ -3924,7 +4022,7 @@ class Conj(UnaryScalarOp):
         return f"{z} = {x};"
 
 
-conj = Conj(same_out_min8, name="conj")
+conj = Conj()
 
 
 class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
@@ -4096,12 +4194,16 @@ class Composite(ScalarInnerGraphOp):
     def clone(self):
         return self  # Op is immutable
 
-    def output_types(self, input_types):
-        if tuple(input_types) != self.inputs_type:
-            raise TypeError(
-                f"Wrong types for Composite. Expected {self.inputs_type}, got {tuple(input_types)}."
-            )
-        return self.outputs_type
+    def resolve_dtypes(self, input_dtypes):
+        expected = tuple(t.dtype for t in self.inputs_type)
+        inputs = tuple(
+            dtype if isinstance(dtype, str) else target
+            for dtype, target in zip(input_dtypes, expected, strict=True)
+        )
+        if inputs != expected:
+            node = self.make_node(*(get_scalar_type(dtype)() for dtype in inputs))
+            return inputs, tuple(out.dtype for out in node.outputs)
+        return inputs, tuple(t.dtype for t in self.outputs_type)
 
     def make_node(self, *inputs):
         inputs = [

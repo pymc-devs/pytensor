@@ -314,38 +314,45 @@ and a static shape/broadcastable pattern with a ``1``\/``True`` for every shape
 dimension that is one and ``None``\/``False`` for every dimension with an unknown
 shape.
 
-For Python numbers, the static shape/broadcastable pattern is ``()`` but the dtype must be
-inferred. Under the default ``config.cast_policy == 'numpy+floatX'`` (see
-:mod:`config`), Python integers become ``int64`` and Python floats become
-``config.floatX``. NumPy scalars and arrays keep their own dtype.
+Python numbers have scalar shape ``()``. Their dtype depends on whether they
+are converted on their own or passed directly to an operation. The following
+rules describe the default ``cast_policy='numpy+floatX'``.
 
-A Python number can still upcast the variable it is combined with. With
-``floatX='float64'``, ``pt.fvector() * 2`` is ``float64``, ``pt.ivector() + 1`` is
-``int64``, and a ``float16`` variable plus a Python number is ``float64``. To keep
-the variable's dtype, use a typed constant such as ``np.float32(2)`` or
-``pt.constant(1, dtype=x.dtype)``. This matters where dtypes must match, as in the
-initial states of :func:`pytensor.scan`, the init and update of a ``ScalarLoop``,
-and the two branches of ``ifelse``.
+A standalone constant gets a default dtype::
 
-With ``floatX='float32'``, a ``float32`` variable stays ``float32`` when combined
-with any Python number, integers included, unless another input is ``float64``.
-Integer variables still become ``int64`` (``pt.ivector() + 1``), and a ``float16``
-variable plus a Python number is ``float32``.
+    pt.constant(2)       # int64
+    pt.constant(2.0)     # config.floatX
+    pt.constant(2, dtype="float32")  # explicitly float32
 
-Constants such as ``pt.sqrt(2.0)`` follow ``floatX``. A float function of a Python
-integer does not: ``pt.sqrt(2)`` is ``float64`` under any ``floatX``, because
-``int64`` inputs give ``float64``, and it upcasts a ``float32`` expression it is
-part of. Write ``pt.sqrt(2.0)``, or compute the constant in Python
-(``math.sqrt(2)``), which follows ``floatX`` under both policies.
+A Python number passed directly to an arithmetic operation is weakly typed.
+Its precision follows the operation and its typed operands::
 
-.. note::
+    x = pt.fvector("x")
+    x + 2               # float32
+    x ** 2              # float32
+    pt.ivector() + 1    # int32
 
-    Under ``cast_policy='custom'``, the previous default, Python integers are
-    stored in the smallest dtype that can hold them, so small constants like
-    ``1`` are stored in a `bscalar`. Python floats are stored in an `fscalar`
-    if it holds them exactly and in a `dscalar` otherwise, or as
-    single-precision floats when ``config.floatX == float32``. For fine control
-    of this rounding policy, see `pytensor.scalar.basic.autocast_float`.
+NumPy values and symbolic constants already have a dtype, which participates
+in promotion. For example, ``x + np.float64(2)`` is ``float64``. With
+``floatX='float64'``, ``x + pt.constant(2)`` is also ``float64``: that constant
+was already constructed as int64. Use ``pt.constant(2, dtype=x.dtype)`` when a
+constant must match ``x``.
+
+An operation may require a floating computation even when its arguments are
+integers. True division of integer inputs uses ``floatX``; ``pt.sqrt(2)`` uses
+float64 because its standalone int64 input is promoted to floating point. ``pt.sqrt(2.0)``
+uses ``floatX``. Computing ``math.sqrt(2)`` in Python leaves a Python float
+that can take its precision from a typed operand when used in an expression.
+
+With ``floatX='float32'``, ``pt.fvector() + pt.ivector()`` is float32, although
+NumPy would promote those dtypes to float64. Other operations have their
+own conventions: floating-point functions select a suitable working dtype,
+sums and products widen small integer outputs, linear
+algebra uses the core operation's working dtype, and random variables use the
+distribution's sampling dtype or an explicit ``dtype`` argument.
+
+The legacy ``cast_policy='custom'`` instead chooses constant dtypes based on
+which types can represent their values. See :attr:`config.cast_policy`.
 
 .. function:: as_tensor_variable(x, name=None, ndim=None)
 

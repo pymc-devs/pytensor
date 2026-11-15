@@ -36,7 +36,7 @@ from pytensor.link.numba.dispatch.basic import (
     numba_typify,
 )
 from pytensor.link.numba.linker import NumbaLinker
-from pytensor.scalar.basic import Composite, ScalarOp, as_scalar
+from pytensor.scalar.basic import Composite, ScalarOp
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.utils import hash_from_ndarray
 
@@ -80,10 +80,9 @@ class ScalarMyMultiOut(ScalarOp):
         res2 = 2 * b
         return [res1, res2]
 
-    def make_node(self, a, b):
-        a = as_scalar(a)
-        b = as_scalar(b)
-        return Apply(self, [a, b], [a.type(), b.type()])
+    def resolve_dtypes(self, input_dtypes):
+        inputs = ps.resolve_weak_dtypes(input_dtypes)
+        return inputs, inputs
 
     def perform(self, node, inputs, outputs):
         res1, res2 = self.impl(inputs[0], inputs[1])

@@ -4,7 +4,7 @@ from itertools import chain
 from pytensor.graph.basic import Constant, Variable, clone
 from pytensor.graph.fg import FrozenFunctionGraph
 from pytensor.graph.replace import clone_replace
-from pytensor.scalar.basic import ScalarInnerGraphOp, as_scalar
+from pytensor.scalar.basic import ScalarInnerGraphOp, as_scalar, get_scalar_type
 
 
 class ScalarLoop(ScalarInnerGraphOp):
@@ -77,8 +77,20 @@ class ScalarLoop(ScalarInnerGraphOp):
 
         super().__init__(**kwargs)
 
-    def output_types(self, input_types):
-        return self.outputs_type
+    def resolve_dtypes(self, input_dtypes):
+        expected = ("int64", *(t.dtype for t in self.inputs_type))
+        inputs = tuple(
+            dtype if isinstance(dtype, str) else target
+            for dtype, target in zip(input_dtypes, expected, strict=True)
+        )
+        if not inputs[0].startswith("int"):
+            raise TypeError(
+                "The first variable of ScalarLoop (n_steps) must be of integer type."
+            )
+        if inputs[1:] != expected[1:]:
+            node = self.make_node(*(get_scalar_type(dtype)() for dtype in inputs))
+            return inputs, tuple(out.dtype for out in node.outputs)
+        return inputs, tuple(t.dtype for t in self.outputs_type)
 
     def _validate_updates(
         self, inputs: Sequence[Variable], outputs: Sequence[Variable]

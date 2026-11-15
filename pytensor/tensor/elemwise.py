@@ -31,6 +31,7 @@ from pytensor.tensor.type import (
     float_dtypes,
 )
 from pytensor.tensor.utils import (
+    as_tensor_variables,
     broadcast_static_dim_lengths,
     import_func_from_string,
     normalize_reduce_axis,
@@ -474,7 +475,7 @@ class Elemwise(OpenMPOp):
     def make_scalar_node(self, *inputs):
         """Create a scalar Apply node matching the dtypes of tensor inputs.
 
-        Used by get_output_info, grad, and backend dispatchers to obtain
+        Used by grad and backend dispatchers to obtain
         the scalar-level graph corresponding to this Elemwise operation.
         """
         return self.scalar_op.make_node(
@@ -486,7 +487,9 @@ class Elemwise(OpenMPOp):
         dimshuffled inputs.
 
         """
-        shadow = self.make_scalar_node(*inputs)
+        _, out_dtypes = self.scalar_op.resolve_dtypes(
+            tuple(inp.dtype for inp in inputs)
+        )
 
         target_length = max(input.type.ndim for input in inputs)
 
@@ -514,7 +517,7 @@ class Elemwise(OpenMPOp):
                     broadcast_static_dim_lengths(shape)
                     for shape in zip(*[inp.type.shape for inp in inputs], strict=True)
                 ]
-            ] * shadow.nout
+            ] * len(out_dtypes)
         except ValueError:
             raise ValueError(
                 f"Incompatible Elemwise input shapes {[inp.type.shape for inp in inputs]}"
@@ -533,7 +536,6 @@ class Elemwise(OpenMPOp):
                             "with broadcasted dimensions."
                         )
 
-        out_dtypes = [o.type.dtype for o in shadow.outputs]
         if any(
             inputs[i].type.dtype != out_dtypes[o] for o, i in inplace_pattern.items()
         ):
@@ -552,7 +554,16 @@ class Elemwise(OpenMPOp):
         is left-completed to the greatest number of dimensions with 1s
         using DimShuffle.
         """
-        inputs = [as_tensor_variable(i) for i in inputs]
+        if self.scalar_op.nin >= 0 and len(inputs) != self.scalar_op.nin:
+            raise TypeError(
+                f"Wrong number of inputs for {self.scalar_op}: got {len(inputs)}, expected {self.scalar_op.nin}"
+            )
+        if len(inputs) == 1:
+            inputs = [as_tensor_variable(inputs[0])]
+        else:
+            inputs = as_tensor_variables(
+                *inputs, resolve_dtypes=self.scalar_op.resolve_dtypes
+            )
         out_dtypes, out_shapes, inputs = self.get_output_info(*inputs)
         outputs = [
             TensorType(dtype=dtype, shape=shape)()
