@@ -1763,25 +1763,10 @@ def std_lib_dirs_and_libs() -> tuple[list[str], ...] | None:
     elif sys.platform == "darwin":
         std_lib_dirs_and_libs.data = [], []
     else:
-        # Assume Linux
-        # Typical include directory: /usr/include/python2.6
-
-        # get the name of the python library (shared object)
-
-        libname = str(get_config_var("LDLIBRARY"))
-
-        if libname.startswith("lib"):
-            libname = libname[3:]
-
-        # remove extension if present
-        if libname.endswith(".so"):
-            libname = libname[:-3]
-        elif libname.endswith(".a"):
-            libname = libname[:-2]
-
+        # Linux extensions resolve Python symbols from the running interpreter.
         libdir = str(get_config_var("LIBDIR"))
 
-        std_lib_dirs_and_libs.data = [libname], [libdir]
+        std_lib_dirs_and_libs.data = [], [libdir]
 
     # sometimes, the linker cannot find -lpython so we need to tell it
     # explicitly where it is located this returns
