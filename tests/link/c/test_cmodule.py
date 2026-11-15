@@ -82,6 +82,24 @@ def test_compiler_error():
         GCC_compiler.compile_str("module_name", "blah", location=dir_name)
 
 
+@pytest.mark.parametrize("library", ["python3.15", ":libmissing.so.1"])
+def test_compiler_error_names_missing_library(library, capsys, tmp_path):
+    stderr = (
+        f"/opt/conda/bin/x86_64-conda-linux-gnu-ld: cannot find -l{library}: "
+        "No such file or directory\n"
+    ).encode()
+    with (
+        patch(
+            "pytensor.link.c.cmodule.output_subprocess_Popen",
+            return_value=(b"", stderr, 1),
+        ),
+        pytest.raises(CompileError),
+    ):
+        GCC_compiler.compile_str("module_name", "", location=tmp_path)
+    reported = re.findall(r"library (.*) is not found\.", capsys.readouterr().out)
+    assert reported == [library]
+
+
 @pytest.mark.parametrize(
     "platform, expected_libs",
     [("linux", []), ("darwin", []), ("win32", ["python314"])],

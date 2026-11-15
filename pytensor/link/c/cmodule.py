@@ -2590,25 +2590,8 @@ class GCC_compiler(Compiler):
             tf.write(compile_stderr)
             tf.close()
             print("\nYou can find the C code in this temporary file: " + tf.name)
-            not_found_libraries = re.findall('-l["."-_a-zA-Z0-9]*', compile_stderr)
-            for nf_lib in not_found_libraries:
-                print("library " + nf_lib[2:] + " is not found.")
-                if re.search('-lPYTHON["."0-9]*', nf_lib, re.IGNORECASE):
-                    py_string = re.search(
-                        '-lpython["."0-9]*', nf_lib, re.IGNORECASE
-                    ).group()[8:]
-                    if py_string != "":
-                        print(
-                            "Check if package python-dev "
-                            + py_string
-                            + " or python-devel "
-                            + py_string
-                            + " is installed."
-                        )
-                    else:
-                        print(
-                            "Check if package python-dev or python-devel is installed."
-                        )
+            for nf_lib in re.findall(r"(?<!\S)-l(:?[\w.+-]+)", compile_stderr):
+                print(f"library {nf_lib} is not found.")
 
             # We replace '\n' by '. ' in the error message because when Python
             # prints the exception, having '\n' in the text makes it more
