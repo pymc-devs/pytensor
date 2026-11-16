@@ -797,14 +797,15 @@ class TestConstantFolding:
 class TestAllocConstantFolding:
     def test_excluding(self):
         allocated = pt.alloc(np.float64(0), 5)
-        out = allocated[1:4].inc(np.array([1.0, 2.0, 3.0]))
+        written = np.array([1.0, 2.0, 3.0])
+        out = allocated[1:4].inc(written)
         for exclude in (
             "constant_folding",
             "topo_constant_folding",
             "local_alloc_constant_folding",
         ):
             result = utt.RewriteTester([], [out], include="o3", exclude=[exclude])
-            result.assert_graph(out)
+            result.assert_graph(allocated[1:4].set(written))
 
     def test_folding_stages(self):
         """Generic folding preserves Alloc, while late folding replaces it and its sum with a constant."""
@@ -863,7 +864,7 @@ class TestAllocConstantFolding:
         result.assert_graph(pt.alloc(value, size))
 
     def test_inc_subtensor(self):
-        """Constant increments fold away, while symbolic increments preserve Alloc and IncSubtensor."""
+        """Constant increments fold away, while symbolic increments preserve the Alloc they write into."""
         a = pt.alloc(pt.constant(0, dtype=config.floatX), 5)
         increments = pt.constant([1, 2, 3], dtype=config.floatX)
         out = a[1:4].inc(increments)
@@ -873,7 +874,7 @@ class TestAllocConstantFolding:
         increments = vector("increments", dtype=config.floatX)
         out = a[1:4].inc(increments)
         result = utt.RewriteTester([increments], [out], include="o3")
-        result.assert_graph(out)
+        result.assert_graph(a[1:4].set(increments))
 
     @pytest.mark.parametrize(
         "op, shape", [(Gemv(inplace=False), (3,)), (Gemm(inplace=False), (3, 3))]

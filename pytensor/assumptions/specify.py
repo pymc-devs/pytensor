@@ -107,7 +107,7 @@ def assume(
     x : tensor-like
         The input to annotate.
     diagonal : bool, optional
-        Assert that *x* is (or is not) a diagonal matrix.
+        Assert that *x* is (or is not) a diagonal matrix, which must be square.
     lower_triangular : bool, optional
         Assert that *x* is (or is not) lower-triangular.
     upper_triangular : bool, optional
