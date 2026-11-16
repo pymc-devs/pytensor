@@ -150,7 +150,12 @@ class ScalarizeRewriter(GraphRewriter):
             for out, inp in node.op.inplace_pattern.items()
             if scalars[inp] is None
         }
-        all_scalar = all(all(inp.type.broadcastable) for inp in node.inputs)
+        # Views can retain stale shape information after scalarization, so also
+        # recognize scalars recovered by scalar_behind.
+        all_scalar = all(
+            scalar is not None or all(inp.type.broadcastable)
+            for inp, scalar in zip(node.inputs, scalars, strict=True)
+        )
         if all_scalar and not inplace_pattern:
             if not has_scalar_input and not any(
                 ScalarizeRewriter.has_scalar_consumer(fgraph, out)
