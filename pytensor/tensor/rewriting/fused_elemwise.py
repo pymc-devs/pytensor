@@ -380,6 +380,9 @@ class FuseElemwise(GraphRewriter):
                 return None
         else:
             if isinstance(op, AdvancedIncSubtensor):
+                # Fused increments accumulate every occurrence of an index.
+                if op.ignore_duplicates and not op.set_instead_of_inc:
+                    return None
                 n_skip = 2
             else:
                 return None

@@ -679,6 +679,17 @@ class TestIndexedWriteFusion:
 class TestRepeatedAccumulationIndices:
     """Test inc_subtensor with repeated indices (same position accumulated multiple times)."""
 
+    def test_ignore_duplicates_not_fused(self):
+        x = pt.vector("x", shape=(3,))
+        idx = np.array([0, 0, 2])
+        out = pt.inc_subtensor(pt.zeros(3)[idx], x + 1, ignore_duplicates=True)
+        fn = function([x], out, mode=NUMBA_MODE)
+
+        assert not any(
+            isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.toposort()
+        )
+        np.testing.assert_allclose(fn([1.0, 2.0, 3.0]), [3.0, 0.0, 4.0])
+
     def test_repeated_inc_subtensor(self):
         """inc_subtensor with repeated indices should accumulate correctly."""
         rng = np.random.default_rng(42)
