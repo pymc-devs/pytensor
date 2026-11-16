@@ -517,6 +517,31 @@ def test_rtruediv():
     assert y.eval({x: 2.0}) == 0.5
 
 
+@pytest.mark.parametrize(
+    "op",
+    [
+        lambda x, y: x + y,
+        lambda x, y: x - y,
+        lambda x, y: x * y,
+        lambda x, y: x / y,
+        lambda x, y: x**y,
+        lambda x, y: x < y,
+        lambda x, y: x >= y,
+    ],
+)
+def test_scalar_tensor_binary_op(op):
+    # The scalar methods raised instead of returning NotImplemented, so Python
+    # never tried the tensor's reflected method (e.g. TensorVariable.__rmul__).
+    x = ScalarType(dtype="float64")("x")
+    y = pt.vector("y", dtype="float64")
+
+    out = op(x, y)
+
+    assert isinstance(out, pt.TensorVariable)
+    y_val = np.array([1.0, 2.0, 3.0])
+    np.testing.assert_allclose(out.eval({x: 2.0, y: y_val}), op(2.0, y_val))
+
+
 def test_rfloordiv():
     x = ScalarType(dtype="float64")()
     y = 5.0 // x

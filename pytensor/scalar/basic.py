@@ -795,6 +795,21 @@ all_types: _ScalarTypes = discrete_types + continuous_types
 discrete_dtypes = tuple(t.dtype for t in discrete_types)
 
 
+def _binary_op_or_not_implemented(op, x, y):
+    """Apply a binary scalar op, or return NotImplemented if an operand isn't a scalar.
+
+    Returning NotImplemented lets Python try the other operand's reflected method,
+    so ``scalar * tensor`` falls through to ``TensorVariable.__rmul__``. Errors
+    raised by the op itself (e.g. ComplexError) still propagate.
+    """
+    try:
+        as_scalar(x)
+        as_scalar(y)
+    except (TypeError, NotImplementedError):
+        return NotImplemented
+    return op(x, y)
+
+
 class _scalar_py_operators:
     # These can't work because Python requires native output types
     def __bool__(self):
@@ -852,79 +867,79 @@ class _scalar_py_operators:
         return invert(self)
 
     def __and__(self, other):
-        return and_(self, other)
+        return _binary_op_or_not_implemented(and_, self, other)
 
     def __or__(self, other):
-        return or_(self, other)
+        return _binary_op_or_not_implemented(or_, self, other)
 
     def __xor__(self, other):
-        return xor(self, other)
+        return _binary_op_or_not_implemented(xor, self, other)
 
     def __rand__(self, other):
-        return and_(other, self)
+        return _binary_op_or_not_implemented(and_, other, self)
 
     def __ror__(self, other):
-        return or_(other, self)
+        return _binary_op_or_not_implemented(or_, other, self)
 
     def __rxor__(self, other):
-        return xor(other, self)
+        return _binary_op_or_not_implemented(xor, other, self)
 
     # COMPARISONS
     def __lt__(self, other):
-        return lt(self, other)
+        return _binary_op_or_not_implemented(lt, self, other)
 
     def __le__(self, other):
-        return le(self, other)
+        return _binary_op_or_not_implemented(le, self, other)
 
     def __gt__(self, other):
-        return gt(self, other)
+        return _binary_op_or_not_implemented(gt, self, other)
 
     def __ge__(self, other):
-        return ge(self, other)
+        return _binary_op_or_not_implemented(ge, self, other)
 
     # ARITHMETIC - NORMAL
     def __add__(self, other):
-        return add(self, other)
+        return _binary_op_or_not_implemented(add, self, other)
 
     def __sub__(self, other):
-        return sub(self, other)
+        return _binary_op_or_not_implemented(sub, self, other)
 
     def __mul__(self, other):
-        return mul(self, other)
+        return _binary_op_or_not_implemented(mul, self, other)
 
     def __truediv__(self, other):
-        return true_div(self, other)
+        return _binary_op_or_not_implemented(true_div, self, other)
 
     def __floordiv__(self, other):
-        return int_div(self, other)
+        return _binary_op_or_not_implemented(int_div, self, other)
 
     def __mod__(self, other):
-        return mod_check(self, other)
+        return _binary_op_or_not_implemented(mod_check, self, other)
 
     def __pow__(self, other):
-        return pow(self, other)
+        return _binary_op_or_not_implemented(pow, self, other)
 
     # ARITHMETIC - RIGHT-OPERAND
     def __radd__(self, other):
-        return add(other, self)
+        return _binary_op_or_not_implemented(add, other, self)
 
     def __rsub__(self, other):
-        return sub(other, self)
+        return _binary_op_or_not_implemented(sub, other, self)
 
     def __rmul__(self, other):
-        return mul(other, self)
+        return _binary_op_or_not_implemented(mul, other, self)
 
     def __rtruediv__(self, other):
-        return true_div(other, self)
+        return _binary_op_or_not_implemented(true_div, other, self)
 
     def __rfloordiv__(self, other):
-        return int_div(other, self)
+        return _binary_op_or_not_implemented(int_div, other, self)
 
     def __rmod__(self, other):
-        return mod(other, self)
+        return _binary_op_or_not_implemented(mod, other, self)
 
     def __rpow__(self, other):
-        return pow(other, self)
+        return _binary_op_or_not_implemented(pow, other, self)
 
     def zeros_like(self, dtype=None):
         # The second is needed for Elemwise ops to work right
