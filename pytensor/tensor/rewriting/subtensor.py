@@ -8,7 +8,7 @@ from pytensor import compile
 from pytensor.assumptions.core import UNIQUE_INDICES, check_assumption
 from pytensor.assumptions.elemwise import zero_preserving_input_groups
 from pytensor.compile import optdb
-from pytensor.graph.basic import Constant, Variable, equal_computations
+from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
@@ -79,10 +79,9 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.shape import _is_shape_i_of_x
 from pytensor.tensor.shape import (
     Reshape,
-    Shape,
-    Shape_i,
     shape_padleft,
     shape_padright,
     shape_tuple,
@@ -495,44 +494,6 @@ def _idx_to_int_array(idx):
     return np.arange(n, dtype=np.int64) + off_val
 
 
-def _is_shape_of_x_at(var, x, axis, shape_feature=None) -> bool:
-    """``True`` when ``var`` is statically equivalent to ``x.shape[axis]``.
-
-    With a ``shape_feature``, ``var`` may also recompute the shape it records for ``x``.
-    """
-    if shape_feature is not None and equal_computations(
-        [var], [shape_feature.get_shape(x, axis)]
-    ):
-        return True
-    if isinstance(var, TensorConstant):
-        s = x.type.shape[axis]
-        return s is not None and int(var.data) == s
-    op = var.owner_op
-    if isinstance(op, Shape_i):
-        return op.i == axis and var.owner.inputs[0] is x
-    if isinstance(op, Subtensor):
-        shape_node = var.owner.inputs[0]
-        if not isinstance(shape_node.owner_op, Shape):
-            return False
-        if shape_node.owner.inputs[0] is not x:
-            return False
-        try:
-            idx_val = get_constant_idx(
-                var.owner.op.idx_list, var.owner.inputs, allow_partial=False
-            )
-        except NotScalarConstantError:
-            return False
-        return len(idx_val) == 1 and idx_val[0] == axis
-    if isinstance(op, DimShuffle) and op.new_order == ():
-        # ``Squeeze(Shape(x))`` collapses Shape(x) (length-1 vector) to scalar:
-        # only valid when ``x`` is 1-D, in which case it's ``x.shape[0]``.
-        shape_node = var.owner.inputs[0]
-        if not isinstance(shape_node.owner_op, Shape):
-            return False
-        return axis == 0 and shape_node.owner.inputs[0] is x
-    return False
-
-
 @register_infer_shape
 @register_useless
 @register_canonicalize
@@ -635,7 +596,7 @@ def local_useless_slice(fgraph, node):
                 if isinstance(stop.owner_op, ScalarFromTensor)
                 else stop
             )
-            if _is_shape_of_x_at(tensor_stop, x, dim, shape_feature=shape_feature):
+            if _is_shape_i_of_x(tensor_stop, x, dim, shape_feature=shape_feature):
                 change_flag = True
                 stop = None
             elif isinstance(tensor_stop.owner_op, Elemwise) and isinstance(
@@ -644,9 +605,9 @@ def local_useless_slice(fgraph, node):
                 a, b = tensor_stop.owner.inputs
                 kept = (
                     a
-                    if _is_shape_of_x_at(b, x, dim, shape_feature=shape_feature)
+                    if _is_shape_i_of_x(b, x, dim, shape_feature=shape_feature)
                     else b
-                    if _is_shape_of_x_at(a, x, dim, shape_feature=shape_feature)
+                    if _is_shape_i_of_x(a, x, dim, shape_feature=shape_feature)
                     else None
                 )
                 if kept is not None:
@@ -1245,13 +1206,11 @@ def local_set_to_inc_subtensor(fgraph, node):
     return [ret]
 
 
-def _has_one_distinct_client(fgraph: FunctionGraph, var: Variable) -> bool:
-    """Whether every client of ``var`` applies the same Op to the same inputs."""
+def _clients_are_identical(fgraph: FunctionGraph, var: Variable) -> bool:
+    """Whether every client of ``var`` applies the same Op to the same variables."""
     (first_client, _), *other_clients = fgraph.clients[var]
     return all(
-        client.op == first_client.op
-        and len(client.inputs) == len(first_client.inputs)
-        and equal_computations(client.inputs, first_client.inputs)
+        client.op == first_client.op and client.inputs == first_client.inputs
         for client, _ in other_clients
     )
 
@@ -1476,9 +1435,11 @@ def _write_parts(fgraph, var):
 
 
 def _same_write_location(write, other_write) -> bool:
-    return (
-        write.owner.op.idx_list == other_write.owner.op.idx_list
-        and equal_computations(write.owner.inputs[2:], other_write.owner.inputs[2:])
+    return write.owner.op.idx_list == other_write.owner.op.idx_list and all(
+        index is other_index
+        for index, other_index in zip(
+            write.owner.inputs[2:], other_write.owner.inputs[2:], strict=True
+        )
     )
 
 
@@ -1531,7 +1492,7 @@ def local_elemwise_of_set_subtensor(fgraph, node):
 
         base, value, *idx_vars = write.owner.inputs
         if not _holds_one_value(base) and not (
-            _holds_one_value(value) and _has_one_distinct_client(fgraph, write)
+            _holds_one_value(value) and len(fgraph.clients[write]) == 1
         ):
             continue
 
@@ -2068,7 +2029,7 @@ def local_adv_idx_to_diagonal(fgraph, node):
     # Verify that the arange spans the full diagonal at this offset:
     # d == min(shape[a1] - row_off, shape[a2] - col_off).
     def _is_dim_of_var(term, axis):
-        return _is_shape_of_x_at(
+        return _is_shape_i_of_x(
             term,
             var,
             axis,
@@ -2144,7 +2105,7 @@ def _arange_covers_axis(fgraph, idx, x, axis) -> bool:
     arange_node, offset = sym_match
     if get_underlying_scalar_constant_value(offset, raise_not_constant=False) != 0:
         return False
-    return _is_shape_of_x_at(
+    return _is_shape_i_of_x(
         arange_node.owner.inputs[1],
         x,
         axis,

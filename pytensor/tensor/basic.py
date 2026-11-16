@@ -3763,8 +3763,8 @@ class ExtractDiag(COp):
 
         positions = arange(outputs[0].shape[-1])
         row_offset, column_offset = max(0, -offset), max(0, offset)
-        rows = positions + row_offset if row_offset else positions
-        columns = positions + column_offset if column_offset else positions
+        rows = positions + row_offset
+        columns = positions + column_offset
 
         # With the diagonal axes last, the advanced indices leave the diagonal as the
         # last dimension, which is where ``gz`` has it.
