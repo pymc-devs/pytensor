@@ -1,9 +1,10 @@
-"""Fuse indexed reads/writes and reductions into Elemwise iteration loops.
+"""Fuse indexed and basic writes, indexed reads, and reductions into Elemwise loops.
 
 Introduces ``FusedElemwise``, an ``OpFromGraph`` that wraps
-``AdvancedSubtensor`` + ``Elemwise`` + ``AdvancedIncSubtensor`` / ``CAReduce``
-subgraphs so the Numba backend can generate a single loop with indirect
-indexing and inline accumulation, eliminating materialised intermediate arrays.
+``AdvancedSubtensor`` / ``IncSubtensor`` + ``Elemwise`` +
+``AdvancedIncSubtensor`` / ``CAReduce`` subgraphs so the Numba backend can
+generate a single loop with indirect indexing or a basic 1D slice write,
+eliminating materialised intermediate arrays.
 """
 
 from pytensor.compile import optdb
@@ -32,15 +33,19 @@ from pytensor.scalar.basic import (
 )
 from pytensor.tensor.basic import (
     atleast_Nd,
+    get_scalar_constant_value,
     scalar_from_tensor,
     tensor_from_scalar,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
 from pytensor.tensor.shape import shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
+    IncSubtensor,
+    get_idx_list,
 )
 from pytensor.tensor.variable import TensorVariable
 
@@ -116,8 +121,8 @@ class FusedElemwise(FinalizedOpFromGraph):
     """Fuse indexed reads and updates into a single Elemwise iteration loop.
 
     Absorbs ``AdvancedSubtensor`` (indexed reads on inputs) and
-    ``AdvancedIncSubtensor`` (indexed updates on outputs) into one loop,
-    avoiding materialisation of intermediate arrays.
+    ``AdvancedIncSubtensor`` or supported 1D ``IncSubtensor`` slice updates on
+    outputs into one loop, avoiding materialisation of intermediate arrays.
 
     Inner fgraph contains the unfused subgraph.
     Non-Numba backends run it as-is via ``OpFromGraph.perform``.
@@ -166,6 +171,11 @@ class FusedElemwise(FinalizedOpFromGraph):
 
             tgt[idx] += exp(x)   → indexed_outputs=[((0,), 0, "inc")]
 
+    basic_outputs : tuple of ((int, int | None, str) | None)
+        Per output, an optional ``(start, stop, mode)`` for a 1D unit-step
+        slice write. Bounds are nonnegative constants; ``stop=None`` means the
+        end of the destination.
+
     reduced_outputs : tuple of ((scalar_op, axes, identity, acc_dtype) | None)
         One entry per (inner Elemwise / outer op) output position.
         ``None`` if the output is not a reduction.
@@ -193,11 +203,13 @@ class FusedElemwise(FinalizedOpFromGraph):
         *args,
         indexed_inputs=(),
         indexed_outputs=(),
+        basic_outputs=(),
         reduced_outputs=(),
         **kwargs,
     ):
         self.indexed_inputs = indexed_inputs
         self.indexed_outputs = indexed_outputs
+        self.basic_outputs = basic_outputs
         self.reduced_outputs = reduced_outputs
         # A read buffer can occupy multiple input slots (e.g. read through
         # several indices); construct_nominal_fgraph dedupes those to one
@@ -266,6 +278,7 @@ class FusedElemwise(FinalizedOpFromGraph):
             destroy_map=destroy_map,
             indexed_inputs=self.indexed_inputs,
             indexed_outputs=self.indexed_outputs,
+            basic_outputs=self.basic_outputs,
             reduced_outputs=self.reduced_outputs,
         )
 
@@ -290,8 +303,13 @@ def _op_debug_information_FusedElemwise(op, node):
     info = {}
 
     n_idx = len(op.indexed_inputs)
-    n_update_targets = sum(1 for e in op.indexed_outputs if e is not None)
-    n_elemwise = len(node.inputs) - n_idx - n_update_targets
+    write_output_idxs = {
+        out_idx
+        for entry in op.indexed_outputs
+        if entry is not None
+        for out_idx in entry[0]
+    } | {out_idx for out_idx, entry in enumerate(op.basic_outputs) if entry is not None}
+    n_elemwise = len(node.inputs) - n_idx - len(write_output_idxs)
 
     # Annotate indexed-read inputs
     for k, entry in enumerate(op.indexed_inputs):
@@ -310,27 +328,34 @@ def _op_debug_information_FusedElemwise(op, node):
             info[node.inputs[idx_pos]] = f"idx_{k}"
 
     # Annotate update targets and outputs
-    buf_counter = 0
     target_start = n_elemwise + n_idx
-    target_offset = 0
+    buffer_positions = {
+        out_idx: target_start + target_offset
+        for target_offset, out_idx in enumerate(sorted(write_output_idxs))
+    }
+    buffer_labels = {
+        out_idx: f"buf_{target_offset}"
+        for target_offset, out_idx in enumerate(sorted(write_output_idxs))
+    }
+    for out_idx, target_pos in buffer_positions.items():
+        if target_pos < len(node.inputs):
+            info[node.inputs[target_pos]] = buffer_labels[out_idx]
+
     for k, entry in enumerate(op.indexed_outputs):
         if entry is None:
             continue
         sources, _source_axis, mode = entry
-        buf_label = f"buf_{buf_counter}"
-        buf_counter += 1
         idx_label = f"idx_{k}"
-
-        target_pos = target_start + target_offset
-        target_offset += 1
-        if target_pos < len(node.inputs):
-            info[node.inputs[target_pos]] = buf_label
 
         for out_idx in sources:
             if out_idx < len(node.outputs):
                 info[node.outputs[out_idx]] = (
-                    f"indexed {mode} ({buf_label}, {idx_label})"
+                    f"indexed {mode} ({buffer_labels[out_idx]}, {idx_label})"
                 )
+
+    for out_idx, entry in enumerate(op.basic_outputs):
+        if entry is not None and out_idx < len(node.outputs):
+            info[node.outputs[out_idx]] = f"basic {entry[2]} ({buffer_labels[out_idx]})"
 
     # Annotate reduced outputs
     for out_idx, spec in enumerate(op.reduced_outputs):
@@ -346,11 +371,12 @@ def _op_debug_information_FusedElemwise(op, node):
 
 
 class FuseElemwise(GraphRewriter):
-    """Fuse indexed reads and indexed updates into Elemwise loops.
+    """Fuse indexed reads, indexed updates, and basic 1D slice writes.
 
     Absorbs single-client ``AdvancedSubtensor`` on inputs (indexed reads)
-    and single-client ``AdvancedIncSubtensor`` on outputs (indexed updates)
-    into the Elemwise iteration, avoiding intermediate arrays.
+    and single-client ``AdvancedIncSubtensor`` or supported ``IncSubtensor``
+    slice writes on outputs into the Elemwise iteration, avoiding intermediate
+    arrays.
 
     Supports multiple index arrays: e.g. ``x[idx_a] + y[idx_b]`` produces
     two index groups.  Index arrays are shared between reads and updates
@@ -401,6 +427,41 @@ class FuseElemwise(GraphRewriter):
                 return None
             pairs.append((idx, axis))
         return pairs or None
+
+    @staticmethod
+    def _extract_basic_write_spec(node):
+        """Return constant nonnegative bounds for a supported 1D basic write."""
+        op = node.op
+        if (
+            not isinstance(op, IncSubtensor)
+            or node.inputs[0].ndim != 1
+            or node.inputs[1].ndim != 1
+            or len(op.idx_list) != 1
+            or not isinstance(op.idx_list[0], slice)
+        ):
+            return None
+
+        try:
+            [entry] = get_idx_list((node.inputs[0], *node.inputs[2:]), op.idx_list)
+            start = (
+                0
+                if entry.start is None
+                else int(get_scalar_constant_value(entry.start))
+            )
+            stop = (
+                None
+                if entry.stop is None
+                else int(get_scalar_constant_value(entry.stop))
+            )
+            step = (
+                1 if entry.step is None else int(get_scalar_constant_value(entry.step))
+            )
+        except (NotScalarConstantError, TypeError, ValueError):
+            return None
+
+        if start < 0 or (stop is not None and stop < 0) or step != 1:
+            return None
+        return start, stop
 
     @staticmethod
     def _duplicate_multi_client_outputs(node, multi_client_outs):
@@ -523,6 +584,7 @@ class FuseElemwise(GraphRewriter):
             # Our current vectorize codegen can't produce write only loops that don't force
             # the recomputation of the core function in every step.
             write_targets = {}  # out_idx -> update_node
+            basic_write_specs = {}
             leading_write_axes = {}
             for out_idx, out in enumerate(node.outputs):
                 clients = fgraph.clients[out]
@@ -543,12 +605,39 @@ class FuseElemwise(GraphRewriter):
                 inc_clients = [
                     (c, ci)
                     for c, ci in clients
-                    if ci == 1 and isinstance(c.op, AdvancedIncSubtensor)
+                    if ci == 1
+                    and isinstance(c.op, (AdvancedIncSubtensor, IncSubtensor))
                 ]
                 if len(inc_clients) != 1:
                     # TODO: support multiple writes from the same Elemwise output via Composite duplication
                     continue
                 [(client_node, _)] = inc_clients
+                if isinstance(client_node.op, IncSubtensor):
+                    basic_spec = self._extract_basic_write_spec(client_node)
+                    if (
+                        right_pad
+                        or basic_spec is None
+                        or len(node.outputs) != 1
+                        or isinstance(node.op.scalar_op, Composite)
+                    ):
+                        continue
+
+                    target = client_node.inputs[0]
+                    if not client_node.op.set_instead_of_inc and (
+                        node.outputs[out_idx].type.dtype != target.type.dtype
+                        or target.type.dtype == "bool"
+                    ):
+                        continue
+                    if client_node.op.inplace and (
+                        _view_root(view_i, target)
+                        in {_view_root(view_i, inp) for inp in node.inputs}
+                    ):
+                        continue
+
+                    write_targets[out_idx] = client_node
+                    basic_write_specs[out_idx] = basic_spec
+                    continue
+
                 idx_axis_pairs = self._extract_idx_axis_pairs(client_node, write=True)
                 if idx_axis_pairs is None:
                     continue
@@ -645,7 +734,7 @@ class FuseElemwise(GraphRewriter):
                 worklist.append(new_node)
                 continue
 
-            if not idx_groups and not reduced_outputs:
+            if not idx_groups and not basic_write_specs and not reduced_outputs:
                 continue
 
             if any(leading_write_axes.values()):
@@ -901,6 +990,16 @@ class FuseElemwise(GraphRewriter):
                 else None
                 for key, (_, writes) in idx_groups.items()
             )
+            basic_outputs_spec = tuple(
+                (
+                    basic_write_specs[out_idx][0],
+                    basic_write_specs[out_idx][1],
+                    "set" if write_targets[out_idx].op.set_instead_of_inc else "inc",
+                )
+                if out_idx in basic_write_specs
+                else None
+                for out_idx in range(len(node.outputs))
+            )
 
             outer_inputs = []
             for i, inp in enumerate(fgraph_inputs):
@@ -913,6 +1012,7 @@ class FuseElemwise(GraphRewriter):
                 destroy_map=fgraph_destroy_map,
                 indexed_inputs=indexed_inputs_spec,
                 indexed_outputs=indexed_outputs_spec,
+                basic_outputs=basic_outputs_spec,
                 reduced_outputs=reduced_spec,
             )(*outer_inputs, return_list=True)
 

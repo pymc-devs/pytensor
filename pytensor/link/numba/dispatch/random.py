@@ -24,6 +24,7 @@ from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
 from pytensor.link.numba.dispatch.linalg.decomposition.eigen import _eigh
 from pytensor.link.numba.dispatch.linalg.decomposition.svd import _svd_gesdd_full
 from pytensor.link.numba.dispatch.vectorize_codegen import (
+    NO_BASIC_OUTPUTS,
     NO_INDEXED_INPUTS,
     NO_INDEXED_OUTPUTS,
     NO_REDUCE_OUTPUTS,
@@ -491,6 +492,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
                 else numba_ndarray.to_fixed_tuple(size, size_len),
                 NO_INDEXED_INPUTS,
                 NO_INDEXED_OUTPUTS,
+                NO_BASIC_OUTPUTS,
                 NO_REDUCE_OUTPUTS,
                 core_handles_out,
             )
@@ -502,7 +504,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
         # If the core RV can't be cached, then the whole RV can't be cached
         random_rv_key = None
     else:
-        random_rv_cache_version = 1
+        random_rv_cache_version = 2
         random_rv_key_contents = (
             type(op),
             type(rv_op),

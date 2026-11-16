@@ -149,3 +149,238 @@ def test_core_shape_simplify_keeps_fgraph_intact():
     assert any(node.op.destroy_map for node in fg.apply_nodes)
     optdb.query("+introduce_explicit_core_shape_blockwise").rewrite(fg)
     fg.toposort()
+
+
+@pytest.mark.parametrize("kind", ["set", "inc"])
+@pytest.mark.parametrize("indexing", ["basic", "advanced"])
+def test_basic_slice_write_fusion_2192(kind, indexing):
+    from pytensor import config
+    from pytensor.tensor.elemwise import Elemwise
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    destination = pt.vector("destination")
+    indices = pt.lvector("indices")
+
+    base = destination + 1
+    region = base[1:] if indexing == "basic" else base[indices]
+    values = pt.exp(x)
+
+    result = region.set(values) if kind == "set" else region.inc(values)
+    inputs = [x, destination]
+    args = [
+        np.array([0.0, 1.0, 2.0]),
+        np.zeros(4),
+    ]
+
+    if indexing == "advanced":
+        inputs.append(indices)
+        args.append(np.array([1, 2, 3], dtype=np.int64))
+
+    mode = get_mode("NUMBA")
+    with config.change_flags(numba__cache=False):
+        fn = function(inputs, result, mode=mode)
+        actual = fn(*args)
+        if indexing == "basic":
+            fn_unfused = function(
+                inputs,
+                result,
+                mode=mode.excluding("fuse_indexed_into_elemwise"),
+            )
+            fn_unfused(*args)
+    expected = np.r_[
+        1.0,
+        np.exp(args[0]) + (0 if kind == "set" else 1),
+    ]
+
+    np.testing.assert_allclose(actual, expected)
+    np.testing.assert_array_equal(args[1], np.zeros(4))
+
+    assert any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.apply_nodes
+    ), f"{kind}/{indexing}: expected fused slice write"
+
+    if indexing == "basic":
+        assert not any(
+            isinstance(node.op, Elemwise) and type(node.op.scalar_op).__name__ == "Exp"
+            for node in fn.maker.fgraph.apply_nodes
+        )
+
+        def allocations(compiled_fn):
+            llvm = "\n".join(compiled_fn.vm.jit_fn.inspect_llvm().values())
+            return llvm.count("NRT_MemInfo_alloc_aligned")
+
+        assert allocations(fn) + 1 == allocations(fn_unfused), (
+            "basic slice fusion should eliminate the standalone Exp output allocation"
+        )
+
+
+@pytest.mark.parametrize(
+    ("slice_spec", "x_values"),
+    [
+        (slice(2, 4), np.array([0.0, 1.0])),
+        (slice(1, 99), np.array([0.0, 1.0, 2.0])),
+        (slice(9, None), np.array([])),
+        (slice(2, 2), np.array([])),
+        (slice(1, None), np.array([2.0])),
+    ],
+)
+def test_basic_slice_write_fusion_2192_boundaries(slice_spec, x_values):
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    destination = pt.vector("destination")
+    result = pt.set_subtensor((destination + 1)[slice_spec], pt.exp(x))
+    fn = function([x, destination], result, mode="NUMBA")
+
+    x_value = x_values.astype("float64")
+    destination_value = np.zeros(4)
+    actual = fn(x_value, destination_value)
+    expected = destination_value + 1
+    expected[slice_spec] = np.exp(x_value)
+    np.testing.assert_allclose(actual, expected)
+    assert any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+
+@pytest.mark.parametrize(
+    ("slice_spec", "x_value"),
+    [
+        (slice(-2, None), np.array([0.0, 1.0])),
+        (slice(None, None, 2), np.array([0.0, 1.0, 2.0])),
+    ],
+)
+def test_basic_slice_write_fusion_2192_unsupported_slices_are_not_fused(
+    slice_spec, x_value
+):
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    destination = pt.vector("destination")
+    result = pt.set_subtensor((destination + 1)[slice_spec], pt.exp(x))
+    fn = function([x, destination], result, mode="NUMBA")
+
+    destination_value = np.zeros(5)
+    actual = fn(x_value, destination_value)
+    expected = destination_value + 1
+    expected[slice_spec] = np.exp(x_value)
+    np.testing.assert_allclose(actual, expected)
+    assert not any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+
+def test_basic_slice_write_fusion_2192_set_dtype_conversion():
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    destination = pt.vector("destination", dtype="int32")
+    result = pt.set_subtensor((destination + 1)[1:], pt.exp(x))
+    fn = function([x, destination], result, mode="NUMBA")
+
+    actual = fn(np.array([0.0, 1.0]), np.array([4, 5, 6], dtype=np.int32))
+    np.testing.assert_array_equal(actual, np.array([5, 1, 2], dtype=np.int32))
+    assert any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+
+def test_basic_slice_write_fusion_2192_inc_dtype_mismatch_is_not_fused():
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    destination = pt.vector("destination", dtype="int32")
+    result = pt.inc_subtensor((destination + 1)[1:], pt.exp(x))
+    fn = function([x, destination], result, mode="NUMBA")
+
+    actual = fn(np.array([0.0, 1.0]), np.array([4, 5, 6], dtype=np.int32))
+    np.testing.assert_array_equal(actual, np.array([5, 7, 9], dtype=np.int32))
+    assert not any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+
+def test_basic_slice_write_fusion_2192_shape_mismatch():
+    x = pt.vector("x")
+    destination = pt.vector("destination")
+    result = pt.set_subtensor((destination + 1)[1:], pt.exp(x))
+    fn = function([x, destination], result, mode="NUMBA")
+
+    with pytest.raises(ValueError, match="broadcast"):
+        fn(np.array([0.0, 1.0]), np.zeros(4))
+
+
+def test_basic_slice_write_fusion_2192_dynamic_bounds_are_not_fused():
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    destination = pt.vector("destination")
+    start = pt.lscalar("start")
+    stop = pt.lscalar("stop")
+    result = pt.set_subtensor((destination + 1)[start:stop], pt.exp(x))
+    fn = function([x, destination, start, stop], result, mode="NUMBA")
+
+    assert not any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.apply_nodes
+    )
+    x_value = np.array([0.0, 1.0])
+    destination_value = np.zeros(4)
+    for start_value, stop_value in ((0, 2), (2, 4)):
+        actual = fn(x_value, destination_value, start_value, stop_value)
+        expected = destination_value + 1
+        expected[start_value:stop_value] = np.exp(x_value)
+        np.testing.assert_allclose(actual, expected)
+
+
+def test_basic_slice_write_fusion_2192_inc_shape_mismatch():
+    x = pt.vector("x")
+    destination = pt.vector("destination")
+    result = pt.inc_subtensor((destination + 1)[1:], pt.exp(x))
+    fn = function([x, destination], result, mode="NUMBA")
+
+    with pytest.raises(ValueError, match="broadcast"):
+        fn(np.array([0.0, 1.0]), np.zeros(4))
+
+
+def test_basic_slice_write_fusion_2192_rejects_output_handling_core():
+    from numba import TypingError
+
+    from pytensor.link.numba.dispatch.vectorize_codegen import (
+        _BasicOutputSlice,
+        _CoreCall,
+    )
+
+    basic_output = object.__new__(_BasicOutputSlice)
+    with pytest.raises(TypingError, match="not supported with basic slice writes"):
+        _CoreCall(None, None, None, None, True, [basic_output])
+
+
+@pytest.mark.parametrize("inplace", [False, True])
+def test_basic_slice_write_fusion_2192_input_aliasing(inplace):
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    result = pt.set_subtensor(x[1:], pt.exp(x[:-1]), inplace=inplace)
+    fn = function(
+        [In(x, mutable=inplace)],
+        result,
+        mode="NUMBA",
+        accept_inplace=inplace,
+    )
+
+    x_value = np.array([0.0, 1.0, 2.0, 3.0])
+    original = x_value.copy()
+    actual = fn(x_value)
+    expected = original.copy()
+    expected[1:] = np.exp(original[:-1])
+    np.testing.assert_allclose(actual, expected)
+
+    fused = any(
+        isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.apply_nodes
+    )
+    assert fused is not inplace
+    if inplace:
+        np.testing.assert_allclose(x_value, expected)
+    else:
+        np.testing.assert_array_equal(x_value, original)
