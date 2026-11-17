@@ -830,6 +830,15 @@ class TestElemwise(unittest_tools.InferShapeTester):
         assert (pt.bvector() / 128).dtype == "float64"
         assert (pt.vector(dtype="uint8") / -1).dtype == "float64"
 
+    @config.change_flags(cast_policy="numpy+floatX", floatX="float64")
+    def test_weak_scalar_promotion_grad(self):
+        # Scalar gradients mix their inputs with Python literals
+        x = pt.fscalar("x")
+        ops = (pt.sqrt, pt.tanh, pt.sigmoid, pt.log1p, pt.arctan, pt.arcsin, pt.sqr)
+        for op in ops:
+            assert grad(op(x), x).dtype == "float32"
+        assert grad(x**3, x).dtype == "float32"
+
     def test_elemwise_grad_bool(self):
         x = scalar(dtype="bool")
         y = bscalar()

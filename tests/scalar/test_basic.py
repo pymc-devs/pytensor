@@ -470,6 +470,16 @@ def test_constant():
     assert c.dtype == "float32"
 
 
+@pytensor.config.change_flags(cast_policy="numpy+floatX", floatX="float64")
+def test_weak_scalar_promotion():
+    x = float32("x")
+    for out in (x + 2, 2.5 * x, x / 2, x**2):
+        assert out.dtype == "float32"
+    assert add(int8("i"), 1).dtype == "int8"
+    with pytest.raises(OverflowError):
+        add(int8("i"), 128)
+
+
 def test_shape():
     a = float32("a")
     assert isinstance(a.type, ScalarType)
