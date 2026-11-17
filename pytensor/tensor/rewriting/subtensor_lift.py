@@ -1326,7 +1326,7 @@ def _lift_basic_idxs_over_adv_idxs(
     return left_idxs, new_adv_idxs, right_idxs
 
 
-def _subtensor_lift_through_adv_subtensor_is_profitable(
+def _lift_multi_client_advanced_subtensor_profitable(
     adv_subtensor, clients, adv_group
 ) -> bool:
     """Whether lifting all clients avoids increasing the total number of copied entries."""
@@ -1380,6 +1380,9 @@ def _subtensor_lift_through_adv_subtensor_is_profitable(
         ) <= prod(counted_shape):
             return True
 
+    # If static sizes don't prove profitability, try disjoint client regions.
+    # Pairwise disjoint ranges on any one axis imply disjoint regions,
+    # regardless of overlap or unknown bounds on the other axes.
     def constant_range(idx) -> tuple | None:
         idx = as_index_literal(idx)
         if not isinstance(idx, slice):
@@ -1451,7 +1454,7 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
         return None
 
     clients = [client for client, _ in fgraph.clients[adv_subtensor]]
-    if not _subtensor_lift_through_adv_subtensor_is_profitable(
+    if not _lift_multi_client_advanced_subtensor_profitable(
         adv_subtensor, clients, adv_group
     ):
         return None
@@ -1510,7 +1513,6 @@ def local_adv_inc_subtensor_of_inc_subtensor(fgraph, node):
     if len(adv_groups) != 1:
         return None
     [adv_group] = adv_groups
-    n_left = adv_group[0][0]
     adv_ndim = max(idx.ndim for _, idx in adv_group)
 
     if y.type.ndim != z.type.ndim - len(adv_group) + adv_ndim:
@@ -1518,6 +1520,16 @@ def local_adv_inc_subtensor_of_inc_subtensor(fgraph, node):
         return None
 
     basic_idxs = indices_from_subtensor(idxs, y_op.idx_list)
+    if any(
+        broadcastable and idx != slice(None)
+        for broadcastable, idx in zip(y_base.type.broadcastable, basic_idxs)
+    ):
+        # Wait for local_useless_slice (slices) or
+        # local_inc_subtensor_remove_broadcastable_index (integers) to replace
+        # redundant singleton indices with full slices. Only full slices commute
+        # with broadcasting the inner increment onto the outer slice.
+        return None
+
     lifted_idxs = _lift_basic_idxs_over_adv_idxs(adv_group, basic_idxs)
     if lifted_idxs is None:
         return None
@@ -1525,10 +1537,6 @@ def local_adv_inc_subtensor_of_inc_subtensor(fgraph, node):
 
     if any(idx != slice(None) for idx in left_idxs):
         # Not implemented: basic indices that don't end up to the right of the advanced ones
-        return None
-
-    if any(y_base.type.broadcastable[n_left:]):
-        # y is broadcast by the outer increment, which spreads g beyond the entries it indexes
         return None
 
     new_idxs = (*new_adv_idxs, *right_idxs)

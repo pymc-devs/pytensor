@@ -62,6 +62,7 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -523,6 +524,10 @@ def local_useless_slice(fgraph, node):
     - ``X[:]`` -> ``X``
     - ``X[0:7:1]`` -> ``X[:]`` when ``X.shape[0] <= 7``
     - ``X[-1:-8:-1]`` -> ``X[::-1]`` when ``X.shape[0] <= 7``
+    - ``X[:, 0:1, i:j].inc(y)`` -> ``X[:, :, i:j].inc(y)`` when ``X.shape[1] == 1``
+
+    Singleton integer indices in updates are handled by
+    ``local_inc_subtensor_remove_broadcastable_index``.
     """
     op = node.op
     idx_list = op.idx_list
@@ -1054,6 +1059,7 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
     a[0,:,-1,:] -> a.dimshuffle(1,3), when
         a.broadcastable = (True, False, True, False)
 
+    Update cleanup is handled by ``local_inc_subtensor_remove_broadcastable_index``.
     """
     idx = node.op.idx_list
 
@@ -1082,6 +1088,58 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         all_dim = range(node.inputs[0].ndim)
         remain_dim = [x for x in all_dim if x not in remove_dim]
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([IncSubtensor])
+def local_inc_subtensor_remove_broadcastable_index(fgraph, node):
+    """Replace singleton integer indices with full slices.
+
+    ``x[:, 0, i:j].inc(y) -> x[:, :, i:j].inc(y[:, None, :])``
+    when ``x.shape[1] == 1``. Also applies to assignment and index ``-1``,
+    which selects the same element as ``0`` on a singleton axis.
+
+    Slice bounds remain the responsibility of ``local_useless_slice``.
+    If only full slices remain, ``local_useless_inc_subtensor`` removes the update.
+    The read counterpart is ``local_subtensor_remove_broadcastable_index``.
+    """
+    x, y, *index_vars = node.inputs
+    singleton_dims = []
+    singleton_axes = []
+    dropped_dims = 0
+    for dim, idx_entry in enumerate(node.op.idx_list):
+        if not isinstance(idx_entry, int):
+            continue
+        if (
+            x.type.broadcastable[dim]
+            and isinstance(idx := index_vars[idx_entry], Constant)
+            and idx.data in (0, -1)
+        ):
+            singleton_dims.append(dim)
+            singleton_axes.append(dim - dropped_dims)
+        else:
+            dropped_dims += 1
+    if not singleton_axes:
+        return None
+
+    indexed_ndim = x.ndim - dropped_dims - len(singleton_axes)
+    # Make the update's implicit leading broadcasts explicit.
+    y = shape_padleft(y, indexed_ndim - y.ndim)
+    # Insert update axes where singleton integer indices became full slices.
+    y = expand_dims(y, singleton_axes)
+    # Let the update broadcast implicitly along leading singleton axes.
+    y = _squeeze_left(y)
+    # Merge or remove the resulting DimShuffles.
+    y = apply_local_dimshuffle_merge(fgraph, y)
+    indices = list(indices_from_subtensor(index_vars, node.op.idx_list))
+    for dim in singleton_dims:
+        indices[dim] = slice(None)
+    idx_list, index_vars = flatten_index_variables(indices)
+    props = node.op._props_dict() | {"idx_list": idx_list}
+    out = type(node.op)(**props)(x, y, *index_vars)
+    copy_stack_trace(node.outputs, out)
+    return [out]
 
 
 @register_canonicalize
