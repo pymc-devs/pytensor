@@ -2670,7 +2670,9 @@ def local_join_with_alloc_to_set_subtensor(fgraph, node):
     alloc_inputs: list[tuple[int, Variable, Variable]] = []
     for i, t in enumerate(tensors):
         if t.owner is not None and isinstance(t.owner.op, Alloc):
-            alloc_inputs.append((i, t, t.owner.inputs[0]))
+            fill_val = t.owner.inputs[0]
+            if fill_val.ndim == 0:
+                alloc_inputs.append((i, t, fill_val))
 
     if not alloc_inputs:
         return None
@@ -2717,20 +2719,21 @@ def local_join_with_alloc_to_set_subtensor(fgraph, node):
             is_prefilled = True
         elif t.owner is not None and isinstance(t.owner.op, Alloc):
             fill_val = t.owner.inputs[0]
-            if fill_val is base_val:
-                is_prefilled = True
-            else:
-                try:
-                    c1 = get_scalar_constant_value(
-                        fill_val, only_process_constants=True
-                    )
-                    c2 = get_scalar_constant_value(
-                        base_val, only_process_constants=True
-                    )
-                    if c1 == c2:
-                        is_prefilled = True
-                except NotScalarConstantError:
-                    pass
+            if fill_val.ndim == 0:
+                if fill_val is base_val:
+                    is_prefilled = True
+                else:
+                    try:
+                        c1 = get_scalar_constant_value(
+                            fill_val, only_process_constants=True
+                        )
+                        c2 = get_scalar_constant_value(
+                            base_val, only_process_constants=True
+                        )
+                        if c1 == c2:
+                            is_prefilled = True
+                    except NotScalarConstantError:
+                        pass
 
         if not is_prefilled:
             idx = [slice(None)] * ndim
