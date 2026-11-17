@@ -729,14 +729,7 @@ class TestFusion:
                     "numpy": "float64",
                 },
             ),  # 40
-            (
-                fx - (fy / 2),
-                (fx, fy),
-                (fxv, fyv),
-                1,
-                fxv - (fyv / 2),
-                "float32",
-            ),
+            (fx - (fy / 2), (fx, fy), (fxv, fyv), 1, fxv - (fyv / 2), "float32"),
             (
                 fx - (fy % fz),
                 (fx, fy, fz),

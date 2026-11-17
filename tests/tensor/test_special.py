@@ -199,6 +199,20 @@ def test_softmax_stability(constructor, scipy_fn, mode):
     assert np.isnan(out[2:]).all()
 
 
+@pytest.mark.parametrize("op", [logaddexp, xlogy, xlog1py])
+@pytest.mark.parametrize("floatX", ["float32", "float64"])
+@config.change_flags(cast_policy="numpy+floatX")
+def test_float_operation_weak_scalar_promotion(op, floatX):
+    with config.change_flags(floatX=floatX):
+        x = vector("x", dtype="float32")
+        for inputs in ((x, 2), (2.5, x)):
+            out = op(*inputs)
+            assert out.dtype == "float32"
+            assert all(inp.dtype == "float32" for inp in out.owner.inputs)
+        assert op(x, np.float64(2)).dtype == "float64"
+        assert op(vector(dtype="int8"), 128).dtype == "float32"
+
+
 def test_logaddexp():
     # Test more than two multidimensional inputs
     x, y, z = matrices("x", "y", "z")
@@ -267,6 +281,11 @@ def test_logsumexp(shape, axis, keepdims):
         pytensor_out,
         scipy_out,
     )
+
+
+@config.change_flags(cast_policy="numpy+floatX", floatX="float64")
+def test_logsumexp_preserves_float32():
+    assert logsumexp(vector(dtype="float32")).dtype == "float32"
 
 
 def test_logsumexp_zero_size():
