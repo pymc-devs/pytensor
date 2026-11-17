@@ -70,6 +70,15 @@ class Layout:
         return Layout(tuple(range(ndim)), (PACKED,) * ndim)
 
     @staticmethod
+    def of_const(data) -> Layout:
+        """How a constant is stored: packed in its own order if it has one, else C."""
+        a, nd = np.asarray(data), np.ndim(data)
+        order = sorted(range(nd), key=lambda i: -a.strides[i])
+        if nd < 2 or a.flags.c_contiguous or not a.transpose(order).flags.c_contiguous:
+            return Layout.c(nd)
+        return Layout.make(a.shape, order, (PACKED,) * nd)
+
+    @staticmethod
     def dynamic(ndim: int) -> Layout:
         """Nothing known."""
         return Layout(tuple(range(ndim)), (DYNAMIC,) * ndim)
@@ -472,7 +481,9 @@ def _default_layout(var, inputs_c=False):
 
     if not hasattr(var.type, "ndim"):
         return None
-    if isinstance(var, Constant) or inputs_c:
+    if isinstance(var, Constant):
+        return Layout.of_const(var.data)
+    if inputs_c:
         return Layout.c(var.type.ndim)
     return Layout.dynamic(var.type.ndim)
 
@@ -486,8 +497,7 @@ def infer_layouts(fgraph, input_layouts=None) -> dict:
         lays[v] = lay if lay is not None else _default_layout(v)
     for node in fgraph.toposort():
         ins = [lays[i] if i in lays else _default_layout(i) for i in node.inputs]
-        for o, lay in zip(node.outputs, predict_layouts(node, ins), strict=True):
-            lays[o] = lay  # noqa: PERF403
+        lays.update(zip(node.outputs, predict_layouts(node, ins), strict=True))
     return lays
 
 

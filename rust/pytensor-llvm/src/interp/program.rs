@@ -706,7 +706,7 @@ impl Program {
                     format!("input {i} (C-contiguous)")
                 }
                 ValueKind::Input(i) => format!("input {i}"),
-                ValueKind::Const(_) => "constant".to_string(),
+                ValueKind::Const(c) => format!("constant at {:p}", c.data()),
                 ValueKind::Arena(off) if !v.order.is_empty() => {
                     format!("arena +{off}, order {:?}", v.order)
                 }

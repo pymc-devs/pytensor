@@ -134,6 +134,7 @@ def test_views_keep_what_still_holds_of_the_layout():
         (2, 3, None), range(3), (DYNAMIC, DYNAMIC, 0)
     )
 
+
 def test_mistakes_raise():
     m = ir.Module("array")
     f = m.function("f", [ir.ptr, ir.i64], ir.f64)

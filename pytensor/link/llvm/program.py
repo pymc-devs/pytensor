@@ -292,7 +292,7 @@ class Planner:
         if not hasattr(t, "ndim") or is_absent(t):
             return None
         if k in self.values.consts:
-            return Layout.c(t.ndim)  # constants are stored C-contiguous
+            return Layout.of_const(self.values.consts[k])
         return self.layouts.get(k)
 
     def set_layouts(self, vids, layouts):
@@ -763,8 +763,9 @@ class Planner:
             what = memory.kind[k]
             if what == "const":
                 ids[k] = pb.constant(
-                    np.asarray(consts[k], dtype=types[k].dtype)
-                )  # stored C-contiguous
+                    np.asarray(consts[k], dtype=types[k].dtype),
+                    list(Layout.of_const(consts[k]).order),
+                )
             elif what == "provided":
                 if k in memory.first_out:
                     ids[k] = pb.fresh(dtype(k), shape(k))

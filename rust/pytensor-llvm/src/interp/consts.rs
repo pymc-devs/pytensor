@@ -7,16 +7,26 @@ use zerocopy::{FromBytes, Immutable, IntoBytes};
 #[repr(C, align(64))]
 struct Align64([u8; 64]);
 
-/// Constant data: native byte order, C-contiguous, 64-byte aligned.
+/// Constant data: native byte order, packed in `order` (outermost axis first; empty is
+/// C), 64-byte aligned. Equal buffers are shared (a matrix and its transpose).
 pub struct ConstData {
     pub dtype: DType,
     pub shape: Vec<i64>,
     pub strides: Vec<i64>,
-    buf: Vec<Align64>,
+    buf: std::sync::Arc<Vec<Align64>>,
 }
 
+#[derive(Default)]
+pub struct ConstBuffers(std::collections::HashMap<u64, Vec<std::sync::Arc<Vec<Align64>>>>);
+
 impl ConstData {
-    pub fn new(dtype: DType, shape: Vec<i64>, bytes: &[u8]) -> Result<Self, String> {
+    pub fn new(
+        dtype: DType,
+        shape: Vec<i64>,
+        order: &[usize],
+        bytes: &[u8],
+        shared: &mut ConstBuffers,
+    ) -> Result<Self, String> {
         let n = crate::abi::checked_nbytes(&shape, dtype.itemsize())
             .ok_or_else(|| crate::abi::bad_size("constant", &shape))?;
         if n != bytes.len() {
@@ -25,14 +35,21 @@ impl ConstData {
                 bytes.len()
             ));
         }
-        let mut buf = vec![Align64([0; 64]); n.div_ceil(64).max(1)];
-        buf.as_mut_bytes()[..n].copy_from_slice(bytes);
-        let mut strides = vec![0i64; shape.len()];
-        let mut acc = dtype.itemsize() as i64;
-        for d in (0..shape.len()).rev() {
-            strides[d] = acc;
-            acc *= shape[d].max(1);
-        }
+        let key = std::hash::BuildHasher::hash_one(
+            &std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default(),
+            bytes,
+        );
+        let same = shared.0.entry(key).or_default();
+        let buf = match same.iter().find(|b| &b.as_bytes()[..n] == bytes) {
+            Some(buf) => buf.clone(),
+            None => {
+                let mut buf = vec![Align64([0; 64]); n.div_ceil(64).max(1)];
+                buf.as_mut_bytes()[..n].copy_from_slice(bytes);
+                same.push(std::sync::Arc::new(buf));
+                same.last().unwrap().clone()
+            }
+        };
+        let strides = super::program::packed_strides(&shape, dtype.itemsize() as i64, order);
         Ok(ConstData {
             dtype,
             shape,
