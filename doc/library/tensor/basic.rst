@@ -894,6 +894,8 @@ Creating Tensors
     >>> f(x, x, x, x).shape
     (2, 2, 4, 4)
 
+.. autofunction:: pytensor.tensor.basic.block
+
 .. autofunction:: pytensor.tensor.basic.choose
 
 Reductions
