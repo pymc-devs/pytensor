@@ -535,13 +535,6 @@ def add_tensor_configvars():
         in_c_key=False,
     )
 
-    config.add(
-        "tensor__insert_inplace_optimizer_validate_nb",
-        "-1: auto, if graph have less then 500 nodes 1, else 10",
-        IntParam(-1),
-        in_c_key=False,
-    )
-
 
 def add_traceback_configvars():
     config.add(

@@ -3,10 +3,8 @@ import itertools
 import sys
 from collections import defaultdict
 from collections.abc import Sequence
-from warnings import warn
 
 from pytensor.compile.aliasing import Supervisor
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.fg import FunctionGraph
@@ -194,34 +192,6 @@ class InplaceGraphOptimizer(GraphRewriter):
             (x + y) * (x * y) -> (x += y) *= (x * y) or (x + y) *= (x *= y)
 
         """
-        # We should not validate too often as this takes too much time to execute!
-        # It is the _dfs_toposort() fct in pytensor/graph/destroyhandler.py
-        # that takes so much time.
-        # Should we try to use another lib that does toposort?
-        #   igraph: http://igraph.sourceforge.net/
-        #   networkx: https://networkx.lanl.gov/
-        # Should we try to use cython?
-        #   Compiling only that fct is not enough, should we try to add the
-        #   deque class too?
-        #   And init the deque and other list to an upper bound number of
-        #   elements?
-        # Maybe PyTensor should do online toposort as in
-        #   http://code.google.com/p/acyclic
-        #
-        # The next longest rewriter is the canonizer phase.
-        # Then I think it is the [io_?]toposort (need to validate) so check if
-        # the solution is also applicable there.
-
-        # 2025: The above comment is not specific to Elemwise, if we have concerns about this approach, we should
-        # tackle them in a more general way. The whole try/except approach is probably suboptimal.
-        # We can consider restricting inputs with static shapes that are large enough.
-
-        if config.tensor__insert_inplace_optimizer_validate_nb != -1:
-            warn(
-                "tensor__insert_inplace_optimizer_validate_nb config is deprecated. Setting it will fail in a future release.",
-                FutureWarning,
-            )
-
         reason = f"{self.op}_inplace_optimizer"
         prof = {
             "opt": self,

@@ -1797,18 +1797,4 @@ def test_InplaceElemwiseOptimizer_bug():
 
     fgraph = FunctionGraph(inputs=[z], outputs=[out, *irrelevant_outs], clone=False)
     add_supervisor_to_fgraph(fgraph, [In(z)])
-    # with config.change_flags(tensor__insert_inplace_optimizer_validate_nb=10):
     rewrite_graph(fgraph, include=("inplace",))
-
-    # Save original value to restore later
-    original_value = pytensor.config.tensor__insert_inplace_optimizer_validate_nb
-    try:
-        pytensor.config.tensor__insert_inplace_optimizer_validate_nb = 1
-        with pytest.warns(
-            FutureWarning,
-            match="tensor__insert_inplace_optimizer_validate_nb config is deprecated",
-        ):
-            rewrite_graph(fgraph, include=("inplace",))
-    finally:
-        # Restore original value to avoid affecting other tests
-        pytensor.config.tensor__insert_inplace_optimizer_validate_nb = original_value

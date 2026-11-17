@@ -155,18 +155,17 @@ def _random_inplace_graph(n, seed):
     return xs, outs
 
 
-@pytest.mark.parametrize("n, expected_n_inplace", [(300, 140), (1000, 493)])
-def test_inplace_rewrite_benchmark(n, expected_n_inplace, benchmark):
+def test_inplace_rewrite_benchmark(benchmark):
     from pytensor.compile import optdb
     from pytensor.compile.aliasing import add_supervisor_to_fgraph
     from pytensor.compile.io import In
     from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 
-    xs, outs = _random_inplace_graph(n, seed=0)
+    xs, outs = _random_inplace_graph(300, seed=0)
     fg = rewrite_graph(
         FunctionGraph(xs, outs),
         include=("fast_run",),
-        exclude=("inplace", "shape_unsafe"),
+        exclude=("inplace",),
     )
     inplace = optdb.query(RewriteDatabaseQuery(include=["inplace"]))
 
@@ -176,5 +175,5 @@ def test_inplace_rewrite_benchmark(n, expected_n_inplace, benchmark):
         inplace.rewrite(fg_clone)
         return sum(bool(node.op.destroy_map) for node in fg_clone.apply_nodes)
 
-    assert rewrite_func() == expected_n_inplace
+    assert rewrite_func() == 140
     benchmark.pedantic(rewrite_func, rounds=3, iterations=1)

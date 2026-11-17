@@ -1955,7 +1955,7 @@ compile.optdb.register(
     InplaceIncSubtensorOptimizer(AdvancedIncSubtensor),
     "fast_run",
     "inplace",
-    position=70.6,
+    position=50.15,
 )
 
 

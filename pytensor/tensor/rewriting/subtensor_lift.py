@@ -459,8 +459,10 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if not (elem.owner and isinstance(elem.owner.op, Elemwise | Blockwise)):
         return None
 
-    if len(fgraph.clients[elem]) > 1:
-        # Elemwise output is used beyond the Subtensor.
+    if len(fgraph.clients[elem]) > 1 or any(
+        fgraph.clients[o] for o in elem.owner.outputs if o is not elem
+    ):
+        # Elemwise outputs are used beyond the Subtensor.
         # Get out to avoid repeated computations
         return None
 
@@ -534,7 +536,9 @@ def local_subtensor_of_batch_dims(fgraph, node):
     [copy_stack_trace(old_out, new_inp) for new_inp in indexed_inputs]
 
     # Define elemwise operation on indexed inputs
-    new_out = elem.owner.op(*indexed_inputs)
+    new_out = elem.owner.op.make_node(*indexed_inputs).outputs[
+        elem.owner.outputs.index(elem)
+    ]
 
     # The indices dropped on broadcast dims may have been needed to determine the output shape
     # We use an alloc to enforce the output shape.
