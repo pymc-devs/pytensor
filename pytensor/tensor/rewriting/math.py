@@ -49,7 +49,7 @@ from pytensor.tensor.extra_ops import (
     broadcast_shape,
     concat_with_broadcast,
 )
-from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
 from pytensor.tensor.math import (
     All,
     Any,
@@ -383,6 +383,40 @@ def local_dot_of_join(fgraph, node):
         replacements[old_out] = new_out
 
     return replacements
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([Join])
+def local_nested_join_to_block_diagonal(fgraph, node):
+    r"""Rewrite a square grid of nested ``Join``\s with zero off-diagonals to :func:`block_diag`.
+
+    Matches a ``Join`` along one matrix axis whose every input is a ``Join`` along the
+    other, which covers both rows of column-concatenations (what :func:`block`
+    builds) and columns of row-concatenations. The ``BlockDiagonal`` form is what the
+    ``det``, ``inv``, ``solve``, and ``svd`` rewrites for block-diagonal matrices
+    match on. The shapes of the zero blocks are not checked.
+    """
+    out = node.outputs[0]
+    outer_axis = _join_matmul_axis(out)
+    if outer_axis is None or len(node.inputs) < 2:
+        return None
+
+    inner_axis = -3 - outer_axis
+    grid = []
+    for line in node.inputs:
+        if _join_matmul_axis(line) != inner_axis:
+            return None
+        grid.append(line.owner.inputs)
+
+    n = len(grid)
+    if any(len(line) != n for line in grid):
+        return None
+    if not all(_is_zero(grid[i][j]) for i in range(n) for j in range(n) if i != j):
+        return None
+
+    new_out = block_diag(*(grid[i][i] for i in range(n))).astype(out.type.dtype)
+    copy_stack_trace(out, new_out)
+    return [new_out]
 
 
 @register_canonicalize

@@ -37,7 +37,7 @@ from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
 from pytensor.tensor.math import (
     All,
     Any,
@@ -118,6 +118,7 @@ from pytensor.tensor.rewriting.math import (
     local_mul_canonizer,
     local_mul_switch_sink,
     local_neg_to_mul,
+    local_nested_join_to_block_diagonal,
     local_reduce_broadcastable,
     local_reduce_chain,
     local_sum_prod_of_mul_or_div,
@@ -5766,6 +5767,102 @@ def test_sign_prod_unsafe_dtype(dtype, prod_dtype, acc_dtype):
         [x], [out], include=["canonicalize", "stabilize", "specialize"]
     )
     result.assert_graph(out)
+
+
+class TestNestedJoinToBlockDiagonal:
+    @pytest.mark.parametrize("order", ["rows_of_columns", "columns_of_rows"])
+    def test_zero_off_diagonal(self, order):
+        rng = np.random.default_rng(utt.fetch_seed())
+        a = pt.tensor("a", shape=(3, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        if order == "rows_of_columns":
+            M = pt.block([[a, pt.zeros((3, 4))], [pt.zeros((4, 3)), d]])
+        else:
+            M = pt.concatenate(
+                [
+                    pt.concatenate([a, pt.zeros((4, 3))]),
+                    pt.concatenate([pt.zeros((3, 4)), d]),
+                ],
+                axis=1,
+            )
+
+        result = RewriteTester(
+            [a, d],
+            [M],
+            include=None,
+            custom_rewrite=local_nested_join_to_block_diagonal,
+        )
+        result.assert_graph(block_diag(a, d))
+        result.assert_eval(rng.normal(size=(3, 3)), rng.normal(size=(4, 4)))
+
+    def test_mixed_dtypes(self):
+        a = pt.tensor("a", shape=(3, 3), dtype="float32")
+        d = pt.tensor("d", shape=(4, 4), dtype="float32")
+        M = pt.block(
+            [
+                [a, pt.zeros((3, 4), dtype="float64")],
+                [pt.zeros((4, 3), dtype="float64"), d],
+            ]
+        )
+
+        result = RewriteTester(
+            [a, d],
+            [M],
+            include=None,
+            custom_rewrite=local_nested_join_to_block_diagonal,
+        )
+        result.assert_graph(block_diag(a, d).astype("float64"))
+
+    def test_batched(self):
+        rng = np.random.default_rng(utt.fetch_seed())
+        a = pt.tensor("a", shape=(2, 3, 3))
+        d = pt.tensor("d", shape=(2, 4, 4))
+        M = pt.block([[a, pt.zeros((2, 3, 4))], [pt.zeros((2, 4, 3)), d]])
+
+        result = RewriteTester(
+            [a, d],
+            [M],
+            include=None,
+            custom_rewrite=local_nested_join_to_block_diagonal,
+        )
+        result.assert_graph(block_diag(a, d))
+        result.assert_eval(rng.normal(size=(2, 3, 3)), rng.normal(size=(2, 4, 4)))
+
+    @pytest.mark.parametrize("structure", ["nonzero_off_diagonal", "non_square_grid"])
+    def test_not_rewritten(self, structure):
+        a = pt.tensor("a", shape=(3, 4))
+        b = pt.tensor("b", shape=(3, 4))
+        z = pt.zeros((3, 4))
+        if structure == "nonzero_off_diagonal":
+            M = pt.block([[a, b], [b, a]])
+        else:
+            M = pt.block([[a, z, z], [z, b, z]])
+
+        result = RewriteTester(
+            [a, b],
+            [M],
+            include=None,
+            custom_rewrite=local_nested_join_to_block_diagonal,
+        )
+        result.assert_graph(M)
+
+    def test_is_shape_unsafe(self):
+        a = pt.tensor("a", shape=(3, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        M = pt.block([[a, pt.zeros((3, 4))], [pt.zeros((4, 3)), d]])
+
+        result = RewriteTester([a, d], [M], exclude=("shape_unsafe",))
+        result.assert_graph(M)
+
+    def test_enables_block_diag_det(self):
+        a = pt.tensor("a", shape=(3, 3))
+        d = pt.tensor("d", shape=(4, 4))
+        M = pt.block([[a, pt.zeros((3, 4))], [pt.zeros((4, 3)), d]])
+
+        result = RewriteTester(
+            [a, d], [pt.linalg.det(M)], include=("canonicalize", "stabilize")
+        )
+        result.assert_graph(pt.prod(pt.as_tensor([pt.linalg.det(a), pt.linalg.det(d)])))
 
 
 class TestDotOfJoin:
