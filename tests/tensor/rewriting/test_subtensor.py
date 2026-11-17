@@ -24,6 +24,7 @@ from pytensor.tensor.rewriting.subtensor import (
     local_add_of_sparse_write,
     local_adv_idx_to_slice,
     local_blockwise_inc_subtensor,
+    local_inc_subtensor_remove_broadcastable_index,
     local_read_of_write_same_indices,
     local_useless_slice,
     local_write_of_write_same_indices,
@@ -2933,6 +2934,61 @@ class TestBlockwiseIncSubtensor:
             new_out.eval({x_new: test_x, cloned_y: test_y}, mode=ref_mode),
             out.eval({x: test_x, core_y: test_y}, mode=ref_mode),
         )
+
+
+class TestIncSubtensorRemoveBroadcastableIndex:
+    @pytest.mark.parametrize(
+        "index, value_ndim, use_set", [(0, 2, False), (-1, 1, True)]
+    )
+    def test_singleton_integer_update(self, index, value_ndim, use_set):
+        x = pt.tensor("x", shape=(2, 1, 4))
+        y = pt.tensor("y", shape=(2,) * value_ndim)
+        out = inc_subtensor(x[:, index, 1:3], y, set_instead_of_inc=use_set)
+        expanded_y = y[:, None, :] if value_ndim == 2 else y
+        expected = inc_subtensor(x[:, :, 1:3], expanded_y, set_instead_of_inc=use_set)
+        result = utt.RewriteTester(
+            [x, y],
+            [out],
+            include=None,
+            custom_rewrite=local_inc_subtensor_remove_broadcastable_index,
+        )
+        result.assert_graph(expected)
+        rng = np.random.default_rng(257)
+        result.assert_eval(
+            rng.normal(size=x.type.shape).astype(x.dtype),
+            rng.normal(size=y.type.shape).astype(y.dtype),
+        )
+
+    def test_multiple_singleton_integer_updates(self):
+        x = pt.tensor("x", shape=(1, 3, 1, 4))
+        y = pt.vector("y", shape=(2,))
+        out = x[0, 1, -1, 1:3].inc(y)
+        result = utt.RewriteTester(
+            [x, y],
+            [out],
+            include=None,
+            custom_rewrite=local_inc_subtensor_remove_broadcastable_index,
+        )
+        result.assert_graph(x[:, 1, :, 1:3].inc(y))
+        rng = np.random.default_rng(257)
+        result.assert_eval(
+            rng.normal(size=x.type.shape).astype(x.dtype),
+            rng.normal(size=y.type.shape).astype(y.dtype),
+        )
+
+    @pytest.mark.parametrize("index", [1, pt.lscalar("index")])
+    def test_singleton_update_keeps_unproven_index(self, index):
+        x = pt.matrix("x", shape=(2, 1))
+        y = pt.vector("y")
+        out = x[:, index].inc(y)
+        inputs = [x, y] if isinstance(index, int) else [x, y, index]
+        result = utt.RewriteTester(
+            inputs,
+            [out],
+            include=None,
+            custom_rewrite=local_inc_subtensor_remove_broadcastable_index,
+        )
+        result.assert_graph(out)
 
 
 class TestUselessSlice:

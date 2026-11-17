@@ -1294,6 +1294,16 @@ def test_local_subtensor_of_adv_subtensor(original_fn, expected_fn):
             lambda z, y, g, v, iv: z[iv].inc(pt.zeros((3, 4))[:, 1:3].inc(g)),
             lambda z, y, g, v, iv: z[iv, 1:3].inc(g),
         ),
+        # Broadcast along a dimension left untouched by the inner indexing
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[0][None, :][:, 1:3].inc(g[0])),
+            lambda z, y, g, v, iv: z[iv].inc(y[0][None, :])[iv, 1:3].inc(g[0]),
+        ),
+        # Wait for singleton integer indexing to become a full slice
+        (
+            lambda z, y, g, v, iv: z[iv].inc(y[0][None, :][0, 1:3].inc(g[0])),
+            None,
+        ),
         # Not an increment
         (lambda z, y, g, v, iv: z[iv].inc(y[:, 1:3].set(g)), None),
         (lambda z, y, g, v, iv: z[iv].set(y[:, 1:3].inc(g)), None),
@@ -1301,19 +1311,6 @@ def test_local_subtensor_of_adv_subtensor(original_fn, expected_fn):
         (
             lambda z, y, g, v, iv: (lambda y_inc: z[iv].inc(y_inc) + y_inc.sum())(
                 y[:, 1:3].inc(g)
-            ),
-            None,
-        ),
-        # Inner increment is broadcast by the outer one, along a sliced dim
-        (
-            lambda z, y, g, v, iv: z[iv].inc(
-                pt.matrix("y_bcast", shape=(None, 1))[:, 0:1].inc(g[:, :1])
-            ),
-            None,
-        ),
-        (
-            lambda z, y, g, v, iv: z[iv].inc(
-                pt.matrix("y_row", shape=(1, None))[:1, 1:3].inc(g[:1])
             ),
             None,
         ),
@@ -1342,8 +1339,6 @@ def test_local_adv_inc_subtensor_of_inc_subtensor(original_fn, expected_fn):
         "y": (3, 4),
         "g": (3, 2),
         "v": (3,),
-        "y_bcast": (3, 1),
-        "y_row": (1, 4),
         "z3": (5, 2, 2),
         "y_low": (2, 2),
         "g_low": (2, 1),
