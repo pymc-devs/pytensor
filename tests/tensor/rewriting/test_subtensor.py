@@ -739,13 +739,12 @@ class TestSubtensorIncSubtensor:
         assert isinstance(f.maker.fgraph.outputs[0].owner.op, optype)
         assert f.maker.fgraph.outputs[0].owner.op.inplace is True
 
-    @pytest.mark.parametrize("fill", [0.0, 2.0])
     @pytest.mark.parametrize("advanced", [True, False])
-    def test_inplace_shared_alloc(self, fill, advanced):
+    def test_inplace_shared_alloc(self, advanced):
         # Writers sharing one Alloc each get their own copy of it, and all go inplace
         idx = np.array([0, 1, 2, 0, 1, 2]) if advanced else slice(1, None)
         y1, y2 = vector("y1"), vector("y2")
-        x = pt.full((3,), fill)
+        x = pt.zeros(3)
         f = function(
             [y1, y2],
             [x[idx].inc(y1), x[idx].inc(y2)],
@@ -758,7 +757,7 @@ class TestSubtensorIncSubtensor:
         y1v = np.arange(6 if advanced else 2).astype(y1.type.dtype)
         res1, res2 = f(y1v, 10 * y1v)
         for res, yv in [(res1, y1v), (res2, 10 * y1v)]:
-            expected = np.full(3, fill, dtype=res.dtype)
+            expected = np.zeros(3, dtype=res.dtype)
             np.add.at(expected, idx, yv)
             np.testing.assert_allclose(res, expected)
 

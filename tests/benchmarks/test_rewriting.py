@@ -140,11 +140,11 @@ def _random_inplace_graph(n, seed):
             case 1:
                 v = a * b
             case 2:
-                v = pt.inc_subtensor(a[1:3], b[0:2])
+                v = a[1:3].inc(b[0:2])
             case 3:
-                v = pt.inc_subtensor(pt.zeros(4)[idx], b[:2])
+                v = pt.zeros(4)[idx].inc(b[:2])
             case 4:
-                v = pt.inc_subtensor(pt.exp(a)[idx], b[:2])
+                v = pt.exp(a)[idx].inc(b[:2])
             case 5:
                 o1, v = Elemwise(comp)(a, b, c)
                 pool.append(o1)
