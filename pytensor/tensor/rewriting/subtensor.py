@@ -2599,10 +2599,8 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
 def _merge_contiguous_subtensors(subtensor1, subtensor2, axis):
     """``x[..., a:b, ...]`` and ``x[..., b:c, ...]`` (same other indices, unit step) -> ``x[..., a:c, ...]``, else None."""
     if not (
-        subtensor1.owner is not None
-        and isinstance(subtensor1.owner.op, Subtensor)
-        and subtensor2.owner is not None
-        and isinstance(subtensor2.owner.op, Subtensor)
+        isinstance(subtensor1.owner_op, Subtensor)
+        and isinstance(subtensor2.owner_op, Subtensor)
         and subtensor1.owner.inputs[0] is subtensor2.owner.inputs[0]
     ):
         return None
@@ -2612,6 +2610,8 @@ def _merge_contiguous_subtensors(subtensor1, subtensor2, axis):
     idxs2 = indices_from_subtensor(
         subtensor2.owner.inputs[1:], subtensor2.owner.op.idx_list
     )
+    if len(idxs1) != len(idxs2):
+        return None
     try:
         slice1, slice2 = idxs1[axis], idxs2[axis]
     except IndexError:
@@ -2630,11 +2630,7 @@ def _merge_contiguous_subtensors(subtensor1, subtensor2, axis):
                 return None
         except NotScalarConstantError:
             return None
-    if any(
-        i1 != i2
-        for i, (i1, i2) in enumerate(zip(idxs1, idxs2, strict=True))
-        if i != axis
-    ):
+    if any(i1 != i2 for i, (i1, i2) in enumerate(zip(idxs1, idxs2)) if i != axis):
         return None
     new_idxs = list(idxs1)
     new_idxs[axis] = slice(slice1.start, slice2.stop, slice1.step)

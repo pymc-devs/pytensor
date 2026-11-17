@@ -12,7 +12,13 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
-from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
+from pytensor.graph.rewriting.basic import (
+    MergeOptimizer,
+    check_stack_trace,
+    dfs_rewriter,
+    in2out,
+    out2in,
+)
 from pytensor.tensor.basic import Alloc, ExtractDiag, Join, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
@@ -25,6 +31,7 @@ from pytensor.tensor.rewriting.subtensor import (
     local_adv_idx_to_slice,
     local_blockwise_inc_subtensor,
     local_inc_subtensor_remove_broadcastable_index,
+    local_join_subtensors,
     local_read_of_write_same_indices,
     local_useless_slice,
     local_write_of_write_same_indices,
@@ -2560,9 +2567,6 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
 def test_local_join_subtensors_merges_all_runs_at_once():
     # A join of many contiguous slices (and an unrelated tensor in between) is merged in one
     # application, rather than one pair per pass over the whole graph
-    from pytensor.graph.rewriting.basic import MergeOptimizer, dfs_rewriter
-    from pytensor.tensor.rewriting.subtensor import local_join_subtensors
-
     x, z = pt.dmatrix("x"), pt.dmatrix("z")
     parts = (
         [x[i : i + 1] for i in range(6)] + [z] + [x[i : i + 2] for i in range(6, 10, 2)]
@@ -2576,6 +2580,17 @@ def test_local_join_subtensors_merges_all_runs_at_once():
     f = pytensor.function([x, z], fg.outputs[0], mode=Mode("py", optimizer=None))
     xv, zv = np.arange(40.0).reshape(10, 4), -np.ones((2, 4))
     np.testing.assert_array_equal(f(xv, zv), np.concatenate([xv[:6], zv, xv[6:10]]))
+
+
+def test_local_join_subtensors_skips_unmergeable_pair():
+    # A pair with a non-unit step stays as it is, and the runs after it still merge
+    x = pt.dvector("x")
+    parts = [x[0:1], x[1:2], x[2:4:2], x[4:5], x[5:6]]
+    fg = FunctionGraph([x], [pt.concatenate(parts)], clone=False)
+    MergeOptimizer().rewrite(fg)
+    dfs_rewriter(local_join_subtensors, ignore_newtrees=True).rewrite(fg)
+    [join] = [n for n in fg.apply_nodes if isinstance(n.op, Join)]
+    assert len(join.inputs) == 3  # x[0:2], x[2:4:2], x[4:6]
 
 
 def test_local_uint_constant_indices():
