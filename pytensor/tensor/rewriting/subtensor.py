@@ -2596,47 +2596,6 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
             return [r]
 
 
-def _merge_contiguous_subtensors(subtensor1, subtensor2, axis):
-    """``x[..., a:b, ...]`` and ``x[..., b:c, ...]`` (same other indices, unit step) -> ``x[..., a:c, ...]``, else None."""
-    if not (
-        isinstance(subtensor1.owner_op, Subtensor)
-        and isinstance(subtensor2.owner_op, Subtensor)
-        and subtensor1.owner.inputs[0] is subtensor2.owner.inputs[0]
-    ):
-        return None
-    idxs1 = indices_from_subtensor(
-        subtensor1.owner.inputs[1:], subtensor1.owner.op.idx_list
-    )
-    idxs2 = indices_from_subtensor(
-        subtensor2.owner.inputs[1:], subtensor2.owner.op.idx_list
-    )
-    if len(idxs1) != len(idxs2):
-        return None
-    try:
-        slice1, slice2 = idxs1[axis], idxs2[axis]
-    except IndexError:
-        return None
-    if not (isinstance(slice1, slice) and isinstance(slice2, slice)):
-        return None
-    if slice1.stop is None or slice2.start is None or slice1.stop != slice2.start:
-        return None
-    # For non-unit steps (perhaps except for -1) we would need to know the
-    # exact values of start and stop to know if they can be merged
-    for step in (slice1.step, slice2.step):
-        if step is None:
-            continue
-        try:
-            if get_scalar_constant_value(step, only_process_constants=True) != 1:
-                return None
-        except NotScalarConstantError:
-            return None
-    if any(i1 != i2 for i, (i1, i2) in enumerate(zip(idxs1, idxs2)) if i != axis):
-        return None
-    new_idxs = list(idxs1)
-    new_idxs[axis] = slice(slice1.start, slice2.stop, slice1.step)
-    return subtensor1.owner.inputs[0][tuple(new_idxs)]
-
-
 @register_specialize
 @node_rewriter([Join])
 def local_join_subtensors(fgraph, node):
@@ -2650,15 +2609,43 @@ def local_join_subtensors(fgraph, node):
     # TODO: Generalize to AdvancedSubtensors
     axis = node.op.axis
     joined = [node.inputs[0]]
-    changed = False
     for t in node.inputs[1:]:
-        merged = _merge_contiguous_subtensors(joined[-1], t, axis)
-        if merged is None:
+        prev = joined[-1]
+        if not (
+            isinstance(prev.owner_op, Subtensor)
+            and isinstance(t.owner_op, Subtensor)
+            and prev.owner.inputs[0] is t.owner.inputs[0]
+        ):
             joined.append(t)
-        else:
-            joined[-1] = merged
-            changed = True
-    if not changed:
+            continue
+        idxs1 = indices_from_subtensor(prev.owner.inputs[1:], prev.owner.op.idx_list)
+        idxs2 = indices_from_subtensor(t.owner.inputs[1:], t.owner.op.idx_list)
+        s1, s2 = (
+            (idxs1[axis], idxs2[axis])
+            if len(idxs1) == len(idxs2) > axis
+            else (None, None)
+        )
+        if not (
+            isinstance(s1, slice)
+            and isinstance(s2, slice)
+            and s1.stop is not None
+            and s1.stop == s2.start
+            and all(
+                i1 == i2 for i, (i1, i2) in enumerate(zip(idxs1, idxs2)) if i != axis
+            )
+            # For non-unit steps (perhaps except for -1) we would need to know the
+            # exact values of start and stop to know if they can be merged
+            and all(
+                st is None or (isinstance(st, Constant) and st.data == 1)
+                for st in (s1.step, s2.step)
+            )
+        ):
+            joined.append(t)
+            continue
+        new_idxs = list(idxs1)
+        new_idxs[axis] = slice(s1.start, s2.stop, s1.step)
+        joined[-1] = prev.owner.inputs[0][tuple(new_idxs)]
+    if len(joined) == len(node.inputs):
         return None
     return [concatenate(joined, axis=axis) if len(joined) > 1 else joined[0]]
 
