@@ -62,10 +62,8 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.elemwise import (
-    InplaceGraphOptimizer,
-    apply_local_dimshuffle_merge,
-)
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
+from pytensor.tensor.rewriting.inplace import InplaceGraphOptimizer
 from pytensor.tensor.shape import (
     Reshape,
     Shape,
@@ -1925,28 +1923,23 @@ class InplaceIncSubtensorOptimizer(InplaceGraphOptimizer):
         return new_node
 
     def apply(self, fgraph):
-        # A zeros buffer that is written to by several nodes, or already destroyed,
-        # is duplicated so that each write can go to its own buffer in place.
-        if self.op is AdvancedIncSubtensor:
-            for node in fgraph.toposort():
-                x = node.inputs[0] if isinstance(node.op, self.op) else None
-                if (
-                    x is None
-                    or node.op.inplace
-                    or x.owner is None
-                    or not isinstance(x.owner.op, Alloc)
-                    or not x.owner.op.value_is_scalar_zero(x.owner.inputs[0])
-                ):
-                    continue
-                writers = [
-                    c
-                    for c, i in fgraph.clients[x]
-                    if i == 0 and isinstance(c.op, self.op) and not c.op.inplace
-                ]
-                if fgraph.has_destroyers([x]) or node is not writers[0]:
-                    fgraph.change_node_input(
-                        node, 0, x.owner.clone().outputs[0], reason="unshare_zeros"
-                    )
+        # An Alloc written to by several nodes, or already destroyed, is duplicated
+        # so that each write goes to its own buffer in place: a fill is no dearer than a copy.
+        for node in fgraph.toposort():
+            if not isinstance(node.op, self.op) or node.op.inplace:
+                continue
+            x = node.inputs[0]
+            if not isinstance(x.owner_op, Alloc):
+                continue
+            writers = [
+                c
+                for c, i in fgraph.clients[x]
+                if i == 0 and isinstance(c.op, self.op) and not c.op.inplace
+            ]
+            if fgraph.has_destroyers([x]) or node is not writers[0]:
+                fgraph.change_node_input(
+                    node, 0, x.owner.clone().outputs[0], reason="unshare_alloc"
+                )
         return super().apply(fgraph)
 
 

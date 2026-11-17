@@ -117,3 +117,64 @@ def test_xtensor_attention_rewrite_benchmark(n_layers, benchmark):
         )
 
     benchmark(rewrite_once)
+
+
+def _random_inplace_graph(n, seed):
+    import pytensor.scalar as ps
+    from pytensor.scalar import Composite
+    from pytensor.tensor.elemwise import Elemwise
+
+    rng = np.random.default_rng(seed)
+    xs = [pt.vector(f"x{i}", shape=(4,)) for i in range(3)]
+    s = [ps.float64(f"s{i}") for i in range(3)]
+    comp = Composite(s, [s[0] + s[1], s[1] * s[2] + 1])
+    idx = np.array([0, 2])
+    pool = list(xs)
+    for _ in range(n):
+        a, b, c = (
+            pool[int(i)] for i in rng.integers(max(0, len(pool) - 30), len(pool), 3)
+        )
+        match rng.integers(7):
+            case 0:
+                v = pt.exp(a) + b
+            case 1:
+                v = a * b
+            case 2:
+                v = pt.inc_subtensor(a[1:3], b[0:2])
+            case 3:
+                v = pt.inc_subtensor(pt.zeros(4)[idx], b[:2])
+            case 4:
+                v = pt.inc_subtensor(pt.exp(a)[idx], b[:2])
+            case 5:
+                o1, v = Elemwise(comp)(a, b, c)
+                pool.append(o1)
+            case _:
+                v = a[::-1] + b
+        pool.append(v)
+    outs = [pool[int(i)] for i in rng.integers(len(pool) // 2, len(pool), 10)]
+    return xs, outs
+
+
+@pytest.mark.parametrize("n, expected_n_inplace", [(300, 140), (1000, 493)])
+def test_inplace_rewrite_benchmark(n, expected_n_inplace, benchmark):
+    from pytensor.compile import optdb
+    from pytensor.compile.aliasing import add_supervisor_to_fgraph
+    from pytensor.compile.io import In
+    from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+
+    xs, outs = _random_inplace_graph(n, seed=0)
+    fg = rewrite_graph(
+        FunctionGraph(xs, outs),
+        include=("fast_run",),
+        exclude=("inplace", "shape_unsafe"),
+    )
+    inplace = optdb.query(RewriteDatabaseQuery(include=["inplace"]))
+
+    def rewrite_func():
+        fg_clone = fg.clone()
+        add_supervisor_to_fgraph(fg_clone, [In(x) for x in fg_clone.inputs])
+        inplace.rewrite(fg_clone)
+        return sum(bool(node.op.destroy_map) for node in fg_clone.apply_nodes)
+
+    assert rewrite_func() == expected_n_inplace
+    benchmark.pedantic(rewrite_func, rounds=3, iterations=1)
