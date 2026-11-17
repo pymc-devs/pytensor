@@ -114,16 +114,16 @@ class InplaceGraphOptimizer(GraphRewriter):
             p for p in candidate_pairs if not fgraph.has_destroyers([p[1][1]])
         ]
         if len(candidate_pairs) > 1:
-            # Drop pairs whose destroyed memory is read after the node (they'd form a cycle)
-            after = _descendants(fgraph, node)
-            candidate_pairs = [
-                p
-                for p in candidate_pairs
-                if not any(
-                    c is not node and c in after
-                    for c in _root_and_readers(fgraph, p[1][1])[1]
-                )
+            # Drop pairs whose destroyed memory is read after the node (they'd form a cycle),
+            # walking the graph only if the memory has other readers
+            readers = [
+                _root_and_readers(fgraph, p[1][1])[1] - {node} for p in candidate_pairs
             ]
+            if any(readers):
+                after = _descendants(fgraph, node)
+                candidate_pairs = [
+                    p for p, r in zip(candidate_pairs, readers) if after.isdisjoint(r)
+                ]
         if not candidate_pairs:
             return node
 
