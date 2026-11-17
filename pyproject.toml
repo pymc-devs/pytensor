@@ -15,7 +15,7 @@ authors = [{ name = "pymc-devs", email = "pymc.devs@gmail.com" }]
 description = "Optimizing compiler for evaluating mathematical expressions on CPUs and GPUs."
 readme = "README.rst"
 license = "BSD-3-Clause"
-license-files = ["LICENSE.txt"]
+license-files = ["LICENSE.txt", "doc/LICENSE.txt"]
 classifiers = [
     "Development Status :: 6 - Mature",
     "Intended Audience :: Education",
