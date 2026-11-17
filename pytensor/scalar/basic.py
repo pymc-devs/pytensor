@@ -1075,6 +1075,48 @@ def resolve_weak_dtypes(input_dtypes):
     )
 
 
+def as_variables(inputs, as_variable=as_scalar, resolve_dtypes=None):
+    """Convert inputs together, preserving NumPy's weak Python scalar promotion.
+
+    Explicitly typed inputs keep their dtype. Under ``numpy+floatX``, Python
+    int, float and complex literals take their precision from the other inputs.
+    Without a typed input, constants follow the usual casting policy.
+    ``resolve_dtypes`` determines the operation's input conversions before any
+    literal is materialized. Without it, ordinary numeric promotion is used.
+    """
+    # This module defines its own complex
+    weak_types = (builtins.int, builtins.float, builtins.complex)
+    if len(inputs) < 2 or not any(type(inp) in weak_types for inp in inputs):
+        return [as_variable(inp) for inp in inputs]
+    if config.cast_policy == "custom":
+        return [as_variable(inp) for inp in inputs]
+
+    weak_inputs = {}
+    variables = []
+    for i, inp in enumerate(inputs):
+        if type(inp) in weak_types:
+            weak_inputs[i] = inp
+            variables.append(None)
+        else:
+            variables.append(as_variable(inp))
+
+    dtypes = [inp.dtype for inp in variables if inp is not None]
+    if not dtypes:
+        return [as_variable(inp) for inp in inputs]
+
+    input_dtypes = tuple(
+        type(inp) if i in weak_inputs else variables[i].dtype
+        for i, inp in enumerate(inputs)
+    )
+    if resolve_dtypes is None:
+        resolved = resolve_weak_dtypes(input_dtypes)
+    else:
+        resolved, _ = resolve_dtypes(input_dtypes)
+    for i, inp in weak_inputs.items():
+        variables[i] = as_variable(np.asarray(inp, dtype=resolved[i]))
+    return variables
+
+
 def _resolve_numeric_dtypes(input_dtypes):
     inputs = resolve_weak_dtypes(input_dtypes)
     dtype = inputs[0] if len(inputs) == 1 else upcast(*inputs)
@@ -1163,7 +1205,7 @@ class ScalarOp(COp):
                     f"Wrong number of inputs for {self}.make_node "
                     f"(got {len(inputs)}({inputs}), expected {self.nin})"
                 )
-        inputs = [as_scalar(input) for input in inputs]
+        inputs = as_variables(inputs, resolve_dtypes=self.resolve_dtypes)
         _, output_dtypes = self.resolve_dtypes(tuple(input.dtype for input in inputs))
         outputs = [get_scalar_type(dtype)() for dtype in output_dtypes]
         if len(outputs) != self.nout:
