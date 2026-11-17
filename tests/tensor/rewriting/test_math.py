@@ -361,36 +361,12 @@ class TestAlgebraicCanonizer:
             # (fx*fy*(fx+fy+dz),(fx,fy,dz),(dxv,dyv,dzv),2,'float64'),  # check mixed type add
             # (dz*fy*(fx+fy),(fx,fy,dz),(dxv,dyv,dzv),2,'float64'),  # check mixed type mul
             # check with dimshuffle of constant
-            (
-                fx + fy + fz + 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                "float32",
-            ),
-            (
-                fx * fy * fz * 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                "float32",
-            ),
+            (fx + fy + fz + 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
+            (fx * fy * fz * 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
             # (2+fx+fy+fz,(fx,fy,fz),(fxv,fyv,fzv),1,'float32'),
             # (2*fx*fy*fz,(fx,fy,fz),(fxv,fyv,fzv),1,'float32'),
-            (
-                2 + fx + fy + fz + 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                "float32",
-            ),
-            (
-                2 * fx * fy * fz * 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                "float32",
-            ),
+            (2 + fx + fy + fz + 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
+            (2 * fx * fy * fz * 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
             # (fx*fy*2*(fx+fy+fz),(fx,fy,fz),(fxv,fyv,fzv),2,'float32'),
             # (fx*fy*(2+fx+fy+fz),(fx,fy,fz),(fxv,fyv,fzv),2,'float32'),
             (
@@ -762,26 +738,11 @@ class TestAlgebraicCanonizer:
         for id, (g, sym_inputs, val_inputs, out_dtype) in enumerate(
             [
                 (((2.0 * dx) / (4.0 * dy)), [dx, dy], [dxv, dyv], "float64"),
-                (
-                    ((2.0 * fx) / (4.0 * fy)),
-                    [fx, fy],
-                    [fxv, fyv],
-                    "float32",
-                ),
+                ((2.0 * fx) / (4.0 * fy), [fx, fy], [fxv, fyv], "float32"),
                 (((2.0 * dv) / (4.0 * dy)), [dv, dy], [dvv, dyv], "float64"),
-                (
-                    ((2.0 * fv) / (4.0 * fy)),
-                    [fv, fy],
-                    [fvv, fyv],
-                    "float32",
-                ),
+                ((2.0 * fv) / (4.0 * fy), [fv, fy], [fvv, fyv], "float32"),
                 (((2.0 * dx) / (4.0 * dv)), [dx, dv], [dxv, dvv], "float64"),
-                (
-                    ((2.0 * fx) / (4.0 * fv)),
-                    [fx, fv],
-                    [fxv, fvv],
-                    "float32",
-                ),
+                ((2.0 * fx) / (4.0 * fv), [fx, fv], [fxv, fvv], "float32"),
             ]
         ):
             if isinstance(out_dtype, dict):
@@ -803,19 +764,9 @@ class TestAlgebraicCanonizer:
         for id, (g, sym_inputs, val_inputs, out_dtype) in enumerate(
             [
                 ((2 * dx) / 2, [dx], [dxv], "float64"),
-                (
-                    (2 * fx) / 2,
-                    [fx],
-                    [fxv],
-                    "float32",
-                ),
+                ((2 * fx) / 2, [fx], [fxv], "float32"),
                 ((2 * dv) / 2, [dv], [dvv], "float64"),
-                (
-                    (2 * fv) / 2,
-                    [fv],
-                    [fvv],
-                    "float32",
-                ),
+                ((2 * fv) / 2, [fv], [fvv], "float32"),
             ]
         ):
             if isinstance(out_dtype, dict):
@@ -850,26 +801,11 @@ class TestAlgebraicCanonizer:
         for id, (g, sym_inputs, val_inputs, out_dtype) in enumerate(
             [
                 ((2 * dx) / (3 * abs(dx)), [dx], [0.5 - dxv], "float64"),
-                (
-                    (2 * fx) / (3 * abs(fx)),
-                    [fx],
-                    [0.5 - fxv],
-                    "float32",
-                ),
+                ((2 * fx) / (3 * abs(fx)), [fx], [0.5 - fxv], "float32"),
                 ((2 * dx) / (3 * abs(dx)), [dx], [0.1 * dxv], "float64"),
-                (
-                    (2 * fx) / (3 * abs(fx)),
-                    [fx],
-                    [0.1 * fxv],
-                    "float32",
-                ),
+                ((2 * fx) / (3 * abs(fx)), [fx], [0.1 * fxv], "float32"),
                 ((2 * dv) / (3 * abs(dv)), [dv], [0.5 - dvv], "float64"),
-                (
-                    (2 * fv) / (3 * abs(fv)),
-                    [fv],
-                    [0.5 - fvv],
-                    "float32",
-                ),
+                ((2 * fv) / (3 * abs(fv)), [fv], [0.5 - fvv], "float32"),
             ]
         ):
             if isinstance(out_dtype, dict):
@@ -1466,6 +1402,7 @@ class TestLocalUselessElemwiseComparison:
         for dtype, zero, one in [
             ("bool", np.array(False), np.array(True)),
             ("int8", np.int8(0), np.int8(1)),
+            ("int8", 0, 1),
         ]:
             x = scalar("x", dtype=dtype)
 
@@ -4624,9 +4561,7 @@ class TestSigmoidRewrites:
 
         # Test `inv_1_plus_exp`
         f = pytensor.function(
-            [x],
-            1 - pt.fill(x, np.float32(1.0)) / (1 + exp(-x)),
-            mode=m,
+            [x], 1 - pt.full_like(x, 1.0, dtype=x.dtype) / (1 + exp(-x)), mode=m
         )
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
         assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
