@@ -1,6 +1,6 @@
 //! `pytensor_llvm.interp`: programs and Rust kernels for Python.
 
-use super::consts::ConstData;
+use super::consts::{ConstBuffers, ConstData};
 use super::kernels;
 use super::layout::Layout;
 use super::program::{
@@ -831,6 +831,7 @@ pub struct ProgramBuilder {
     keepalive: Vec<Py<PyAny>>,
     arena_bytes: u64,
     contiguous_inputs: Vec<bool>,
+    const_buffers: ConstBuffers,
 }
 
 impl ProgramBuilder {
@@ -861,6 +862,7 @@ impl ProgramBuilder {
             keepalive: vec![],
             arena_bytes: 0,
             contiguous_inputs: vec![],
+            const_buffers: ConstBuffers::default(),
         }
     }
 
@@ -880,17 +882,28 @@ impl ProgramBuilder {
         self.add(&dtype, shape, ValueKind::Input(k))
     }
 
-    fn constant(&mut self, array: &Bound<'_, PyUntypedArray>) -> PyResult<u32> {
+    /// `order`: the memory order (outermost axis first) to store it in; default C.
+    #[pyo3(signature = (array, order = None))]
+    fn constant(
+        &mut self,
+        array: &Bound<'_, PyUntypedArray>,
+        order: Option<Vec<usize>>,
+    ) -> PyResult<u32> {
         let dt = dtype_of(&array.dtype())?;
         let np = array.py().import("numpy")?;
-        let native = np.call_method1("ascontiguousarray", (array,))?;
+        let order = order.unwrap_or_default();
+        let native = match order.is_empty() {
+            true => array.clone().into_any(),
+            false => np.call_method1("transpose", (array, order.clone()))?,
+        };
         let native = native.call_method1(
             "astype",
             (array.dtype().call_method1("newbyteorder", ("=",))?,),
         )?;
         let bytes: Vec<u8> = native.call_method0("tobytes")?.extract()?;
         let shape: Vec<i64> = array.shape().iter().map(|&n| n as i64).collect();
-        let c = ConstData::new(dt, shape.clone(), &bytes).map_err(PyValueError::new_err)?;
+        let c = ConstData::new(dt, shape.clone(), &order, &bytes, &mut self.const_buffers)
+            .map_err(PyValueError::new_err)?;
         self.values.push(ValueSpec {
             dtype: dt,
             shape: shape.iter().map(|&n| Some(n as u64)).collect(),
