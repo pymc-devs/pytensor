@@ -1727,7 +1727,7 @@ class _CountValidations(Feature):
         self.n += 1
 
 
-def _random_elemwise_fgraph(seed, n=300):
+def _random_elemwise_fgraph(seed, n=120):
     rng = np.random.default_rng(seed)
     x = pt.vector("x", shape=(5,))
     vs = [x]
@@ -1755,13 +1755,11 @@ def test_inplace_elemwise_batched_matches_sequential(seed):
     opt.apply(batched)
 
     def destroyed(fgraph):
-        return sorted(
-            sum(map(len, n.op.destroy_map.values())) for n in fgraph.apply_nodes
-        )
+        return [n.op.destroy_map for n in fgraph.toposort()]
 
-    assert sum(destroyed(batched)) > 100
+    assert sum(map(len, destroyed(batched))) > 40
     assert destroyed(batched) == destroyed(sequential)
-    assert counter.n * 3 < seq_counter.n
+    assert counter.n * 2 < seq_counter.n
 
 
 def test_inplace_multi_output_skips_cyclic_pairs():

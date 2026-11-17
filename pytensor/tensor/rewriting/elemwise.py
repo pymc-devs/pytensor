@@ -4,7 +4,7 @@ import operator
 import sys
 from collections import defaultdict
 from collections.abc import Generator, Sequence
-from functools import cache, partial, reduce
+from functools import cache, reduce
 from heapq import heapify, heappop, heappush
 from operator import or_
 from warnings import warn
@@ -148,16 +148,18 @@ class InplaceGraphOptimizer(GraphRewriter):
             candidate_pairs = self.filter_candidate_pairs(
                 fgraph, node, protected_inputs
             )
+        candidate_pairs = [
+            p for p in candidate_pairs if not fgraph.has_destroyers([p[1][1]])
+        ]
         if len(candidate_pairs) > 1:
             # Drop pairs whose destroyed memory is read after the node (they'd form a cycle)
             after = _descendants(fgraph, node)
             candidate_pairs = [
-                pair
-                for pair in candidate_pairs
-                if not fgraph.has_destroyers([pair[1][1]])
-                and not any(
+                p
+                for p in candidate_pairs
+                if not any(
                     c is not node and c in after
-                    for c in _root_and_readers(fgraph, pair[1][1])[1]
+                    for c in _root_and_readers(fgraph, p[1][1])[1]
                 )
             ]
         if not candidate_pairs:
@@ -262,8 +264,6 @@ class InplaceGraphOptimizer(GraphRewriter):
         prof = {
             "opt": self,
             "node_before": len(fgraph.apply_nodes),
-            "nb_eager_inconsistent": 0,
-            "nb_inconsistent": 0,
             "nb_replaced": 0,
         }
         large_graph = len(fgraph.apply_nodes) > 500
@@ -286,12 +286,11 @@ class InplaceGraphOptimizer(GraphRewriter):
 
         nodes = fgraph.toposort()
         ancestors, bitflags = ancestor_bitsets(fgraph, nodes)
-        root_and_readers = partial(_root_and_readers, fgraph)
 
         # Validating each in-placing on its own costs a whole-graph cycle check each.
         # Pairs that would surely form a cycle (another reader of the destroyed memory
         # depends on the node) are dropped up front, the rest validated in batches.
-        claimed, batchable, deferred = set(), [], []
+        claimed, plan = set(), []
         for node in nodes:
             if not isinstance(node.op, self_op) or node.op.destroy_map:
                 continue
@@ -334,23 +333,41 @@ class InplaceGraphOptimizer(GraphRewriter):
                     direct_update_pairs + indirect_update_pairs + other_update_pairs
                 )
 
-            flag, viable, pattern, used = bitflags[node], [], {}, set()
+            flag, viable, pattern, roots, contended = (
+                bitflags[node],
+                [],
+                {},
+                set(),
+                False,
+            )
             for pair in sorted_candidate_pairs:
                 (o, _), (i, inp) = pair
-                root, readers = root_and_readers(inp)
+                root, readers = _root_and_readers(fgraph, inp)
                 if any(c is not node and ancestors.get(c, 0) & flag for c in readers):
                     continue
                 viable.append(pair)
-                if root not in claimed and o not in pattern and i not in used:
-                    pattern[o] = [i]
-                    used.add(i)
-                    claimed.add(root)
+                contended |= root in claimed
+                if (
+                    root not in claimed | roots
+                    and o not in pattern
+                    and i not in pattern.values()
+                ):
+                    pattern[o] = i
+                    roots.add(root)
+            # a node contending for memory an earlier node claimed is tried on its own, in order
             if viable:
-                (batchable if pattern else deferred).append((node, viable, pattern))
+                plan.append((node, viable, None if contended else pattern))
+                claimed |= roots if not contended else set()
 
         def try_batch(batch):
-            new_nodes = [self.create_inplace_node(n, p) for n, _, p in batch]
-            if any(new.op.destroy_map != p for new, (_, _, p) in zip(new_nodes, batch)):
+            new_nodes = [
+                self.create_inplace_node(n, {o: [i] for o, i in p.items()})
+                for n, _, p in batch
+            ]
+            if any(
+                new.op.destroy_map != {o: [i] for o, i in p.items()}
+                for new, (_, _, p) in zip(new_nodes, batch)
+            ):
                 return False
             # In reverse topological order, so a node is replaced after its clients
             replacements = [
@@ -368,11 +385,9 @@ class InplaceGraphOptimizer(GraphRewriter):
             return True
 
         def try_one(node, viable):
-            viable = [p for p in viable if not fgraph.has_destroyers([p[1][1]])]
-            if (
-                viable
-                and self.try_inplace_on_node(fgraph, node, viable, reason) is not node
-            ):
+            # node.inputs, not the pairs' variables: earlier in-placings replace producers
+            viable = [((o, out), (i, node.inputs[i])) for (o, out), (i, _) in viable]
+            if self.try_inplace_on_node(fgraph, node, viable, reason) is not node:
                 prof["nb_replaced"] += 1
 
         def run(batch):
@@ -382,9 +397,15 @@ class InplaceGraphOptimizer(GraphRewriter):
                 run(batch[: len(batch) // 2])
                 run(batch[len(batch) // 2 :])
 
-        run(batchable)
-        for node, viable, _ in deferred:
-            try_one(node, viable)
+        batch = []
+        for node, viable, pattern in plan:
+            if pattern:
+                batch.append((node, viable, pattern))
+            else:
+                run(batch)
+                batch = []
+                try_one(node, viable)
+        run(batch)
         return prof
 
     @classmethod
@@ -393,8 +414,6 @@ class InplaceGraphOptimizer(GraphRewriter):
         print(blanc, cls.__name__, file=stream)
         for k in [
             "node_before",
-            "nb_eager_inconsistent",
-            "nb_inconsistent",
             "nb_replaced",
         ]:
             print(blanc, k, prof[k], file=stream)
