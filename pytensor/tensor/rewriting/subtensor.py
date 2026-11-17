@@ -2628,8 +2628,6 @@ def local_join_subtensors(fgraph, node):
         if not (
             isinstance(s1, slice)
             and isinstance(s2, slice)
-            and s1.stop is not None
-            and s1.stop == s2.start
             and all(
                 i1 == i2 for i, (i1, i2) in enumerate(zip(idxs1, idxs2)) if i != axis
             )
@@ -2638,6 +2636,30 @@ def local_join_subtensors(fgraph, node):
             and all(
                 st is None or (isinstance(st, Constant) and st.data == 1)
                 for st in (s1.step, s2.step)
+            )
+        ):
+            joined.append(t)
+            continue
+        # x[a:b] ++ x[b:c] is x[a:c] only if a <= b <= c once clipped to the length:
+        # true for None ends, and for constants of b's sign in that order.
+        a, b, b2, c = (
+            int(v.data) if isinstance(v, Constant) else v
+            for v in (s1.start, s1.stop, s2.start, s2.stop)
+        )
+        if not (
+            b is not None
+            and (b is b2 or (isinstance(b, int) and isinstance(b2, int) and b == b2))
+            and (
+                (a is None and c is None)
+                or (
+                    isinstance(b, int)
+                    and all(
+                        v is None or (isinstance(v, int) and (v < 0) == (b < 0))
+                        for v in (a, c)
+                    )
+                    and (a is None or a <= b)
+                    and (c is None or b <= c)
+                )
             )
         ):
             joined.append(t)

@@ -2481,6 +2481,12 @@ def test_local_adv_idx_to_slice_boolean_mask():
             ),
             3,
         ),
+        # Below NotImplemented: These could be merged, but we would need to evaluate the
+        # start and stop values
+        (0, lambda _: ((slice(None, 6, 3),), (slice(6, None, 3),)), 3),
+        (0, lambda step: ((slice(None, 6, step),), (slice(6, None, step),)), 4),
+        # Below should not be merged
+        # 1 <= stop <= 5 isn't known: with stop = 0, x[1:stop] ++ x[stop:5] is not x[1:5]
         (
             0,
             lambda stop: (
@@ -2488,7 +2494,7 @@ def test_local_adv_idx_to_slice_boolean_mask():
                 (slice(stop, 5, None),),
                 (slice(5, 7, None)),
             ),
-            2,
+            5,
         ),
         (
             0,
@@ -2497,13 +2503,8 @@ def test_local_adv_idx_to_slice_boolean_mask():
                 (slice(stop + 1, 5, None),),
                 (slice(5, 7, None)),
             ),
-            2,
+            6,
         ),
-        # Below NotImplemented: These could be merged, but we would need to evaluate the
-        # start and stop values
-        (0, lambda _: ((slice(None, 6, 3),), (slice(6, None, 3),)), 3),
-        (0, lambda step: ((slice(None, 6, step),), (slice(6, None, step),)), 4),
-        # Below should not be merged
         (0, lambda _: ((slice(5, None, None),), (slice(None, 5, None),)), 3),
         (0, lambda _: ((slice(None, 5, None),), (slice(4, None, None),)), 3),
         (1, lambda _: ((slice(None, 5, None),), (slice(5, None, None),)), 3),
@@ -2556,6 +2557,24 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
     f_val = np.concatenate([x_val[slice_val] for slice_val in slices_val], axis=axis)
 
     np.testing.assert_array_equal(f(x_val, stop_val), f_val)
+
+
+@pytest.mark.parametrize(
+    "slices_fn",
+    [
+        lambda s: [slice(None, -1), slice(-1, 2)],
+        lambda s: [slice(6, 8), slice(8, 6), slice(6, 9)],
+        lambda s: [slice(1, s), slice(s, 5)],
+        lambda s: [slice(s, 5), slice(5, 7)],
+        lambda s: [slice(None, 5), slice(5, -2)],
+    ],
+)
+def test_local_join_subtensors_unordered_bounds(slices_fn):
+    # Bounds that may not be in order once clipped (here with s = 0) must not merge
+    x, s = pt.dvector("x"), pt.iscalar("s")
+    out = pt.concatenate([x[sl] for sl in slices_fn(s)])
+    result = utt.RewriteTester([x, s], [out], custom_rewrite=local_join_subtensors)
+    result.assert_graph(out)
 
 
 def test_local_join_subtensors_skips_unmergeable_pair():
