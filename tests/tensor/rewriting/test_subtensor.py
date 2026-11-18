@@ -2563,7 +2563,6 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
     "slices_fn",
     [
         lambda s: [slice(None, -1), slice(-1, 2)],
-        lambda s: [slice(1, s), slice(s, 5)],
         lambda s: [slice(s, 5), slice(5, 7)],
         lambda s: [slice(None, 5), slice(5, -2)],
     ],

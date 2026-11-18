@@ -2660,14 +2660,13 @@ def local_join_subtensors(fgraph, node):
         ):
             joined.append(t)
             continue
-        start, stop = (
-            None
-            if u is None
-            else int(pyf(u.data, b.data))
-            if isinstance(u, Constant) and isinstance(b, Constant)
-            else f(u, b)
-            for u, f, pyf in ((a, minimum, min), (c, maximum, max))
-        )
+        start = stop = None
+        if a is not None:
+            consts = isinstance(a, Constant) and isinstance(b, Constant)
+            start = int(min(a.data, b.data)) if consts else minimum(a, b)
+        if c is not None:
+            consts = isinstance(b, Constant) and isinstance(c, Constant)
+            stop = int(max(b.data, c.data)) if consts else maximum(b, c)
         new_idxs = list(idxs1)
         new_idxs[axis] = slice(start, stop)
         joined[-1] = prev.owner.inputs[0][tuple(new_idxs)]
