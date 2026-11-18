@@ -18,6 +18,7 @@ from pytensor.graph.basic import (
     NominalVariable,
     Variable,
 )
+from pytensor.graph.features import op_view_parents, view_feature
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op, io_connection_pattern
@@ -937,6 +938,29 @@ class OpFromGraph(HasInnerFunction, Op):
         # zip strict not specified because we are in a hot loop
         for output, variable in zip(outputs, variables):
             output[0] = variable
+
+
+@op_view_parents.register(OpFromGraph)
+def _ofg_view_parents(op, node):
+    """Besides its `view_map`: the inputs whose memory an inner output may lie in, and
+    the earlier output whose memory it shares (one inner value returned twice, or
+    views of one)."""
+    fg = op.fgraph
+    inner = view_feature(fg)
+    position = {v: k for k, v in enumerate(fg.inputs)}
+    first_output = {}  # inner root that isn't an input -> the first output in it
+    parents = []
+    for k, (io, o) in enumerate(zip(fg.outputs, node.outputs, strict=True)):
+        mine = dict.fromkeys(node.inputs[i] for i in op.view_map.get(k, ()))
+        for r in inner.view_roots(fg, io):
+            if r in position:
+                mine[node.inputs[position[r]]] = None
+            elif r in first_output:
+                mine[first_output[r]] = None
+            else:
+                first_output[r] = o
+        parents.append(tuple(mine))
+    return parents
 
 
 class FinalizedOpFromGraph(OpFromGraph):

@@ -49,9 +49,6 @@ class Values:
     def __init__(self):
         self.types = {}  # vid -> PyTensor type
         self.consts = {}  # vid -> numpy data
-        #: values that stand for several variables (an inlined OpFromGraph passing an
-        #: input through): never overwritten in place
-        self.shared = set()
         self._next = 0
 
     def new(self, t) -> int:

@@ -296,6 +296,11 @@ def test_a_value_that_stands_for_several_variables_is_not_overwritten():
     a = x * 2
     f, _ = validated([x], [Twice()(same(a)) + a])
     np.testing.assert_allclose(f(X), 4 * X + 2 * X)
+    # nor one a view the DestroyHandler doesn't see may lie in
+    transposed = OpFromGraph([v], [v.T], inline=False)
+    a = x * 2
+    f, _ = validated([x], [Twice()(a) + transposed(a).T])
+    np.testing.assert_allclose(f(X), 4 * X + 2 * X)
 
 
 # ------------------------------------------------------------------ memory

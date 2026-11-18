@@ -28,6 +28,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 import pytensor.link.llvm.codegen  # noqa: F401 (registers the emitters)
+from pytensor.graph.features import view_feature
 from pytensor.link.llvm.codegen.call import CalledKernel, LinkTable
 from pytensor.link.llvm.codegen.function import (
     OutputMode,
@@ -268,11 +269,15 @@ class Planner:
         self.copies_first = []
         #: layouts of the program's outputs (after `plan`)
         self.output_layouts = []
-        #: vid -> the values whose memory it may lie in (itself, for new memory)
-        self.roots = {}
         #: may tasks overwrite inputs their ops destroy? Only for a graph whose
         #: DestroyHandler has validated the order of its nodes (`plan`)
         self.allow_inplace = False
+        #: the graph being planned, and its `ViewFeature`
+        self.fgraph = None
+        self.views = None
+        #: memory of the graph that views the DestroyHandler doesn't see may lie in
+        #: (`ViewFeature.undeclared_view_roots`): never overwritten in place
+        self.hidden = frozenset()
 
     # ------------------------------------------------------------ layouts of values
 
@@ -322,10 +327,8 @@ class Planner:
                 tasks += self.copies_first
                 self.copies_first = []
                 tasks.append(task)
-                self.note_roots(task)
                 while self.pending_copies:
                     tasks.append(self.copy_task(*self.pending_copies.pop(0)))
-                    self.note_roots(tasks[-1])
             except NotImplementedError:
                 self.copies_first = []
                 if not isinstance(it, UnitItem):
@@ -335,46 +338,41 @@ class Planner:
                 tasks += self.tasks_for(it.items)
                 for inner, outer in it.outputs:
                     tasks.append(self.copy_task(inner, outer))
-                    self.note_roots(tasks[-1])
         return tasks
 
-    def roots_of(self, k) -> frozenset:
-        return self.roots.get(k, frozenset([k]))
+    def roots_of(self, var) -> frozenset:
+        """The variables of the graph whose memory `var` may lie in."""
+        return self.views.view_roots(self.fgraph, var)
 
-    def note_roots(self, task) -> None:
-        """Record whose memory the outputs of `task` may lie in."""
-        for k, mode, may_alias in zip(
-            task.outputs, task.modes, task.aliases, strict=True
-        ):
-            sources = [task.inputs[pos] for pos in may_alias]
-            if mode is OutputMode.INPLACE or (mode is OutputMode.RETURNED and sources):
-                self.roots[k] = frozenset().union(
-                    *(self.roots_of(src) for src in sources)
-                )
+    def may_destroy(self, it, i) -> bool:
+        """May the item, a node of the graph, overwrite its input `i`? Its op destroys
+        it, so the DestroyHandler says no one else needs it; unless the memory is a
+        constant's, or views it doesn't see may lie in it."""
+        return (
+            self.allow_inplace
+            and it.of_the_graph
+            and it.inputs[i] not in self.values.consts
+            and not self.roots_of(it.node.inputs[i]) & self.hidden
+        )
 
     def grant_inplace(self, it, folded) -> dict:
         """{output: input} for the outputs of a node that may overwrite an input: its
         op destroys it, its emitter can (`llvm_inplace`), and nothing else can see it."""
-        if not (self.allow_inplace and it.of_the_graph):
-            return {}
         values = self.values
+        node = it.node
         granted = {}
-        for k, i in inplace_outputs(it.node, folded).items():
+        for k, i in inplace_outputs(node, folded).items():
+            if not self.may_destroy(it, i):
+                continue
+            # nor may the memory be another input's
+            mine = self.roots_of(node.inputs[i])
+            if any(
+                mine & self.roots_of(var)
+                for pos, var in enumerate(node.inputs)
+                if pos != i and hasattr(var.type, "ndim")
+            ):
+                continue
             vid = it.inputs[i]
-            if vid in values.consts or it.inputs.count(vid) > 1:
-                continue
-            # The graph says the destroyed variable is not used again. The value must
-            # not stand for other variables too, nor share memory with another input.
-            mine = self.roots_of(vid)
-            if any(root in values.shared for root in mine):
-                continue
-            others = [
-                k2
-                for pos, k2 in enumerate(it.inputs)
-                if pos != i and hasattr(values.types[k2], "ndim")
-            ]
-            if any(mine & self.roots_of(k2) for k2 in others):
-                continue
             # a graph output in memory the planner provides is C-contiguous
             memory = self.memory_layouts.get(vid)
             shape = tuple(
@@ -445,8 +443,7 @@ class Planner:
             vid = inputs[i]
             if not isinstance(values.types[vid], TensorType):
                 continue
-            safe = self.allow_inplace and it.of_the_graph and vid not in values.consts
-            if safe and not any(root in values.shared for root in self.roots_of(vid)):
+            if self.may_destroy(it, i):
                 continue
             inputs[i] = values.new(values.types[vid])
             self.copies_first.append(self.copy_task(vid, inputs[i]))
@@ -681,6 +678,9 @@ class Planner:
                 nodes.append(node)
         # (the order of a graph with a DestroyHandler respects what its ops destroy)
         self.allow_inplace = hasattr(fgraph, "destroyers")
+        self.fgraph, self.views = fgraph, view_feature(fgraph)
+        if self.allow_inplace:
+            self.hidden = self.views.undeclared_view_roots(fgraph)
         items = flatten(values, nodes, scope, of_the_graph=True)
         out_ids = [values.of(o, scope) for o in fgraph.outputs]
         self.graph_outputs = set(out_ids)

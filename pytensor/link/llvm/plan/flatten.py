@@ -77,14 +77,9 @@ def flatten(
 def _inlined_outputs(values: Values, inner, node, inner_scope, scope) -> None:
     """The outputs of an inlined OpFromGraph are the values of its inner outputs. Where
     the inner graph passes an input through, or returns one variable twice, a value
-    now stands for several variables of the outer graph (`Values.shared`)."""
-    seen = set()
+    stands for several variables of the outer graph: the graph's `ViewFeature` knows."""
     for inner_output, output in zip(inner.outputs, node.outputs, strict=True):
-        k = values.of(inner_output, inner_scope)
-        if inner_output.owner is None or k in seen:
-            values.shared.add(k)
-        seen.add(k)
-        scope[output] = k
+        scope[output] = values.of(inner_output, inner_scope)
 
 
 def fusable(op, node) -> bool:
