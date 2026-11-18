@@ -35,8 +35,11 @@ pub fn target_cpu() -> (String, String) {
 }
 
 /// Load glibc's vector math library into the process, once. False where there is none
-/// (macOS, musl).
+/// (macOS, Windows, musl).
 fn libmvec_loaded() -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
     static LOADED: OnceLock<bool> = OnceLock::new();
     // SAFETY: a NUL-terminated library name; LLVM keeps the library loaded.
     *LOADED.get_or_init(|| unsafe {
@@ -84,22 +87,36 @@ pub fn target_machine(opt: u32) -> Result<TargetMachine, String> {
         2 => OptimizationLevel::Default,
         _ => OptimizationLevel::Aggressive,
     };
+    // LLJIT links COFF objects with RuntimeDyld, which makes no stubs for far calls: with
+    // the small code model, calls into DLLs and the Rust functions more than 2 GiB away
+    // from the JIT'd code overflow their 32-bit displacements. JITLink (ELF, Mach-O)
+    // makes stubs, so elsewhere the small model is fine.
+    let code_model = if cfg!(all(windows, target_arch = "x86_64")) {
+        CodeModel::Large
+    } else {
+        CodeModel::Default
+    };
     target
-        .create_target_machine(
-            &triple,
-            &cpu,
-            &features,
-            level,
-            RelocMode::PIC,
-            CodeModel::Default,
-        )
+        .create_target_machine(&triple, &cpu, &features, level, RelocMode::PIC, code_model)
         .ok_or_else(|| "could not create target machine".to_string())
 }
 
+/// `PYTENSOR_LLVM_CACHE_DIR`, else the platform's per-user cache directory.
 pub fn cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("PYTENSOR_LLVM_CACHE_DIR") {
         return PathBuf::from(d);
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".cache").join("pytensor-llvm")
+    let var = |k| {
+        std::env::var_os(k)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    let base = if cfg!(windows) {
+        var("LOCALAPPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library").join("Caches"))
+    } else {
+        var("HOME").map(|h| h.join(".cache"))
+    };
+    base.unwrap_or_else(std::env::temp_dir).join("pytensor-llvm")
 }

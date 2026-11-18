@@ -9,6 +9,12 @@
 
 #define MAXD 32
 
+#ifdef _WIN32
+#define EXPORT __declspec(dllexport)
+#else
+#define EXPORT
+#endif
+
 static size_t itemsize(int32_t dt) {
     switch (dt) {
     case PT_FLOAT64: case PT_INT64: return 8;
@@ -20,12 +26,12 @@ static size_t itemsize(int32_t dt) {
 
 static double now_ns(void) {
     struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
+    timespec_get(&t, TIME_UTC); /* C11; MSVC has no clock_gettime */
     return (double)t.tv_sec * 1e9 + (double)t.tv_nsec;
 }
 
 /* One call; outputs as given by the caller (provided or data == NULL). */
-int pt_run_once(const PtFunctionApi *api, const PtFunction *fn, const PtArray *inputs,
+EXPORT int pt_run_once(const PtFunctionApi *api, const PtFunction *fn, const PtArray *inputs,
                 PtArray *outputs, char *err, size_t errlen) {
     PtSession *s = api->session_new(fn);
     int rc = api->call(s, inputs, outputs);
@@ -38,7 +44,7 @@ int pt_run_once(const PtFunctionApi *api, const PtFunction *fn, const PtArray *i
  * provided != 0: output buffers are allocated once here (shapes from a first call) and
  *                reused, as a sampler would do.
  * provided == 0: the runtime allocates outputs on every call; we release them. */
-double pt_bench(const PtFunctionApi *api, const PtFunction *fn, const PtArray *inputs,
+EXPORT double pt_bench(const PtFunctionApi *api, const PtFunction *fn, const PtArray *inputs,
                 int provided, long iters, char *err, size_t errlen) {
     if (api->abi_version != PT_ABI_VERSION) {
         snprintf(err, errlen, "ABI version mismatch");
