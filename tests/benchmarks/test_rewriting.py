@@ -2,11 +2,18 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.scalar as ps
 import pytensor.tensor as pt
 import pytensor.xtensor as px
 from pytensor import config
+from pytensor.compile import optdb
+from pytensor.compile.aliasing import add_supervisor_to_fgraph
+from pytensor.compile.io import In
 from pytensor.graph import FunctionGraph
 from pytensor.graph.rewriting import rewrite_graph
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.scalar import Composite
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.xtensor.shape import stack as xstack
 
 
@@ -120,10 +127,6 @@ def test_xtensor_attention_rewrite_benchmark(n_layers, benchmark):
 
 
 def _random_inplace_graph(n, seed):
-    import pytensor.scalar as ps
-    from pytensor.scalar import Composite
-    from pytensor.tensor.elemwise import Elemwise
-
     rng = np.random.default_rng(seed)
     xs = [pt.vector(f"x{i}", shape=(4,)) for i in range(3)]
     s = [ps.float64(f"s{i}") for i in range(3)]
@@ -156,11 +159,6 @@ def _random_inplace_graph(n, seed):
 
 
 def test_inplace_rewrite_benchmark(benchmark):
-    from pytensor.compile import optdb
-    from pytensor.compile.aliasing import add_supervisor_to_fgraph
-    from pytensor.compile.io import In
-    from pytensor.graph.rewriting.db import RewriteDatabaseQuery
-
     xs, outs = _random_inplace_graph(300, seed=0)
     fg = rewrite_graph(
         FunctionGraph(xs, outs),
@@ -175,5 +173,5 @@ def test_inplace_rewrite_benchmark(benchmark):
         inplace.rewrite(fg_clone)
         return sum(bool(node.op.destroy_map) for node in fg_clone.apply_nodes)
 
-    assert rewrite_func() == 140
+    assert rewrite_func() == 141
     benchmark.pedantic(rewrite_func, rounds=3, iterations=1)

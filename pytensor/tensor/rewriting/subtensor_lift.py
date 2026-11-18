@@ -536,7 +536,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
     [copy_stack_trace(old_out, new_inp) for new_inp in indexed_inputs]
 
     # Define elemwise operation on indexed inputs
-    new_out = elem.owner.op.make_node(*indexed_inputs).outputs[
+    new_out = elem.owner.op(*indexed_inputs, return_list=True)[
         elem.owner.outputs.index(elem)
     ]
 
