@@ -4,11 +4,13 @@ import pytensor.tensor as pt
 from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
+    ORTHOGONAL,
+    SELECTION,
     SYMMETRIC,
     UPPER_TRIANGULAR,
 )
 from pytensor.assumptions.specify import assume
-from pytensor.tensor.basic import alloc_diag
+from pytensor.tensor.basic import Eye, alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from tests.assumptions.conftest import make_fgraph
 
@@ -42,3 +44,19 @@ def test_blockwise_alloc_diag_properties(key):
     _, af = make_fgraph(result)
 
     assert af.check(result, key)
+
+
+@pytest.mark.parametrize(
+    "key, offset",
+    [(SELECTION, 1), (ORTHOGONAL, 1), (LOWER_TRIANGULAR, 1), (UPPER_TRIANGULAR, -1)],
+)
+def test_blockwise_eye_with_batched_sizes_is_unknown(key, offset):
+    # The output has a leading batch dim, and the batched offset is a constant
+    n, m = pt.lvector("n"), pt.lvector("m")
+    result = Blockwise(Eye(dtype="float64"), signature="(),(),()->(r,c)")(
+        n, m, pt.constant([offset], dtype="int64")
+    )
+
+    _, af = make_fgraph(result)
+
+    assert not af.check(result, key)

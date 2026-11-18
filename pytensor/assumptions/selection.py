@@ -86,7 +86,7 @@ def _eye(key, op, feature, fgraph, node, input_states):
     offset = k.data.item()
     if offset == 0 and n is m:
         return [FactState.TRUE]
-    rows, cols = node.outputs[0].type.shape
+    rows, cols = node.outputs[0].type.shape[-2:]
     if rows is None or cols is None:
         return [FactState.UNKNOWN]
     every_column_filled = cols == 0 or (offset <= 0 and cols - offset <= rows)
