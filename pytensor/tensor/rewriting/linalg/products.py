@@ -215,6 +215,73 @@ def kron_of_diagonal_to_diagonal(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
+@node_rewriter([Dot])
+def dot_of_kronecker(fgraph, node):
+    """Optimize multiplications involving Kronecker products.
+
+    1. Mixed-product property:
+       (A1 (x) B1) @ (A2 (x) B2) -> (A1 @ A2) (x) (B1 @ B2)
+
+    2. Vec trick (Roth's column vectorization lemma):
+       (A (x) B) @ c -> vec(B @ X @ A.T)
+       c @ (A (x) B) -> vec(B.T @ X @ A).T
+    """
+    x, y = node.inputs
+    core_x, transp_x = strip_left_expand_dims_and_transpose(x)
+    core_y, transp_y = strip_left_expand_dims_and_transpose(y)
+
+    match (core_x.owner_op_and_inputs, core_y.owner_op_and_inputs):
+        case ((KroneckerProduct(), a1, b1), (KroneckerProduct(), a2, b2)):
+            if transp_x:
+                a1, b1 = a1.T, b1.T
+            if transp_y:
+                a2, b2 = a2.T, b2.T
+            new_out = KroneckerProduct()(Dot()(a1, a2), Dot()(b1, b2))
+            copy_stack_trace(node.outputs[0], new_out)
+            return [new_out]
+
+        case ((KroneckerProduct(), a, b), _):
+            if transp_x:
+                a, b = a.T, b.T
+            nA = a.shape[1]
+            nB = b.shape[1]
+            if y.type.shape[1] == 1 or y.type.broadcastable[1]:
+                X = y.flatten().reshape((nA, nB)).T
+                Y = Dot()(b, Dot()(X, a.T))
+                new_out = Y.T.reshape((-1, 1))
+            else:
+                k = y.shape[1]
+                y_3d = y.reshape((nA, nB, k))
+                t1 = pt.tensordot(a, y_3d, axes=([1], [0]))
+                t2 = pt.tensordot(b, t1, axes=([1], [1]))
+                new_out = t2.dimshuffle(1, 0, 2).reshape((a.shape[0] * b.shape[0], k))
+            copy_stack_trace(node.outputs[0], new_out)
+            return [new_out]
+
+        case (_, (KroneckerProduct(), a, b)):
+            if transp_y:
+                a, b = a.T, b.T
+            mA = a.shape[0]
+            mB = b.shape[0]
+            if x.type.shape[0] == 1 or x.type.broadcastable[0]:
+                X = x.flatten().reshape((mA, mB)).T
+                Y = Dot()(b.T, Dot()(X, a))
+                new_out = Y.T.reshape((1, -1))
+            else:
+                k = x.shape[0]
+                x_t = x.T
+                x_3d = x_t.reshape((mA, mB, k))
+                t1 = pt.tensordot(a.T, x_3d, axes=([1], [0]))
+                t2 = pt.tensordot(b.T, t1, axes=([1], [1]))
+                new_out = t2.dimshuffle(1, 0, 2).reshape((a.shape[1] * b.shape[1], k)).T
+            copy_stack_trace(node.outputs[0], new_out)
+            return [new_out]
+
+    return None
+
+
+@register_canonicalize
+@register_stabilize
 @node_rewriter([blockwise_of(Expm)])
 def expm_of_diag(fgraph, node):
     """expm(D) -> diag(exp(diagonal(D))) for diagonal D."""
