@@ -4099,7 +4099,7 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
 
             if n_outs > 1:
 
-                def _perform(*inputs, outputs=[[None]] * n_outs):
+                def _perform(*inputs, outputs=[[None] for _ in range(n_outs)]):
                     op.perform(node, inputs, outputs)
                     return tuple(o[0] for o in outputs)
 

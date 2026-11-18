@@ -279,6 +279,22 @@ def test_inner_loop(mode):
     )
 
 
+@mode
+def test_loop_in_composite(mode):
+    n_steps = int64("n_steps")
+    x0 = float64("x0")
+    y0 = float64("y0")
+    op = ScalarLoop(init=[x0, y0], update=[x0 + 1, y0 * 2])
+
+    x = float64("x")
+    y = float64("y")
+    x_out, y_out = op(n_steps, x, y)
+    out = Composite([n_steps, x, y], [x_out - y_out])(n_steps, x, y)
+
+    fn = function([n_steps, x, y], out, mode=mode)
+    np.testing.assert_allclose(fn(n_steps=3, x=0.5, y=1.0), 3.5 - 8)
+
+
 @pytest.mark.parametrize("mutate_arg_idx", (0, 1, 2, 3))
 def test_elemwise_inplace(mutate_arg_idx):
     x0 = int64("x0")
