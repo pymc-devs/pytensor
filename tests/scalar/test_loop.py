@@ -287,12 +287,12 @@ def test_loop_in_composite(mode):
     op = ScalarLoop(init=[x0, y0], update=[x0 + 1, y0 * 2])
 
     x = float64("x")
-    y = float64("y")
-    x_out, y_out = op(n_steps, x, y)
-    out = Composite([n_steps, x, y], [x_out - y_out])(n_steps, x, y)
+    # One start value is a constant, which the Composite's C code writes as a literal
+    x_out, y_out = op(n_steps, x, as_scalar(np.float64(1.0)))
+    out = Composite([n_steps, x], [x_out - y_out])(n_steps, x)
 
-    fn = function([n_steps, x, y], out, mode=mode)
-    np.testing.assert_allclose(fn(n_steps=3, x=0.5, y=1.0), 3.5 - 8)
+    fn = function([n_steps, x], out, mode=mode)
+    np.testing.assert_allclose(fn(n_steps=3, x=0.5), 3.5 - 8)
 
 
 @pytest.mark.parametrize("mutate_arg_idx", (0, 1, 2, 3))

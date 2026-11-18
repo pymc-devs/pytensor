@@ -231,7 +231,7 @@ class ScalarLoop(ScalarInnerGraphOp):
 
         # Copy carried inputs
         for i, (var, name) in enumerate(carry_subd.items(), start=1):
-            carry_var_name = f"{name}_carry{i}"
+            carry_var_name = f"V%(id)s_carry{i}"
             _c_code += f"{var.type.dtype_specs()[1]} {carry_var_name} = {name};\n"
             carry_subd[var] = carry_var_name
             subd[var] = carry_var_name
@@ -325,4 +325,4 @@ class ScalarLoop(ScalarInnerGraphOp):
         return res
 
     def c_code_cache_version_outer(self):
-        return (4,)
+        return (5,)
