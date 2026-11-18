@@ -1954,8 +1954,8 @@ class NodeProcessingGraphRewriter(GraphRewriter):
 
         """
         node_rewriter = node_rewriter or self.node_rewriter
-        # TODO FIXME: This class's interface is broken
-        assert node_rewriter is not None
+        if node_rewriter is None:
+            return False
         try:
             replacements = node_rewriter.transform(
                 fgraph, node, enforce_tracks=enforce_tracks
