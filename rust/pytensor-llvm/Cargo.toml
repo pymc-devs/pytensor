@@ -7,8 +7,9 @@ edition = "2024"
 faer = { version = "0.24.4", default-features = false, features = ["std", "rayon"] }
 hex = "0.4.3"
 # only the native target is initialized; the default `target-all` would need every
-# LLVM backend, which the minimal LLVM build (llvm-minimal.cmake) doesn't have
-inkwell = { version = "0.11.0", default-features = false, features = ["llvm23-1"] }
+# LLVM backend, which the minimal LLVM build (llvm-minimal.cmake) doesn't have.
+# inkwell links libffi (for LLVM's interpreter, which we don't use) unless told not to.
+inkwell = { version = "0.11.0", default-features = false, features = ["llvm23-1", "no-libffi-linking"] }
 libm = "0.2.16"
 llvm-sys = { version = "231", features = ["prefer-static"] }
 numpy = "0.30.0"

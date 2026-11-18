@@ -24,13 +24,18 @@ MINGW* | MSYS* | CYGWIN*)
     ;;
 esac
 
-# Only the parts of llvm-project LLVM itself needs (the rest also has symlinks, which
-# break extraction on Windows). Releases no longer have per-project source tarballs.
+# Only the parts of llvm-project LLVM itself needs (releases no longer have per-project
+# source tarballs), without symlinks, which break extraction on Windows: the rest of
+# llvm-project has more, these directories only the excluded (test-only) scripts.
 url=https://github.com/llvm/llvm-project/releases/download/llvmorg-$version
 top=llvm-project-$version.src
+mlgo=$top/llvm/utils/mlgo-utils
 mkdir -p "$work"
 curl -fsSL --retry 3 "$url/$top.tar.xz" |
     tar -xJf - -C "$work" --strip-components=1 \
+        --exclude="$mlgo/combine_training_corpus.py" \
+        --exclude="$mlgo/extract_ir.py" \
+        --exclude="$mlgo/make_corpus.py" \
         "$top/llvm" "$top/cmake" "$top/third-party" "$top/libc"
 
 cmake -G Ninja -S "$work/llvm" -B "$work/build" \

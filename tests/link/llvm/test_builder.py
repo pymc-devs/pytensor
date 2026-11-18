@@ -236,3 +236,44 @@ def test_stubs_list_the_builders_methods():
         }
         real = {n for n in dir(getattr(ir, cls)) if not n.startswith("_")}
         assert real <= typed, f"{cls}: the stubs miss {sorted(real - typed)}"
+
+
+def test_ir_objects_cross_threads(monkeypatch):
+    """Modules built on other threads, a module shared by threads, and IR objects
+    collected (in a reference cycle) on a thread that didn't make them."""
+    import gc
+    import sys
+    from concurrent.futures import ThreadPoolExecutor
+
+    def build(k):
+        m, f, b = _function([ir.i64], ir.i64)
+        (acc,) = b.fold(4, [f.params[0]], lambda j, a: b.add(a, j))
+        b.ret(b.add(acc, k))
+        return m
+
+    shared = ir.Module("shared")
+
+    def add_function(k):
+        f = shared.function(f"f{k}", [ir.i64], ir.i64, exported=True)
+        b = f.builder()
+        b.ret(b.mul(f.params[0], k))
+
+    def cycle():
+        m, f, b = _function([ir.i64], ir.i64)
+        objects = [m, f, b, f.params[0]]
+        objects.append(objects)
+
+    with ThreadPoolExecutor(4) as ex:
+        modules = list(ex.map(build, range(8)))
+        list(ex.map(add_function, range(8)))
+        ex.submit(cycle).result()
+    for k, m in enumerate(modules):
+        assert _compile(m, ctypes.c_int64, ctypes.c_int64)(1) == 1 + 6 + k
+    c = shared.compile(cache=False)
+    for k in range(8):
+        fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(c.address(f"f{k}"))
+        assert fn(3) == 3 * k
+    unraisable = []
+    monkeypatch.setattr(sys, "unraisablehook", unraisable.append)
+    gc.collect()
+    assert unraisable == []
