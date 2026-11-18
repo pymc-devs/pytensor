@@ -118,5 +118,6 @@ pub fn cache_dir() -> PathBuf {
     } else {
         var("HOME").map(|h| h.join(".cache"))
     };
-    base.unwrap_or_else(std::env::temp_dir).join("pytensor-llvm")
+    base.unwrap_or_else(std::env::temp_dir)
+        .join("pytensor-llvm")
 }
