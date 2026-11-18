@@ -3,7 +3,9 @@ from collections.abc import Iterator
 
 from pytensor import tensor as pt
 from pytensor.assumptions import (
+    DIAGONAL,
     LOWER_TRIANGULAR,
+    PERMUTATION,
     POSITIVE_DEFINITE,
     SYMMETRIC,
     TRIDIAGONAL,
@@ -125,6 +127,19 @@ def clients_through_expand_dims(
                 yield from clients_through_expand_dims(fgraph, client.outputs[0])  # type: ignore[arg-type]
             case _:
                 yield client, idx
+
+
+def is_identity(fgraph: FunctionGraph, x: TensorVariable) -> bool:
+    """Whether ``x`` is an identity matrix, possibly left-expanded or transposed.
+
+    A diagonal permutation matrix is the identity.
+    """
+    core, _ = strip_left_expand_dims_and_transpose(x)
+    return (
+        core.type.ndim == 2
+        and check_assumption(fgraph, core, PERMUTATION)
+        and check_assumption(fgraph, core, DIAGONAL)
+    )
 
 
 def is_matrix_transpose(x: TensorVariable) -> bool:
