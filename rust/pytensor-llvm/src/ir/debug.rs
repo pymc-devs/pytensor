@@ -12,7 +12,7 @@
 //!   the LLVM function. Tools (remarks, `perf`, debuggers) see Python source lines and
 //!   the Python call stack.
 
-use super::module::ModuleInner;
+use super::module::ModuleState;
 use llvm_sys::core as c;
 use llvm_sys::debuginfo as di;
 use llvm_sys::prelude::{LLVMDIBuilderRef, LLVMMetadataRef, LLVMValueRef};
@@ -213,7 +213,7 @@ impl DebugInfo {
     /// Give every instruction of the functions with a subprogram a location: those
     /// built without one (allocas, captured values, ...) take the one before them in
     /// their block, else line 0 of the function. Then finish the debug information.
-    pub fn finalize(&self, m: &ModuleInner) {
+    pub fn finalize(&self, m: &ModuleState) {
         if self.finalized.replace(true) {
             return;
         }
@@ -246,7 +246,7 @@ impl DebugInfo {
 
 impl Drop for DebugInfo {
     fn drop(&mut self) {
-        // SAFETY: we own the DIBuilder (the module outlives it: `ModuleInner` drops this
+        // SAFETY: we own the DIBuilder (the module outlives it: `ModuleState` drops this
         // first).
         unsafe { di::LLVMDisposeDIBuilder(self.dib) };
         let _ = self.cu;

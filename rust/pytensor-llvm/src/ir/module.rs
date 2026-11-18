@@ -1,6 +1,11 @@
 //! Modules, functions and values; compiling a module.
+//!
+//! Thread safety: all LLVM state of a module (its context, the caches, its builders) is
+//! in one `ModuleState` behind the module's mutex. The Python objects (`Module`,
+//! `Function`, `Value`, `Builder`, ...) are plain data: an `Arc` of the module and
+//! `Handle`s, raw LLVM handles that can only be read with the module's state locked.
 
-use super::builder::Builder;
+use super::builder::{Builder, BuilderState};
 use super::ty::{PyType, Ty};
 use crate::target::{cache_dir, init_llvm, target_cpu, target_machine, vfabi_variants};
 use llvm_sys::LLVMLinkage;
@@ -12,11 +17,13 @@ use llvm_sys::target_machine as tm;
 use llvm_sys::transforms::pass_builder as pb;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::sync::MutexExt;
 use sha2::Digest;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Bump when the meaning of IR changes for the same text (runtime functions, ABI).
 pub const IR_CACHE_VERSION: u32 = 1;
@@ -29,8 +36,52 @@ pub fn cstring(s: &str) -> CString {
     CString::new(s.replace('\0', "?")).unwrap()
 }
 
-/// An LLVM context and module. Everything built in a module refers to it.
-pub struct ModuleInner {
+/// A raw LLVM handle (value, type, block, ...) of the module `module`.
+///
+/// Handles are what the Python objects hold. The raw handle can only be read with
+/// `get`, which takes the module's (locked) state and checks that it is the right one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Handle<T> {
+    raw: T,
+    module: u64,
+}
+
+// SAFETY: a handle is an identifier. Its raw handle reaches LLVM only through `get`,
+// which needs its module's state, i.e. the module's lock held: LLVM objects of a module
+// are only touched by one thread at a time.
+unsafe impl<T> Send for Handle<T> {}
+// SAFETY: as for `Send`.
+unsafe impl<T> Sync for Handle<T> {}
+
+impl<T: Copy> Handle<T> {
+    /// The raw handle; `what` names it in the error for a handle of another module.
+    pub fn get(&self, st: &ModuleState, what: &str) -> PyResult<T> {
+        if self.module != st.id {
+            return err(format!("{what} from a different module"));
+        }
+        Ok(self.raw)
+    }
+}
+
+/// A module: its LLVM state behind a lock.
+pub struct Shared {
+    state: Mutex<ModuleState>,
+}
+
+impl Shared {
+    /// The module's state, locked. Waiting for the lock detaches from Python, so a
+    /// thread holding it while it runs Python code can't deadlock with this one.
+    pub fn lock(&self, py: Python<'_>) -> PyResult<MutexGuard<'_, ModuleState>> {
+        self.state
+            .lock_py_attached(py)
+            .map_err(|_| PyRuntimeError::new_err("an earlier panic left the module broken"))
+    }
+}
+
+/// An LLVM context and module, and everything built in it.
+pub struct ModuleState {
+    /// `Shared::id`: identifies the module's handles
+    pub id: u64,
     pub ctx: LLVMContextRef,
     pub module: LLVMModuleRef,
     pub name: String,
@@ -42,9 +93,20 @@ pub struct ModuleInner {
     types: RefCell<HashMap<Ty, LLVMTypeRef>>,
     /// debug information, if asked for (`debug.rs`)
     pub debug: Option<super::debug::DebugInfo>,
+    functions: RefCell<Vec<(String, LLVMValueRef, bool)>>,
+    /// a readable name for the generated code in perf maps (not part of the IR, so not
+    /// of the cache key)
+    label: RefCell<Option<String>>,
+    /// the builders of the module's functions (`Builder` holds the index)
+    pub builders: RefCell<Vec<BuilderState>>,
 }
 
-impl ModuleInner {
+// SAFETY: the state owns its LLVM context and everything in it, and LLVM contexts aren't
+// tied to a thread: the state may move to another thread (it is only reached through the
+// module's mutex, so one thread uses it at a time).
+unsafe impl Send for ModuleState {}
+
+impl ModuleState {
     pub fn llvm_type(&self, t: &Ty) -> LLVMTypeRef {
         if let Some(&r) = self.types.borrow().get(t) {
             return r;
@@ -60,14 +122,23 @@ impl ModuleInner {
         }
         Ok(())
     }
+
+    /// A handle of this module.
+    pub fn handle<T>(&self, raw: T) -> Handle<T> {
+        Handle {
+            raw,
+            module: self.id,
+        }
+    }
 }
 
-impl Drop for ModuleInner {
+impl Drop for ModuleState {
     fn drop(&mut self) {
-        // (its DIBuilder refers to the module)
+        // the builders, then the DIBuilder, refer to the module
+        self.builders.get_mut().clear();
         drop(self.debug.take());
         // SAFETY: we own the module and its context; nothing refers to them anymore
-        // (every Value/Function/Builder holds an Rc to this).
+        // (the Python objects hold an `Arc` of `Shared`, which owns this).
         unsafe {
             c::LLVMDisposeModule(self.module);
             c::LLVMContextDispose(self.ctx);
@@ -76,29 +147,41 @@ impl Drop for ModuleInner {
 }
 
 /// A value in a module: a constant, a function parameter, or an instruction result.
-#[pyclass(module = "pytensor_llvm.ir", unsendable, from_py_object)]
+#[pyclass(module = "pytensor_llvm.ir", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct Value {
-    pub m: Rc<ModuleInner>,
-    pub raw: LLVMValueRef,
+    pub m: Arc<Shared>,
+    pub raw: Handle<LLVMValueRef>,
     pub ty: Ty,
     /// the function this value lives in (None: constants and globals)
-    pub func: Option<LLVMValueRef>,
+    pub func: Option<Handle<LLVMValueRef>>,
 }
 
 impl Value {
     /// The value if this is an integer constant (booleans: 0 or 1).
-    pub fn const_int_value(&self) -> Option<i64> {
-        // SAFETY: `raw` is a live value of this module.
+    pub fn const_int_value(&self, st: &ModuleState) -> PyResult<Option<i64>> {
+        let raw = self.raw.get(st, "value")?;
+        // SAFETY: `raw` is a live value of this (locked) module.
         unsafe {
-            if self.ty.is_int() && !c::LLVMIsAConstantInt(self.raw).is_null() {
+            if self.ty.is_int() && !c::LLVMIsAConstantInt(raw).is_null() {
                 if self.ty.is_bool() {
-                    return Some(c::LLVMConstIntGetZExtValue(self.raw) as i64);
+                    return Ok(Some(c::LLVMConstIntGetZExtValue(raw) as i64));
                 }
-                return Some(c::LLVMConstIntGetSExtValue(self.raw));
+                return Ok(Some(c::LLVMConstIntGetSExtValue(raw)));
             }
         }
-        None
+        Ok(None)
+    }
+
+    /// `f(state, raw value)` with the module locked.
+    fn with<R>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&ModuleState, LLVMValueRef) -> R,
+    ) -> PyResult<R> {
+        let st = self.m.lock(py)?;
+        let raw = self.raw.get(&st, "value")?;
+        Ok(f(&st, raw))
     }
 }
 
@@ -111,46 +194,46 @@ impl Value {
 
     /// The value if this is an integer constant.
     #[getter]
-    fn const_int(&self) -> Option<i64> {
-        self.const_int_value()
+    fn const_int(&self, py: Python<'_>) -> PyResult<Option<i64>> {
+        self.const_int_value(&*self.m.lock(py)?)
     }
 
     /// Name the value in the IR text (`%name` instead of `%7`), for reading dumps.
     /// Returns the value. Constants have no names.
-    fn named(slf: Py<Self>, py: Python<'_>, name: &str) -> Py<Self> {
-        {
-            let v = slf.borrow(py);
-            // SAFETY: `raw` is a live value; LLVM copies the name.
+    fn named(slf: Py<Self>, py: Python<'_>, name: &str) -> PyResult<Py<Self>> {
+        slf.get().with(py, |_, raw| {
+            // SAFETY: `raw` is a live value of the locked module; LLVM copies the name.
             unsafe {
-                if c::LLVMIsConstant(v.raw) == 0 {
-                    c::LLVMSetValueName2(v.raw, name.as_ptr() as *const _, name.len());
+                if c::LLVMIsConstant(raw) == 0 {
+                    c::LLVMSetValueName2(raw, name.as_ptr() as *const _, name.len());
                 }
             }
-        }
-        slf
+        })?;
+        Ok(slf)
     }
 
     /// The value if this is a float constant.
     #[getter]
-    fn const_float(&self) -> Option<f64> {
-        // SAFETY: `raw` is a live value of this module.
-        unsafe {
-            if self.ty.is_float() && !c::LLVMIsAConstantFP(self.raw).is_null() {
+    fn const_float(&self, py: Python<'_>) -> PyResult<Option<f64>> {
+        let is_float = self.ty.is_float();
+        // SAFETY: `raw` is a live value of the locked module.
+        self.with(py, |_, raw| unsafe {
+            if is_float && !c::LLVMIsAConstantFP(raw).is_null() {
                 let mut lost = 0;
-                return Some(c::LLVMConstRealGetDouble(self.raw, &mut lost));
+                return Some(c::LLVMConstRealGetDouble(raw, &mut lost));
             }
-        }
-        None
+            None
+        })
     }
 
-    fn __repr__(&self) -> String {
-        // SAFETY: `raw` is a live value; the returned message is freed.
-        unsafe {
-            let s = c::LLVMPrintValueToString(self.raw);
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        // SAFETY: `raw` is a live value of the locked module; the message is freed.
+        self.with(py, |_, raw| unsafe {
+            let s = c::LLVMPrintValueToString(raw);
             let r = CStr::from_ptr(s).to_string_lossy().trim().to_string();
             c::LLVMDisposeMessage(s);
             format!("<ir.Value {r}>")
-        }
+        })
     }
 }
 
@@ -163,16 +246,16 @@ pub enum Inline {
 }
 
 /// A function of a module.
-#[pyclass(module = "pytensor_llvm.ir", unsendable)]
+#[pyclass(module = "pytensor_llvm.ir", frozen)]
 pub struct Function {
-    pub m: Rc<ModuleInner>,
-    pub raw: LLVMValueRef,
-    pub fnty: LLVMTypeRef,
+    pub m: Arc<Shared>,
+    pub raw: Handle<LLVMValueRef>,
+    pub fnty: Handle<LLVMTypeRef>,
     pub name: String,
     pub params: Vec<Ty>,
     pub ret: Ty,
     pub exported: bool,
-    has_builder: Cell<bool>,
+    has_builder: AtomicBool,
 }
 
 #[pymethods]
@@ -183,16 +266,19 @@ impl Function {
     }
 
     #[getter]
-    fn params(&self) -> Vec<Value> {
-        (0..self.params.len())
+    fn params(&self, py: Python<'_>) -> PyResult<Vec<Value>> {
+        let st = self.m.lock(py)?;
+        let f = self.raw.get(&st, "function")?;
+        Ok((0..self.params.len())
             .map(|k| Value {
                 m: self.m.clone(),
-                // SAFETY: `raw` is a function with this many parameters.
-                raw: unsafe { c::LLVMGetParam(self.raw, k as u32) },
+                // SAFETY: `f` is a function of the locked module with this many
+                // parameters.
+                raw: st.handle(unsafe { c::LLVMGetParam(f, k as u32) }),
                 ty: self.params[k].clone(),
                 func: Some(self.raw),
             })
-            .collect()
+            .collect())
     }
 
     #[getter]
@@ -201,12 +287,17 @@ impl Function {
     }
 
     /// A builder for the body. A function has one.
-    fn builder(&self) -> PyResult<Builder> {
-        self.m.check_open()?;
-        if self.has_builder.replace(true) {
+    fn builder(&self, py: Python<'_>) -> PyResult<Builder> {
+        let st = self.m.lock(py)?;
+        st.check_open()?;
+        let f = self.raw.get(&st, "function")?;
+        if self.has_builder.swap(true, Ordering::Relaxed) {
             return err(format!("function {} already has a builder", self.name));
         }
-        Builder::new(self.m.clone(), self.raw, self.ret.clone())
+        let state = BuilderState::new(&st, f, self.ret.clone());
+        let mut builders = st.builders.borrow_mut();
+        builders.push(state);
+        Ok(Builder::new(self.m.clone(), builders.len() - 1))
     }
 }
 
@@ -233,13 +324,9 @@ impl Function {
 }
 
 /// An LLVM module under construction.
-#[pyclass(module = "pytensor_llvm.ir", unsendable)]
+#[pyclass(module = "pytensor_llvm.ir", frozen)]
 pub struct Module {
-    pub m: Rc<ModuleInner>,
-    functions: RefCell<Vec<(String, LLVMValueRef, bool)>>,
-    /// a readable name for the generated code in perf maps (not part of the IR, so not
-    /// of the cache key)
-    label: RefCell<Option<String>>,
+    pub m: Arc<Shared>,
 }
 
 #[pymethods]
@@ -249,6 +336,7 @@ impl Module {
     #[new]
     #[pyo3(signature = (name, fastmath = true, debug_info = false))]
     fn new(name: &str, fastmath: bool, debug_info: bool) -> Self {
+        static IDS: AtomicU64 = AtomicU64::new(0);
         init_llvm();
         // SAFETY: creating a fresh context and a module in it.
         let (ctx, module) = unsafe {
@@ -256,7 +344,9 @@ impl Module {
             let n = cstring(name);
             (ctx, c::LLVMModuleCreateWithNameInContext(n.as_ptr(), ctx))
         };
-        let m = ModuleInner {
+        let id = IDS.fetch_add(1, Ordering::Relaxed);
+        let state = ModuleState {
+            id,
             ctx,
             module,
             name: name.to_string(),
@@ -265,31 +355,32 @@ impl Module {
             vector_decls: RefCell::new(vec![]),
             types: RefCell::new(HashMap::new()),
             debug: debug_info.then(|| super::debug::DebugInfo::new(ctx, module, name)),
-        };
-        Module {
-            m: Rc::new(m),
             functions: RefCell::new(vec![]),
             label: RefCell::new(None),
+            builders: RefCell::new(vec![]),
+        };
+        Module {
+            m: Arc::new(Shared {
+                state: Mutex::new(state),
+            }),
         }
     }
 
     #[getter]
-    fn name(&self) -> &str {
-        &self.m.name
+    fn name(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(self.m.lock(py)?.name.clone())
     }
 
     /// Readable name of the code in perf maps (default: the module name).
     #[getter]
-    fn get_label(&self) -> String {
-        self.label
-            .borrow()
-            .clone()
-            .unwrap_or_else(|| self.m.name.clone())
+    fn get_label(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(label_of(&*self.m.lock(py)?))
     }
 
     #[setter]
-    fn set_label(&self, label: String) {
-        *self.label.borrow_mut() = Some(label);
+    fn set_label(&self, py: Python<'_>, label: String) -> PyResult<()> {
+        *self.m.lock(py)?.label.borrow_mut() = Some(label);
+        Ok(())
     }
 
     /// Add a function. `exported` functions keep a symbol after compilation (their
@@ -298,6 +389,7 @@ impl Module {
     #[pyo3(signature = (name, params, ret, exported = false, inline = Inline::Default, debug_name = None))]
     fn function(
         &self,
+        py: Python<'_>,
         name: &str,
         params: Vec<PyType>,
         ret: PyType,
@@ -305,8 +397,9 @@ impl Module {
         inline: Inline,
         debug_name: Option<&str>,
     ) -> PyResult<Function> {
-        self.m.check_open()?;
-        if self.functions.borrow().iter().any(|(n, _, _)| n == name) {
+        let st = self.m.lock(py)?;
+        st.check_open()?;
+        if st.functions.borrow().iter().any(|(n, _, _)| n == name) {
             return err(format!("function {name} already exists"));
         }
         if name.is_empty()
@@ -324,11 +417,10 @@ impl Module {
         // SAFETY: the types belong to this module's context; the function is added to
         // this module.
         let (raw, fnty) = unsafe {
-            let mut ps: Vec<LLVMTypeRef> = params.iter().map(|t| self.m.llvm_type(t)).collect();
-            let fnty =
-                c::LLVMFunctionType(self.m.llvm_type(&ret), ps.as_mut_ptr(), ps.len() as u32, 0);
+            let mut ps: Vec<LLVMTypeRef> = params.iter().map(|t| st.llvm_type(t)).collect();
+            let fnty = c::LLVMFunctionType(st.llvm_type(&ret), ps.as_mut_ptr(), ps.len() as u32, 0);
             let n = cstring(name);
-            let f = c::LLVMAddFunction(self.m.module, n.as_ptr(), fnty);
+            let f = c::LLVMAddFunction(st.module, n.as_ptr(), fnty);
             c::LLVMSetLinkage(
                 f,
                 if exported {
@@ -338,38 +430,38 @@ impl Module {
                 },
             );
             match inline {
-                Inline::Always => add_fn_attr(&self.m, f, "alwaysinline"),
-                Inline::Never => add_fn_attr(&self.m, f, "noinline"),
+                Inline::Always => add_fn_attr(&st, f, "alwaysinline"),
+                Inline::Never => add_fn_attr(&st, f, "noinline"),
                 Inline::Default => {}
             }
             (f, fnty)
         };
-        if let Some(d) = &self.m.debug {
+        if let Some(d) = &st.debug {
             d.add_function(raw, debug_name.unwrap_or(name), name);
         }
-        self.functions
+        st.functions
             .borrow_mut()
             .push((name.to_string(), raw, exported));
         Ok(Function {
             m: self.m.clone(),
-            raw,
-            fnty,
+            raw: st.handle(raw),
+            fnty: st.handle(fnty),
             name: name.to_string(),
             params,
             ret,
             exported,
-            has_builder: Cell::new(false),
+            has_builder: AtomicBool::new(false),
         })
     }
 
     /// The module as LLVM IR text.
-    fn ir(&self) -> String {
-        print_module(self.m.module)
+    fn ir(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(print_module(self.m.lock(py)?.module))
     }
 
     /// Check the module; raises with LLVM's message if it is invalid.
-    fn verify(&self) -> PyResult<()> {
-        verify(&self.m)
+    fn verify(&self, py: Python<'_>) -> PyResult<()> {
+        verify(&*self.m.lock(py)?)
     }
 
     /// Verify, optimize, generate machine code and link it into the JIT. The object is
@@ -381,31 +473,36 @@ impl Module {
     }
 }
 
+fn label_of(st: &ModuleState) -> String {
+    st.label.borrow().clone().unwrap_or_else(|| st.name.clone())
+}
+
 impl Module {
     /// Finish the module for compilation: verify, hash, give exported functions unique
     /// symbol names.
-    fn prepare(&self, opt_level: u32) -> PyResult<Prepared> {
-        self.m.check_open()?;
-        for (name, f, _) in self.functions.borrow().iter() {
+    fn prepare(&self, py: Python<'_>, opt_level: u32) -> PyResult<Prepared> {
+        let st = self.m.lock(py)?;
+        st.check_open()?;
+        for (name, f, _) in st.functions.borrow().iter() {
             // SAFETY: `f` is a function of this module.
             if unsafe { c::LLVMCountBasicBlocks(*f) } == 0 {
                 return err(format!("function {name} has no body"));
             }
         }
-        finish_vector_decls(&self.m);
+        finish_vector_decls(&st);
         if crate::perf::enabled() {
-            for (_, f, _) in self.functions.borrow().iter() {
-                add_fn_string_attr(&self.m, *f, "frame-pointer", "all");
+            for (_, f, _) in st.functions.borrow().iter() {
+                add_fn_string_attr(&st, *f, "frame-pointer", "all");
             }
         }
-        verify(&self.m)?;
-        self.m.finished.set(true);
-        let text = print_module(self.m.module);
+        verify(&st)?;
+        st.finished.set(true);
+        let text = print_module(st.module);
         let mut h = sha2::Sha256::new();
         h.update(salt(opt_level).as_bytes());
         h.update(text.as_bytes());
         let key = hex::encode(&h.finalize()[..16]);
-        let exported: Vec<(String, LLVMValueRef)> = self
+        let exported: Vec<(String, LLVMValueRef)> = st
             .functions
             .borrow()
             .iter()
@@ -413,7 +510,7 @@ impl Module {
             .map(|(n, f, _)| (n.clone(), *f))
             .collect();
         if exported.is_empty() {
-            return err(format!("module {} exports no function", self.m.name));
+            return err(format!("module {} exports no function", st.name));
         }
         let mut symbols = Vec::new();
         for (name, f) in &exported {
@@ -423,16 +520,10 @@ impl Module {
             unsafe { c::LLVMSetValueName2(*f, s.as_ptr(), sym.len()) };
             symbols.push((name.clone(), sym));
         }
-        let name = self
-            .label
-            .borrow()
-            .clone()
-            .unwrap_or_else(|| self.m.name.clone());
         Ok(Prepared {
             key,
             symbols,
-            module: ModPtr(self.m.module),
-            name,
+            name: label_of(&st),
             ir: text,
         })
     }
@@ -441,7 +532,6 @@ impl Module {
 struct Prepared {
     key: String,
     symbols: Vec<(String, String)>,
-    module: ModPtr,
     name: String,
     /// the IR before optimization
     ir: String,
@@ -459,7 +549,7 @@ pub fn compile_modules(
     let t0 = std::time::Instant::now();
     let prepared: Vec<Prepared> = modules
         .iter()
-        .map(|m| m.prepare(opt_level))
+        .map(|m| m.prepare(py, opt_level))
         .collect::<PyResult<_>>()?;
     let in_process: Vec<bool> = {
         let j = crate::jit::jit().lock().unwrap_or_else(|e| e.into_inner());
@@ -477,17 +567,14 @@ pub fn compile_modules(
     let todo: Vec<usize> = (0..prepared.len())
         .filter(|&i| !in_process[i] && *first_of.entry(prepared[i].key.as_str()).or_insert(i) == i)
         .collect();
-    struct Job(usize, LLVMModuleRef, String);
-    // SAFETY: each module is finished (no Python code touches it) and used by exactly
-    // one worker; distinct modules have distinct LLVM contexts.
-    unsafe impl Send for Job {}
-    let jobs: Vec<Job> = todo
+    // the workers lock the modules they compile (plainly: they don't run Python code)
+    let jobs: Vec<(usize, &Shared, String)> = todo
         .iter()
-        .map(|&i| Job(i, prepared[i].module.0, prepared[i].key.clone()))
+        .map(|&i| (i, &*modules[i].m, prepared[i].key.clone()))
         .collect();
     let results: Vec<(usize, Result<(Vec<u8>, bool, f64), String>)> = py.detach(move || {
         jobs.into_par_iter()
-            .map(|Job(i, m, key)| {
+            .map(|(i, m, key)| {
                 let path = dir.join(format!("ir_{key}.o"));
                 if cache {
                     if let Ok(o) = std::fs::read(&path) {
@@ -495,7 +582,11 @@ pub fn compile_modules(
                     }
                 }
                 let t = std::time::Instant::now();
-                let r = codegen(m, opt_level).map(|obj| {
+                let r = match m.state.lock() {
+                    Ok(st) => codegen(st.module, opt_level),
+                    Err(_) => Err("an earlier panic left the module broken".to_string()),
+                };
+                let r = r.map(|obj| {
                     if cache {
                         let tmp = dir.join(format!("ir_{key}.{}.{i}.tmp", std::process::id()));
                         if std::fs::write(&tmp, &obj).is_ok() {
@@ -556,8 +647,6 @@ pub fn compile_many(
     let refs: Vec<&Module> = modules.iter().map(|m| &**m).collect();
     compile_modules(py, &refs, opt_level, cache)
 }
-
-struct ModPtr(LLVMModuleRef);
 
 #[derive(Clone, Default)]
 pub struct CompileStats {
@@ -638,7 +727,7 @@ impl CompiledModule {
 
 // ------------------------------------------------------------------ helpers
 
-pub fn add_fn_attr(m: &ModuleInner, f: LLVMValueRef, name: &str) {
+pub fn add_fn_attr(m: &ModuleState, f: LLVMValueRef, name: &str) {
     // SAFETY: `f` is a function of `m`; enum attribute kinds are looked up by name.
     unsafe {
         let kind = c::LLVMGetEnumAttributeKindForName(name.as_ptr() as *const _, name.len());
@@ -647,7 +736,7 @@ pub fn add_fn_attr(m: &ModuleInner, f: LLVMValueRef, name: &str) {
     }
 }
 
-pub fn add_fn_string_attr(m: &ModuleInner, f: LLVMValueRef, k: &str, v: &str) {
+pub fn add_fn_string_attr(m: &ModuleState, f: LLVMValueRef, k: &str, v: &str) {
     // SAFETY: as above; the attribute copies the strings.
     unsafe {
         let a = c::LLVMCreateStringAttribute(
@@ -671,7 +760,7 @@ fn print_module(m: LLVMModuleRef) -> String {
     }
 }
 
-fn verify(m: &ModuleInner) -> PyResult<()> {
+fn verify(m: &ModuleState) -> PyResult<()> {
     if let Some(d) = &m.debug {
         d.finalize(m);
     }
@@ -699,7 +788,7 @@ fn verify(m: &ModuleInner) -> PyResult<()> {
 }
 
 /// Keep libmvec declarations alive until the loop vectorizer has seen them.
-fn finish_vector_decls(m: &ModuleInner) {
+fn finish_vector_decls(m: &ModuleState) {
     let decls = m.vector_decls.borrow();
     if decls.is_empty() {
         return;
