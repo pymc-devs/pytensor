@@ -10,7 +10,10 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable, diag, eye, tril, triu
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg._lazy import scipy_linalg
-from pytensor.tensor.linalg.dtype_utils import linalg_real_output_dtype
+from pytensor.tensor.linalg.dtype_utils import (
+    linalg_output_dtype,
+    linalg_real_output_dtype,
+)
 from pytensor.tensor.math import sub, switch
 from pytensor.tensor.type import Variable, tensor, vector
 from pytensor.tensor.type_other import NoneTypeT
@@ -24,6 +27,21 @@ def _zero_disconnected(outputs, grads):
         else:
             l.append(g)
     return l
+
+
+def _fold_onto_read_triangle(g, lower):
+    """Map the gradient of a Hermitian matrix onto the inputs LAPACK reads.
+
+    LAPACK reads one triangle, takes the other as its conjugate mirror, and ignores the
+    imaginary part of the diagonal.
+    """
+    if lower:
+        out = tril(g) + triu(g, k=1).conj().T
+    else:
+        out = triu(g) + tril(g, k=-1).conj().T
+    if out.type.dtype.startswith("complex"):
+        out = switch(eye(out.shape[0], dtype="bool"), out.real, out)
+    return out
 
 
 class Eig(Op):
@@ -168,10 +186,9 @@ class Eigh(Op):
         else:
             inputs = [a]
 
-        w_dtype = linalg_real_output_dtype(*[x.type.dtype for x in inputs])
-
-        w = tensor(dtype=w_dtype, shape=(M,))
-        v = tensor(dtype=w_dtype, shape=(M, N))
+        input_dtypes = [x.type.dtype for x in inputs]
+        w = tensor(dtype=linalg_real_output_dtype(*input_dtypes), shape=(M,))
+        v = tensor(dtype=linalg_output_dtype(*input_dtypes), shape=(M, N))
 
         return Apply(self, inputs, [w, v])
 
@@ -217,7 +234,7 @@ class Eigh(Op):
 
         .. math::
 
-            A V = V \operatorname{diag}(w), \qquad V^T V = I,
+            A V = V \operatorname{diag}(w), \qquad V^H V = I,
 
         define
 
@@ -233,38 +250,38 @@ class Eigh(Op):
 
         .. math::
 
-            C = V^T g_V,
+            C = V^H g_V,
             \qquad
             M = \operatorname{diag}(g_w) + F \odot C,
             \qquad
-            g_A = V M V^T.
+            g_A = V M V^H.
 
         For the generalized symmetric-definite problem,
 
         .. math::
 
-            A V = B V \operatorname{diag}(w), \qquad V^T B V = I,
+            A V = B V \operatorname{diag}(w), \qquad V^H B V = I,
 
         the pullback is
 
         .. math::
 
-            C = V^T g_V,
+            C = V^H g_V,
             \qquad
             M = \operatorname{diag}(g_w) + F \odot C,
 
         .. math::
 
-            g_A = V M V^T,
+            g_A = V M V^H,
 
         .. math::
 
             g_B =
-            -V \left(M \operatorname{diag}(w)\right) V^T
-            - \frac12 V \operatorname{diag}(\operatorname{diag}(C)) V^T.
+            -V \left(M \operatorname{diag}(w)\right) V^H
+            - \frac12 V \operatorname{diag}(\operatorname{diag}(C)) V^H.
 
-        The gradients are symmetrized on return to match the triangular storage
-        specified by ``UPLO``.
+        The gradients are folded onto the triangle selected by ``lower``, the only part
+        of each input that is read.
 
         These formulas assume distinct eigenvalues. When eigenvalues are repeated,
         the factors ``1 / (w_j - w_i)`` are singular and the eigenvector gradient is
@@ -277,30 +294,21 @@ class Eigh(Op):
         w_diff = sub.outer(w, w).T
         F = switch(eye(w.shape[0], dtype="bool"), 0.0, 1.0 / w_diff)
 
+        v_H = v.conj().T
+        C = v_H @ gv
+        inner = diag(gw) + F * C
+
         if len(inputs) == 1:
-            inner = diag(gw) + F * (v.T @ gv)
-            g = v @ inner @ v.T
-
-            if self.lower:
-                out = tril(g) + triu(g, k=1).T
-            else:
-                out = triu(g) + tril(g, k=-1).T
-            return [out]
+            g = v @ inner @ v_H
+            return [_fold_onto_read_triangle(g, self.lower)]
         else:
-            C = v.T @ gv
-            inner = diag(gw) + F * C
-
-            ga = v @ inner @ v.T
-            gb = -v @ (inner * w[None, :]) @ v.T
-            gb = gb - 0.5 * v @ diag(diag(C)) @ v.T
-
-            if self.lower:
-                ga_sym = tril(ga) + triu(ga, k=1).T
-                gb_sym = tril(gb) + triu(gb, k=1).T
-            else:
-                ga_sym = triu(ga) + tril(ga, k=-1).T
-                gb_sym = triu(gb) + tril(gb, k=-1).T
-            return [ga_sym, gb_sym]
+            ga = v @ inner @ v_H
+            gb = -v @ (inner * w[None, :]) @ v_H
+            gb = gb - 0.5 * v @ diag(diag(C)) @ v_H
+            return [
+                _fold_onto_read_triangle(ga, self.lower),
+                _fold_onto_read_triangle(gb, self.lower),
+            ]
 
 
 def eigh(
@@ -446,29 +454,19 @@ class Eigvalsh(Op):
         if len(inputs) == 1:
             (a,) = inputs
             w, v = eigh(a, lower=self.lower)
-            gA = v @ diag(gw) @ v.T
-
-            if self.lower:
-                gA = tril(gA) + triu(gA, k=1).T
-            else:
-                gA = triu(gA) + tril(gA, k=-1).T
-
-            return [gA]
+            gA = v @ diag(gw) @ v.conj().T
+            return [_fold_onto_read_triangle(gA, self.lower)]
 
         else:
             a, b = inputs
             w, v = eigh(a, b, lower=self.lower)
-            gA = v @ diag(gw) @ v.T
-            gB = -v @ diag(gw * w) @ v.T
-
-            if self.lower:
-                gA = tril(gA) + triu(gA, k=1).T
-                gB = tril(gB) + triu(gB, k=1).T
-            else:
-                gA = triu(gA) + tril(gA, k=-1).T
-                gB = triu(gB) + tril(gB, k=-1).T
-
-            return [gA, gB]
+            v_H = v.conj().T
+            gA = v @ diag(gw) @ v_H
+            gB = -v @ diag(gw * w) @ v_H
+            return [
+                _fold_onto_read_triangle(gA, self.lower),
+                _fold_onto_read_triangle(gB, self.lower),
+            ]
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         # overwrite_a and overwrite_b are mutually exclusive (PyTensor tracks at most one destroyed

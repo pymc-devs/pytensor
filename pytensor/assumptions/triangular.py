@@ -24,7 +24,7 @@ from pytensor.tensor.linalg.decomposition.lu import LU
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.inverse import MatrixInverse
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm
 from pytensor.tensor.math import Dot
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.variable import TensorConstant
@@ -88,6 +88,8 @@ register_assumption(LOWER_TRIANGULAR, Dot)(all_inputs_have_key)
 register_assumption(UPPER_TRIANGULAR, Dot)(all_inputs_have_key)
 register_assumption(LOWER_TRIANGULAR, KroneckerProduct)(all_inputs_have_key)
 register_assumption(UPPER_TRIANGULAR, KroneckerProduct)(all_inputs_have_key)
+register_assumption(LOWER_TRIANGULAR, Sqrtm)(propagate_first)
+register_assumption(UPPER_TRIANGULAR, Sqrtm)(propagate_first)
 register_assumption(LOWER_TRIANGULAR, Subtensor)(subtensor_propagates_matrix_property)
 register_assumption(UPPER_TRIANGULAR, Subtensor)(subtensor_propagates_matrix_property)
 

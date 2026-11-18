@@ -6,12 +6,15 @@ from pytensor.assumptions.specify import assume
 from tests.assumptions.conftest import make_fgraph
 
 
-def test_inv_propagates_positive_definite():
+@pytest.mark.parametrize(
+    "matrix_fn", [pt.linalg.inv, pt.linalg.sqrtm], ids=["inv", "sqrtm"]
+)
+def test_matrix_function_propagates_positive_definite(matrix_fn):
     x = pt.matrix("x", shape=(3, 3))
     x_psd = assume(x, positive_definite=True)
-    inv_x = pt.linalg.inv(x_psd)
-    _, af = make_fgraph(inv_x)
-    assert af.check(inv_x, POSITIVE_DEFINITE)
+    out = matrix_fn(x_psd)
+    _, af = make_fgraph(out)
+    assert af.check(out, POSITIVE_DEFINITE)
 
 
 def test_kron_of_eyes_is_positive_definite():

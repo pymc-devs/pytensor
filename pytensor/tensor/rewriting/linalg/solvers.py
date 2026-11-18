@@ -1,7 +1,7 @@
 from collections.abc import Container
 
 from pytensor import tensor as pt
-from pytensor.assumptions import DIAGONAL, ORTHOGONAL, check_assumption
+from pytensor.assumptions import DIAGONAL, ORTHOGONAL, SYMMETRIC, check_assumption
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.fg import FunctionGraph
@@ -19,6 +19,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.core import SolveBase
@@ -578,25 +579,34 @@ def orthogonal_solve_to_transpose_matmul(fgraph, node):
 @register_canonicalize
 @register_stabilize
 @node_rewriter([blockwise_of(SolveSylvester)])
-def solve_sylvester_of_diag(fgraph, node):
-    """Replace solve_sylvester(A, B, C) with C / (a[:, None] + b[None, :]) when both A, B are diagonal.
+def solve_sylvester_of_structured(fgraph, node):
+    """Solve A @ X + X @ B = C in closed form when A and B are both diagonal or both real symmetric.
 
-    The Sylvester equation A @ X + X @ B = C, when A = diag(a) and B = diag(b),
-    reduces to X_ij = C_ij / (a_i + b_j).
+    With A = diag(a) and B = diag(b), X_ij = C_ij / (a_i + b_j). With real symmetric
+    A = U diag(a) U^T and B = V diag(b) V^T, the same division applies in the
+    eigenbases: X = U ((U^T C V) / (a_i + b_j)) V^T.
     """
     A, B, C = node.inputs
 
-    if not check_assumption(fgraph, A, DIAGONAL):
+    if check_assumption(fgraph, A, DIAGONAL) and check_assumption(fgraph, B, DIAGONAL):
+        a = pt.diagonal(A, axis1=-2, axis2=-1)
+        b = pt.diagonal(B, axis1=-2, axis2=-1)
+        new_out = C / (a[..., :, None] + b[..., None, :])
+    elif (
+        not A.type.dtype.startswith("complex")
+        and not B.type.dtype.startswith("complex")
+        and check_assumption(fgraph, A, SYMMETRIC)
+        and check_assumption(fgraph, B, SYMMETRIC)
+    ):
+        a, U = eigh(A)
+        b, V = eigh(B)
+        rotated = U.mT @ C @ V
+        new_out = U @ (rotated / (a[..., :, None] + b[..., None, :])) @ V.mT
+    else:
         return None
-    if not check_assumption(fgraph, B, DIAGONAL):
-        return None
-
-    a = pt.diagonal(A, axis1=-2, axis2=-1)
-    b = pt.diagonal(B, axis1=-2, axis2=-1)
-
-    new_out = C / (a[..., :, None] + b[..., None, :])
 
     old_out = node.outputs[0]
+    new_out = new_out.astype(old_out.type.dtype)
     copy_stack_trace(old_out, new_out)
     return [new_out]
 

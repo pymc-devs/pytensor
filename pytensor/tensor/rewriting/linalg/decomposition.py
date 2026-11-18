@@ -5,6 +5,7 @@ from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
     ORTHOGONAL,
+    POSITIVE_DEFINITE,
     SYMMETRIC,
     UPPER_TRIANGULAR,
     check_assumption,
@@ -26,7 +27,7 @@ from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
-from pytensor.tensor.linalg.products import KroneckerProduct, kron
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm, kron
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -430,7 +431,12 @@ def eig_to_eigh(fgraph, node):
     # Eigh is a subclass of Eig, so this tracker also matches Eigh — skip it
     if isinstance(node.op.core_op, Eigh):
         return None
-    if not check_assumption(fgraph, X, SYMMETRIC):
+    # eigh needs a Hermitian input, which a complex symmetric matrix is not
+    is_hermitian = check_assumption(fgraph, X, POSITIVE_DEFINITE) or (
+        not X.type.dtype.startswith("complex")
+        and check_assumption(fgraph, X, SYMMETRIC)
+    )
+    if not is_hermitian:
         return None
 
     w, v = eigh(X)
@@ -441,6 +447,14 @@ def eig_to_eigh(fgraph, node):
     copy_stack_trace(old_w, w)
     copy_stack_trace(old_v, v)
     return [w, v]
+
+
+def _hermitian_diagonal(X):
+    # LAPACK ignores the imaginary part of a Hermitian diagonal
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+    if X.type.dtype.startswith("complex"):
+        return diag_vals.real
+    return diag_vals
 
 
 @register_canonicalize
@@ -458,7 +472,7 @@ def eigh_of_diag(fgraph, node):
         [X] = node.inputs
         if not check_assumption(fgraph, X, DIAGONAL):
             return None
-        diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+        diag_vals = _hermitian_diagonal(X)
         sort_idx = pt.argsort(diag_vals, axis=-1)
         new_w = pt.take_along_axis(diag_vals, sort_idx, axis=-1)
         new_v = pt.eye(X.shape[-1])[sort_idx].mT
@@ -468,8 +482,8 @@ def eigh_of_diag(fgraph, node):
             return None
         if not check_assumption(fgraph, B, DIAGONAL):
             return None
-        diag_a = pt.diagonal(A, axis1=-2, axis2=-1)
-        diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
+        diag_a = _hermitian_diagonal(A)
+        diag_b = _hermitian_diagonal(B)
         eigvals = diag_a / diag_b
         sort_idx = pt.argsort(eigvals, axis=-1)
         new_w = pt.take_along_axis(eigvals, sort_idx, axis=-1)
@@ -480,10 +494,46 @@ def eigh_of_diag(fgraph, node):
         return None
 
     w, v = node.outputs
+    new_w = new_w.astype(w.type.dtype)
+    new_v = new_v.astype(v.type.dtype)
     copy_stack_trace(w, new_w)
     copy_stack_trace(v, new_v)
 
     return [new_w, new_v]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Eigh)])
+def eigh_of_sqrtm(fgraph, node):
+    """eigh(sqrtm(A)) -> (sqrt(w), V) with w, V = eigh(A), for positive definite A.
+
+    sqrtm(A) shares the eigenvectors of A, and sqrt preserves the ascending order of
+    the eigenvalues. sqrtm(A) is Hermitian, so its transpose is its conjugate, with
+    eigenvectors conj(V).
+    """
+    if len(node.inputs) != 1:
+        return None
+
+    [X] = node.inputs
+    core, transposed = strip_left_expand_dims_and_transpose(X)
+    match core.owner_op_and_inputs:
+        case (Blockwise(Sqrtm()), A) if check_assumption(fgraph, A, POSITIVE_DEFINITE):
+            pass
+        case _:
+            return None
+
+    w, V = eigh(A)
+    if transposed and V.type.dtype.startswith("complex"):
+        V = V.conj()
+    old_w, old_V = node.outputs
+    new_w = atleast_Nd(pt.sqrt(pt.maximum(w, 0)), n=old_w.type.ndim).astype(
+        old_w.type.dtype
+    )
+    new_V = atleast_Nd(V, n=old_V.type.ndim).astype(old_V.type.dtype)
+    copy_stack_trace(old_w, new_w)
+    copy_stack_trace(old_V, new_V)
+    return [new_w, new_V]
 
 
 @register_canonicalize
