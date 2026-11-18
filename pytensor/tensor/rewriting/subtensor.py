@@ -22,6 +22,7 @@ from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
     ARange,
+    ExtractDiag,
     Join,
     Nonzero,
     ScalarFromTensor,
@@ -69,6 +70,7 @@ from pytensor.tensor.shape import (
     Shape_i,
     shape_padleft,
     shape_padright,
+    shape_tuple,
 )
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -83,6 +85,7 @@ from pytensor.tensor.subtensor import (
     get_canonical_form_slice,
     get_constant_idx,
     get_slice_elements,
+    inc_subtensor,
     indices_from_subtensor,
     unflatten_index_variables,
 )
@@ -1207,6 +1210,154 @@ def local_useless_inc_subtensor(fgraph, node):
     r = add(x, y)
     copy_stack_trace(node.outputs[0], r)
     return [r]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([AdvancedSubtensor, ExtractDiag])
+def local_advanced_subtensor_of_unit_axes(fgraph, node):
+    """Gather on static length-1 axes with constant ``0``/``-1`` indices -> broadcast.
+
+    Every such index reads the single entry of its axis, so the gather drops those
+    axes and broadcasts the result to the index shape, a DimShuffle when that shape
+    has a single entry:
+
+    - ``x[[0], :, [0]]`` with ``x.shape == (1, n, 1)`` -> ``x.dimshuffle(1, "x")``
+      placed per numpy's advanced-indexing rules
+    - ``diagonal(x)`` with ``x.shape == (1, 1)`` -> ``x.dimshuffle("x")``
+    """
+    x = node.inputs[0]
+
+    if isinstance(node.op, ExtractDiag):
+        op = node.op
+        if op.offset != 0 or x.type.shape[op.axis1] != 1 or x.type.shape[op.axis2] != 1:
+            return None
+        adv_axes = [op.axis1, op.axis2]
+        index_shape: tuple[int, ...] = (1,)
+        base = x
+        position = x.type.ndim - 2
+    else:
+        indices = list(indices_from_subtensor(node.inputs[1:], node.op.idx_list))
+        indices += [slice(None)] * (x.type.ndim - len(indices))
+        adv_axes = [
+            axis for axis, idx in enumerate(indices) if not isinstance(idx, slice)
+        ]
+        index_values = [
+            _idx_to_int_array(indices[axis])
+            if x.type.shape[axis] == 1 and indices[axis].type.numpy_dtype.kind in "iu"
+            else None
+            for axis in adv_axes
+        ]
+        if any(
+            values is None or not np.isin(values, (0, -1)).all()
+            for values in index_values
+        ):
+            return None
+        index_shape = np.broadcast_shapes(*(values.shape for values in index_values))
+        position = 0 if _non_consecutive_adv_indexing(indices) else adv_axes[0]
+        basic_indices = tuple(
+            slice(None) if axis in adv_axes else idx for axis, idx in enumerate(indices)
+        )
+        if all(idx == slice(None) for idx in basic_indices):
+            base = x
+        else:
+            base = x[basic_indices]
+
+    kept_axes = [axis for axis in range(x.type.ndim) if axis not in adv_axes]
+    order = kept_axes[:position] + ["x"] * len(index_shape) + kept_axes[position:]
+    new_out = base.dimshuffle(order)
+
+    if any(length != 1 for length in index_shape):
+        target_shape = list(shape_tuple(new_out))
+        target_shape[position : position + len(index_shape)] = index_shape
+        new_out = broadcast_to(new_out, target_shape)
+
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([AdvancedIncSubtensor])
+def local_advanced_inc_subtensor_of_unit_axes(fgraph, node):
+    """Write on static length-1 axes with constant ``0``/``-1`` indices -> IncSubtensor.
+
+    Every such index writes the single entry of its axis, so the write becomes a
+    basic write over full slices of those axes, with ``y`` reduced over the index
+    dims (last entry for a set, sum for an accumulating increment). The reduction
+    only matches the original write when ``y``'s index dims are statically 1 or the
+    index length, and, for an accumulating increment, when ``y`` has ``x``'s dtype.
+    When the other slices are full too, `local_useless_inc_subtensor` then removes
+    the write:
+
+    - ``x[[0], [0]].set(v)`` with ``x.shape == (1, 1)``
+      -> ``x[:, :].set(v[-1][None, None])``
+    - ``x[[0, 0]].inc(y)`` with ``x.shape == (1, n)`` -> ``x[:].inc(y.sum(0)[None])``
+    """
+    op = node.op
+    x, y, *index_vars = node.inputs
+    indices = list(indices_from_subtensor(index_vars, op.idx_list))
+    indices += [slice(None)] * (x.type.ndim - len(indices))
+
+    adv_axes = [axis for axis, idx in enumerate(indices) if not isinstance(idx, slice)]
+    index_values = [
+        _idx_to_int_array(indices[axis])
+        if x.type.shape[axis] == 1 and indices[axis].type.numpy_dtype.kind in "iu"
+        else None
+        for axis in adv_axes
+    ]
+    if any(
+        values is None or not np.isin(values, (0, -1)).all() for values in index_values
+    ):
+        return None
+    index_shape = np.broadcast_shapes(*(values.shape for values in index_values))
+    position = 0 if _non_consecutive_adv_indexing(indices) else adv_axes[0]
+    basic_indices = tuple(
+        slice(None) if axis in adv_axes else idx for axis, idx in enumerate(indices)
+    )
+    if 0 in index_shape:
+        return [x]
+
+    index_dims = tuple(range(position, position + len(index_shape)))
+    indexed_ndim = x.type.ndim - len(adv_axes) + len(index_shape)
+    y = shape_padleft(y, indexed_ndim - y.type.ndim)
+    if any(
+        y.type.shape[dim] not in (1, length)
+        for dim, length in zip(index_dims, index_shape)
+    ):
+        return None
+
+    accumulates = not (op.set_instead_of_inc or op.ignore_duplicates)
+    if accumulates and y.type.dtype != x.type.dtype:
+        return None
+
+    if accumulates:
+        repeats = np.prod(
+            [
+                length
+                for length, dim in zip(index_shape, index_dims)
+                if y.type.shape[dim] == 1
+            ],
+            dtype=int,
+        )
+        y = y.sum(axis=index_dims, dtype=y.type.dtype)
+        if repeats != 1:
+            y = y * np.asarray(repeats, dtype=y.type.dtype)
+    else:
+        last_write = tuple(
+            -1 if dim in index_dims else slice(None) for dim in range(y.type.ndim)
+        )
+        y = y[last_write]
+
+    y = expand_dims(y, adv_axes)
+
+    new_out = inc_subtensor(
+        x[basic_indices],
+        y,
+        set_instead_of_inc=op.set_instead_of_inc,
+    )
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize

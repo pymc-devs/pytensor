@@ -711,6 +711,84 @@ def test_local_subtensor_remove_broadcastable_index():
     f2(xn)
 
 
+@pytest.mark.parametrize(
+    "shape, build, build_expected",
+    [
+        ((1, 1), lambda x: x.diagonal(), lambda x: x.dimshuffle("x")),
+        (
+            (1, 3, 1),
+            lambda x: x[np.array([0]), 1:, np.array([-1])],
+            lambda x: x[:, 1:].dimshuffle("x", 1),
+        ),
+        ((1, 4), lambda x: x[np.array([0, -1])], lambda x: pt.alloc(x, 2, 4)),
+    ],
+    ids=["diagonal", "split_axes", "repeated"],
+)
+def test_local_advanced_subtensor_of_unit_axes(shape, build, build_expected):
+    x = tensor("x", shape=shape)
+
+    result = utt.RewriteTester([x], [build(x)])
+    result.assert_graph(build_expected(x))
+    result.assert_eval(np.arange(np.prod(shape), dtype=x.dtype).reshape(shape))
+
+
+@pytest.mark.parametrize(
+    "build, build_expected",
+    [
+        (lambda x, y: x[np.array([0, 0])].set(y), lambda x, y: y[1][None]),
+        (
+            lambda x, y: pt.inc_subtensor(
+                x[np.array([0, 0])], y, ignore_duplicates=True
+            ),
+            lambda x, y: x + y[1][None],
+        ),
+        (
+            lambda x, y: x[np.array([0, 0])].inc(y[0]),
+            lambda x, y: x + pt.constant([[2.0]]) * y[0][None],
+        ),
+    ],
+    ids=["set", "inc_ignore_duplicates", "repeats"],
+)
+def test_local_advanced_inc_subtensor_of_unit_axes(build, build_expected):
+    x = tensor("x", shape=(1, 4))
+    y = tensor("y", shape=(2, 4))
+
+    result = utt.RewriteTester([x, y], [build(x, y)])
+    result.assert_graph(build_expected(x, y))
+    result.assert_eval(
+        np.ones((1, 4), dtype=x.dtype),
+        np.arange(8, dtype=y.dtype).reshape(2, 4),
+    )
+
+
+def test_unit_axes_rewrites_of_constant_stop_arange_index():
+    x = tensor("x", shape=(1, 3, 1))
+    y = tensor("y", shape=(1, 3))
+    index = pt.arange(1)
+    read = x[index, :, index]
+    write = x[index, :, index].set(y)
+
+    result = utt.RewriteTester([x, y], [read, write], exclude=("constant_folding",))
+    result.assert_graph(x.dimshuffle("x", 1), y.dimshuffle("x", 1, "x"))
+    result.assert_eval(
+        np.arange(3, dtype=x.dtype).reshape(1, 3, 1),
+        np.arange(3, dtype=y.dtype).reshape(1, 3),
+    )
+
+
+@pytest.mark.parametrize(
+    "x_dtype, y_shape",
+    [("float64", (None, 4)), ("int8", (2, 4))],
+    ids=["dynamic_index_length", "mixed_dtype"],
+)
+def test_local_advanced_inc_subtensor_of_unit_axes_not_applied(x_dtype, y_shape):
+    x = tensor("x", shape=(1, 4), dtype=x_dtype)
+    y = tensor("y", shape=y_shape, dtype="float64")
+    out = x[np.array([0, 0])].inc(y)
+
+    utt.RewriteTester([x, y], [out]).assert_graph(out)
+
+
 class TestSubtensorIncSubtensor:
     @classmethod
     def setup_class(cls):
