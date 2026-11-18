@@ -77,8 +77,12 @@ def clone_replace(
     """
     from pytensor.compile.rebuild import rebuild_collect_shared
 
-    items = list(_format_replace(replace).items())
+    if not replace:
+        # No replacements to apply, so clone only once.
+        _, outs, _ = rebuild_collect_shared(output, [], [], [], **rebuild_kwds)
+        return outs
 
+    items = list(_format_replace(replace).items())
     tmp_replace = [(x, x.type()) for x, y in items]
     new_replace = [(x, y) for ((_, x), (_, y)) in zip(tmp_replace, items, strict=True)]
     _, _outs, _ = rebuild_collect_shared(output, [], tmp_replace, [], **rebuild_kwds)

@@ -474,8 +474,7 @@ class Elemwise(OpenMPOp):
     def make_scalar_node(self, *inputs):
         """Create a scalar Apply node matching the dtypes of tensor inputs.
 
-        Used by get_output_info, grad, and backend dispatchers to obtain
-        the scalar-level graph corresponding to this Elemwise operation.
+        Used by backend dispatchers when the scalar-level graph is needed.
         """
         return self.scalar_op.make_node(
             *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
@@ -486,7 +485,7 @@ class Elemwise(OpenMPOp):
         dimshuffled inputs.
 
         """
-        shadow = self.make_scalar_node(*inputs)
+        out_dtypes = self.scalar_op.output_dtypes([i.type.dtype for i in inputs])
 
         target_length = max(input.type.ndim for input in inputs)
 
@@ -514,7 +513,7 @@ class Elemwise(OpenMPOp):
                     broadcast_static_dim_lengths(shape)
                     for shape in zip(*[inp.type.shape for inp in inputs], strict=True)
                 ]
-            ] * shadow.nout
+            ] * len(out_dtypes)
         except ValueError:
             raise ValueError(
                 f"Incompatible Elemwise input shapes {[inp.type.shape for inp in inputs]}"
@@ -533,7 +532,6 @@ class Elemwise(OpenMPOp):
                             "with broadcasted dimensions."
                         )
 
-        out_dtypes = [o.type.dtype for o in shadow.outputs]
         if any(
             inputs[i].type.dtype != out_dtypes[o] for o, i in inplace_pattern.items()
         ):
@@ -641,9 +639,9 @@ class Elemwise(OpenMPOp):
 
         scalar_inputs = list(map(as_scalar, inputs))
         scalar_ograds = list(map(as_scalar, ograds))
-        scalar_outputs = self.scalar_op.make_node(
-            *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
-        ).outputs
+        scalar_outputs = [
+            get_scalar_type(out.type.dtype).make_variable() for out in outputs
+        ]
         scalar_igrads = self.scalar_op.pullback(
             scalar_inputs, scalar_outputs, scalar_ograds
         )

@@ -1181,6 +1181,21 @@ class ScalarOp(COp):
             )
         return Apply(self, inputs, outputs)
 
+    def output_dtypes(self, input_dtypes):
+        """Infer output dtypes without requiring input Variables."""
+        if type(self).make_node is ScalarOp.make_node:
+            return [
+                t.dtype
+                for t in self.output_types(
+                    [get_scalar_type(dtype) for dtype in input_dtypes]
+                )
+            ]
+
+        node = self.make_node(
+            *[get_scalar_type(dtype).make_variable() for dtype in input_dtypes]
+        )
+        return [out.type.dtype for out in node.outputs]
+
     def output_types(self, types):
         if self.output_types_preference is not None:
             variables = self.output_types_preference(*types)
@@ -2531,15 +2546,10 @@ class Abs(UnaryScalarOp):
     non_negative = True
     nfunc_spec = ("abs", 1, 1)
 
-    def make_node(self, x):
-        inputs = [as_scalar(input) for input in [x]]
-        if inputs[0].type == complex64:
-            outputs = [float32()]
-        elif inputs[0].type == complex128:
-            outputs = [float64()]
-        else:
-            outputs = [t() for t in self.output_types([input.type for input in inputs])]
-        return Apply(self, inputs, outputs)
+    def output_types(self, types):
+        if types[0] in complex_types:
+            return real_out(types[0])
+        return super().output_types(types)
 
     def impl(self, x):
         return np.abs(x)

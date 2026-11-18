@@ -102,6 +102,9 @@ class ShapeFeature(Feature):
         # Compat: scheduled replacements for local_track_shape_i
         self.scheduled: dict = {}
 
+    def _shape_constant(self, value):
+        return self.lscalar_one if value == 1 else constant(value, dtype="int64")
+
     def _shape_i_var(self, v, i):
         per_dim = self._shape_i_cache.get(v)
         if per_dim is not None:
@@ -112,22 +115,21 @@ class ShapeFeature(Feature):
             per_dim = {}
             self._shape_i_cache[v] = per_dim
         if isinstance(v.type, HasShape) and v.type.shape[i] is not None:
-            res = constant(v.type.shape[i], dtype="int64")
+            res = self._shape_constant(v.type.shape[i])
         else:
             res = Shape_i(i)(v)
         per_dim[i] = res
         return res
 
-    @staticmethod
-    def _fresh_shape_i(v, i):
-        """Like ``_shape_i_var``, but never reusing a cached variable.
+    def _fresh_shape_i(self, v, i):
+        """Like ``_shape_i_var``, but always creating fresh symbolic reads.
 
         The cached variable may live in the graph with its own constraints
         (e.g. its buffer destroyed by an inplace Op); a fresh read carries no
         constraints beyond reading ``v``, which non-recursive consumers rely on.
         """
         if isinstance(v.type, HasShape) and v.type.shape[i] is not None:
-            return constant(v.type.shape[i], dtype="int64")
+            return self._shape_constant(v.type.shape[i])
         return Shape_i(i)(v)
 
     def _coerce_shape_element(self, element, node):
@@ -152,7 +154,7 @@ class ShapeFeature(Feature):
                 )
             if element.type.dtype != "int64":
                 if isinstance(element, Constant):
-                    return constant(int(element.data), dtype="int64")
+                    return self._shape_constant(int(element.data))
                 return cast(element, "int64")
             return element
         if isinstance(element, int | np.integer):
@@ -160,7 +162,7 @@ class ShapeFeature(Feature):
                 raise ValueError(
                     f"infer_shape for {node.op} returned a negative shape: {int(element)}"
                 )
-            return constant(int(element), dtype="int64")
+            return self._shape_constant(int(element))
         raise TypeError(
             f"infer_shape for {node.op} returned an unsupported "
             f"shape element of type {type(element).__name__}: {element!r}"
@@ -273,7 +275,7 @@ class ShapeFeature(Feature):
     def get_shape(self, var, idx):
         """Return a symbolic expression for ``var.shape[idx]``."""
         if isinstance(var.type, HasShape) and var.type.shape[idx] is not None:
-            return constant(var.type.shape[idx], dtype="int64")
+            return self._shape_constant(var.type.shape[idx])
 
         node = var.owner
         if node is None:
@@ -300,7 +302,7 @@ class ShapeFeature(Feature):
         Works on an unattached feature.
         """
         if isinstance(var.type, HasShape) and var.type.shape[idx] is not None:
-            return constant(var.type.shape[idx], dtype="int64")
+            return self._shape_constant(var.type.shape[idx])
 
         node = var.owner
         if node is None:

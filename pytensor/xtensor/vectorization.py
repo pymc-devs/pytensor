@@ -5,7 +5,6 @@ from itertools import chain
 from typing import Literal
 from typing import cast as typing_cast
 
-from pytensor import scalar as ps
 from pytensor.graph import Apply, Op
 from pytensor.graph.basic import Variable
 from pytensor.graph.replace import _vectorize_node
@@ -75,10 +74,7 @@ class XElemwise(XOp):
             )
 
         output_dims, output_shape = unzip(combine_dims_and_shape(inputs).items(), n=2)
-        dummy_scalars = [ps.get_scalar_type(inp.type.dtype)() for inp in inputs]
-        output_dtypes = [
-            out.type.dtype for out in self.scalar_op.make_node(*dummy_scalars).outputs
-        ]
+        output_dtypes = self.scalar_op.output_dtypes([inp.type.dtype for inp in inputs])
         outputs = [
             xtensor(dtype=output_dtype, dims=output_dims, shape=output_shape)
             for output_dtype in output_dtypes
