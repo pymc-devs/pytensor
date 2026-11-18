@@ -526,3 +526,138 @@ def test_det_of_non_permutation_selection_is_not_rewritten():
     f = function([idx], pt.linalg.det(S), mode="FAST_RUN")
     assert any(isinstance(node.op, Det) for node in f.maker.fgraph.apply_nodes)
     assert_allclose(f(np.array([0, 1, 1, 3])), 0.0)  # duplicate column -> singular
+
+
+def test_dot_distributive_add():
+    rng = np.random.default_rng(42)
+    a_val = rng.standard_normal((3, 4))
+    b_val = rng.standard_normal((4, 5))
+    c_val = rng.standard_normal((4, 5))
+
+    a = pt.dmatrix("a")
+    b = pt.dmatrix("b")
+    c = pt.dmatrix("c")
+
+    # Left distributive: a @ b + a @ c -> a @ (b + c)
+    out_left = pt.dot(a, b) + pt.dot(a, c)
+    rewritten_left = rewrite_graph(out_left, include=("canonicalize",))
+    assert isinstance(rewritten_left.owner.op, Dot)
+    assert rewritten_left.owner.inputs[0] == a
+    assert rewritten_left.owner.inputs[1].owner.op == pt.math.add
+
+    f_left = function([a, b, c], out_left, mode="FAST_RUN")
+    assert_allclose(f_left(a_val, b_val, c_val), a_val @ b_val + a_val @ c_val)
+
+    # Right distributive: b @ a + c @ a -> (b + c) @ a
+    d_val = rng.standard_normal((5, 3))
+    e_val = rng.standard_normal((5, 3))
+    d = pt.dmatrix("d")
+    e = pt.dmatrix("e")
+    out_right = pt.dot(d, a) + pt.dot(e, a)
+    rewritten_right = rewrite_graph(out_right, include=("canonicalize",))
+    assert isinstance(rewritten_right.owner.op, Dot)
+    assert rewritten_right.owner.inputs[1] == a
+    assert rewritten_right.owner.inputs[0].owner.op == pt.math.add
+
+    f_right = function([d, e, a], out_right, mode="FAST_RUN")
+    assert_allclose(f_right(d_val, e_val, a_val), d_val @ a_val + e_val @ a_val)
+
+    # Batched 3D matmul: a_3d @ b_3d + a_3d @ c_3d -> a_3d @ (b_3d + c_3d)
+    a_3d = pt.dtensor3("a_3d")
+    b_3d = pt.dtensor3("b_3d")
+    c_3d = pt.dtensor3("c_3d")
+    out_batched = a_3d @ b_3d + a_3d @ c_3d
+    rewritten_batched = rewrite_graph(out_batched, include=("canonicalize",))
+    assert isinstance(rewritten_batched.owner.op, Blockwise)
+    assert rewritten_batched.owner.inputs[0] == a_3d
+    assert rewritten_batched.owner.inputs[1].owner.op == pt.math.add
+
+
+def test_dot_distributive_sub():
+    rng = np.random.default_rng(43)
+    a_val = rng.standard_normal((3, 4))
+    b_val = rng.standard_normal((4, 5))
+    c_val = rng.standard_normal((4, 5))
+
+    a = pt.dmatrix("a")
+    b = pt.dmatrix("b")
+    c = pt.dmatrix("c")
+
+    # Left distributive: a @ b - a @ c -> a @ (b - c)
+    out_left = pt.dot(a, b) - pt.dot(a, c)
+    rewritten_left = rewrite_graph(out_left, include=("canonicalize",))
+    assert isinstance(rewritten_left.owner.op, Dot)
+    assert rewritten_left.owner.inputs[0] == a
+    assert rewritten_left.owner.inputs[1].owner.op == pt.math.sub
+
+    f_left = function([a, b, c], out_left, mode="FAST_RUN")
+    assert_allclose(f_left(a_val, b_val, c_val), a_val @ b_val - a_val @ c_val)
+
+    # Right distributive: b @ a - c @ a -> (b - c) @ a
+    d_val = rng.standard_normal((5, 3))
+    e_val = rng.standard_normal((5, 3))
+    d = pt.dmatrix("d")
+    e = pt.dmatrix("e")
+    out_right = pt.dot(d, a) - pt.dot(e, a)
+    rewritten_right = rewrite_graph(out_right, include=("canonicalize",))
+    assert isinstance(rewritten_right.owner.op, Dot)
+    assert rewritten_right.owner.inputs[1] == a
+    assert rewritten_right.owner.inputs[0].owner.op == pt.math.sub
+
+    f_right = function([d, e, a], out_right, mode="FAST_RUN")
+    assert_allclose(f_right(d_val, e_val, a_val), d_val @ a_val - e_val @ a_val)
+
+
+def test_dot_scalar_pull_out():
+    rng = np.random.default_rng(44)
+    a_val = rng.standard_normal((3, 4))
+    b_val = rng.standard_normal((4, 5))
+
+    a = pt.dmatrix("a")
+    b = pt.dmatrix("b")
+    s = pt.dscalar("s")
+
+    # Left scalar: (s * a) @ b -> s * (a @ b)
+    out_left = pt.dot(s * a, b)
+    rewritten_left = rewrite_graph(out_left, include=("canonicalize",))
+    assert rewritten_left.owner.op == pt.math.mul
+
+    f_left = function([s, a, b], out_left, mode="FAST_RUN")
+    assert_allclose(f_left(2.5, a_val, b_val), (2.5 * a_val) @ b_val)
+
+    # Right scalar: a @ (s * b) -> s * (a @ b)
+    out_right = pt.dot(a, s * b)
+    rewritten_right = rewrite_graph(out_right, include=("canonicalize",))
+    assert rewritten_right.owner.op == pt.math.mul
+
+    f_right = function([s, a, b], out_right, mode="FAST_RUN")
+    assert_allclose(f_right(3.5, a_val, b_val), a_val @ (3.5 * b_val))
+
+    # Batched scalar pull-out
+    a_3d = pt.dtensor3("a_3d")
+    b_3d = pt.dtensor3("b_3d")
+    out_batched = (s * a_3d) @ b_3d
+    rewritten_batched = rewrite_graph(out_batched, include=("canonicalize",))
+    assert rewritten_batched.owner.op == pt.math.mul
+
+
+def test_dot_algebraic_guards():
+    a = pt.dmatrix("a")
+    b = pt.dmatrix("b")
+    c = pt.dmatrix("c")
+
+    # Non-commutative mismatch: a @ b + c @ a must not factor
+    expr_mismatch = pt.dot(a, b) + pt.dot(c, a)
+    rew_mismatch = rewrite_graph(expr_mismatch, include=("canonicalize",))
+    dot_nodes = [
+        inp.owner
+        for inp in rew_mismatch.owner.inputs
+        if inp.owner and isinstance(inp.owner.op, Dot)
+    ]
+    assert len(dot_nodes) == 2
+
+    # Row/column vector multiplier must not be pulled out
+    v = pt.dvector("v")
+    expr_vec = pt.dot(v[:, None] * a, b)
+    rew_vec = rewrite_graph(expr_vec, include=("canonicalize",))
+    assert isinstance(rew_vec.owner.op, Dot)

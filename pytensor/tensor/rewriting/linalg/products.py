@@ -14,6 +14,7 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
+from pytensor.scalar.basic import Mul as ScalarMul
 from pytensor.tensor.basic import (
     ExtractDiag,
     Eye,
@@ -23,10 +24,11 @@ from pytensor.tensor.basic import (
     diag,
 )
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import Expm, KroneckerProduct
 from pytensor.tensor.linalg.summary import det
-from pytensor.tensor.math import Dot, outer, prod
+from pytensor.tensor.math import Dot, add, mul, outer, prod, sub
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_stabilize,
@@ -375,3 +377,138 @@ def det_of_permutation(fgraph, node):
     sign = atleast_Nd(sign, n=node.outputs[0].type.ndim)
     copy_stack_trace(node.outputs[0], sign)
     return [sign]
+
+
+def _is_matrix_dot(v):
+    if v.owner:
+        if isinstance(v.owner.op, Dot):
+            return True, v.owner.inputs[0], v.owner.inputs[1], v.owner.op
+        if isinstance(v.owner.op, Blockwise) and isinstance(v.owner.op.core_op, Dot):
+            return True, v.owner.inputs[0], v.owner.inputs[1], v.owner.op
+    return False, None, None, None
+
+
+def _extract_scalar_and_matrix(v):
+    """Extract scalar factor and matrix variable from a tensor product.
+
+    Returns (scalar, matrix) if `v` can be decomposed as `scalar * matrix`,
+    where `scalar` has scalar or batch-scalar broadcastable dimensions.
+    """
+    if (
+        v.owner
+        and isinstance(v.owner.op, Elemwise)
+        and isinstance(v.owner.op.scalar_op, ScalarMul)
+    ):
+        scalars = []
+        matrices = []
+        for inp in v.owner.inputs:
+            if (
+                inp.type.ndim == 0
+                or all(inp.type.broadcastable)
+                or (inp.ndim == v.ndim and inp.type.broadcastable[-2:] == (True, True))
+            ):
+                scalars.append(inp)
+            else:
+                matrices.append(inp)
+        if scalars and matrices:
+            s = mul(*scalars) if len(scalars) > 1 else scalars[0]
+            m = mul(*matrices) if len(matrices) > 1 else matrices[0]
+            return s, m
+    return None, None
+
+
+@register_canonicalize
+@node_rewriter([add])
+def dot_distributive_add(fgraph, node):
+    """Factor common operands out of sums of matrix multiplications.
+
+    A @ B + A @ C -> A @ (B + C)
+    B @ A + C @ A -> (B + C) @ A
+    """
+    inputs = list(node.inputs)
+    for i in range(len(inputs)):
+        is_dot_i, a1, b1, op_i = _is_matrix_dot(inputs[i])
+        if not is_dot_i:
+            continue
+        for j in range(i + 1, len(inputs)):
+            is_dot_j, a2, b2, _ = _is_matrix_dot(inputs[j])
+            if not is_dot_j:
+                continue
+
+            # Left distributive: A @ B1 + A @ B2 -> A @ (B1 + B2)
+            if a1 is a2 or a1 == a2:
+                new_dot = op_i(a1, add(b1, b2))
+                rem = [inputs[k] for k in range(len(inputs)) if k != i and k != j]
+                new_out = add(*[*rem, new_dot]) if rem else new_dot
+                copy_stack_trace(node.outputs[0], new_out)
+                return [new_out]
+
+            # Right distributive: A1 @ B + A2 @ B -> (A1 + A2) @ B
+            if b1 is b2 or b1 == b2:
+                new_dot = op_i(add(a1, a2), b1)
+                rem = [inputs[k] for k in range(len(inputs)) if k != i and k != j]
+                new_out = add(*[*rem, new_dot]) if rem else new_dot
+                copy_stack_trace(node.outputs[0], new_out)
+                return [new_out]
+
+    return None
+
+
+@register_canonicalize
+@node_rewriter([sub])
+def dot_distributive_sub(fgraph, node):
+    """Factor common operands out of differences of matrix multiplications.
+
+    A @ B - A @ C -> A @ (B - C)
+    B @ A - C @ A -> (B - C) @ A
+    """
+    if len(node.inputs) != 2:
+        return None
+    x, y = node.inputs
+    is_dot_x, a1, b1, op_x = _is_matrix_dot(x)
+    is_dot_y, a2, b2, _ = _is_matrix_dot(y)
+    if not (is_dot_x and is_dot_y):
+        return None
+
+    # Left distributive: A @ B1 - A @ B2 -> A @ (B1 - B2)
+    if a1 is a2 or a1 == a2:
+        new_out = op_x(a1, sub(b1, b2))
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
+
+    # Right distributive: A1 @ B - A2 @ B -> (A1 - A2) @ B
+    if b1 is b2 or b1 == b2:
+        new_out = op_x(sub(a1, a2), b1)
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
+
+    return None
+
+
+@register_canonicalize
+@node_rewriter([Dot, blockwise_of(Dot)])
+def dot_scalar_pull_out(fgraph, node):
+    """Pull scalar multipliers outside of matrix multiplications.
+
+    (s * A) @ B -> s * (A @ B)
+    A @ (s * B) -> s * (A @ B)
+    """
+    a, b = node.inputs
+
+    # Check left operand
+    s, m = _extract_scalar_and_matrix(a)
+    if s is not None:
+        new_dot = node.op(m, b)
+        new_out = mul(s, new_dot)
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
+
+    # Check right operand
+    s, m = _extract_scalar_and_matrix(b)
+    if s is not None:
+        new_dot = node.op(a, m)
+        new_out = mul(s, new_dot)
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
+
+    return None
