@@ -2486,16 +2486,7 @@ def test_local_adv_idx_to_slice_boolean_mask():
         (0, lambda _: ((slice(None, 6, 3),), (slice(6, None, 3),)), 3),
         (0, lambda step: ((slice(None, 6, step),), (slice(6, None, step),)), 4),
         # Below should not be merged
-        # 1 <= stop <= 5 isn't known: with stop = 0, x[1:stop] ++ x[stop:5] is not x[1:5]
-        (
-            0,
-            lambda stop: (
-                (slice(1, stop, None),),
-                (slice(stop, 5, None),),
-                (slice(5, 7, None)),
-            ),
-            5,
-        ),
+        # 1 <= stop + 1 <= 5 isn't known (e.g. stop = -1), so this can't be x[1:5]
         (
             0,
             lambda stop: (
@@ -2563,6 +2554,7 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
     "slices_fn",
     [
         lambda s: [slice(None, -1), slice(-1, 2)],
+        lambda s: [slice(1, s), slice(s, 5)],
         lambda s: [slice(s, 5), slice(5, 7)],
         lambda s: [slice(None, 5), slice(5, -2)],
     ],
