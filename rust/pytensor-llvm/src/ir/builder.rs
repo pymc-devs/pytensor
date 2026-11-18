@@ -989,7 +989,10 @@ impl Builder {
         let t = self.lt(&ty.0);
         let mut vals: Vec<LLVMValueRef> = if ty.0.is_float() {
             // SAFETY: float constants of a float type of this module's context.
-            values.iter().map(|&v| unsafe { c::LLVMConstReal(t, v) }).collect()
+            values
+                .iter()
+                .map(|&v| unsafe { c::LLVMConstReal(t, v) })
+                .collect()
         } else if ty.0.is_int() {
             // SAFETY: integer constants of an integer type of this module's context.
             values

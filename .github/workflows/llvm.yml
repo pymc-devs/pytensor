@@ -1,0 +1,218 @@
+name: LLVM backend
+
+# Builds the pytensor-llvm extension (rust/pytensor-llvm) against a minimal static LLVM
+# on every platform we ship wheels for, and runs tests/link/llvm with the built wheels.
+#
+# LLVM itself (rust/pytensor-llvm/ci/build-llvm.sh) takes 1-3 hours, so it is cached,
+# keyed on the build script, llvm-minimal.cmake, llvm-version.txt and the build image.
+# A cache miss rebuilds it inside the normal build job.
+
+on:
+  push:
+    branches:
+      - main
+      - v2
+    paths:
+      - "rust/pytensor-llvm/**"
+      - "pytensor/**"
+      - "tests/link/llvm/**"
+      - "pyproject.toml"
+      - "setup.py"
+      - ".github/workflows/llvm.yml"
+  pull_request:
+    branches:
+      - main
+      - v2
+    paths:
+      - "rust/pytensor-llvm/**"
+      - "pytensor/**"
+      - "tests/link/llvm/**"
+      - "pyproject.toml"
+      - "setup.py"
+      - ".github/workflows/llvm.yml"
+  workflow_dispatch:
+
+# Cancels all previous workflow runs for pull requests that have not completed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check formatting
+        working-directory: rust/pytensor-llvm
+        run: cargo fmt --check
+
+  build:
+    name: "build: ${{ matrix.name }}"
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    # a cache miss builds LLVM (Windows is slowest)
+    timeout-minutes: 340
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            container: quay.io/pypa/manylinux_2_28_x86_64:2026.11.14-1@sha256:d086f64cddcace250ef0f0073583c51b8298159303290a730c9f59bd91edfd2c
+            maturin-args: --compatibility manylinux_2_28 -i /opt/python/cp312-cp312/bin/python
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            container: quay.io/pypa/manylinux_2_28_aarch64:2026.11.14-1@sha256:34a5e614a4eb26f73f8bf44cbbf2acf8011620453d03ea35a58537bb3cde44de
+            maturin-args: --compatibility manylinux_2_28 -i /opt/python/cp312-cp312/bin/python
+          - name: macos-arm64
+            os: macos-15
+            container: ""
+          - name: windows-x86_64
+            os: windows-latest
+            container: ""
+            # static CRT, as LLVM (ci/build-llvm.sh): Python doesn't ship msvcp140.dll
+            rustflags: -C target-feature=+crt-static
+    env:
+      # same for LLVM and the wheel; part of the LLVM cache key
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      RUSTFLAGS: ${{ matrix.rustflags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build tools (manylinux)
+        if: matrix.container != ''
+        run: |
+          /opt/python/cp312-cp312/bin/python -m venv /opt/tools
+          /opt/tools/bin/pip install cmake ninja "maturin>=1.5,<2"
+          echo /opt/tools/bin >> "$GITHUB_PATH"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: matrix.container == ''
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        if: matrix.container == ''
+        run: |
+          python -m pip install cmake ninja "maturin>=1.5,<2"
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        if: runner.os == 'Windows'
+
+      - name: Restore LLVM
+        id: llvm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .llvm
+          key: llvm-${{ matrix.name }}-${{ matrix.container }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('rust/pytensor-llvm/llvm-version.txt', 'rust/pytensor-llvm/llvm-minimal.cmake', 'rust/pytensor-llvm/ci/build-llvm.sh') }}
+
+      - name: Build LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: bash rust/pytensor-llvm/ci/build-llvm.sh "$GITHUB_WORKSPACE/.llvm"
+
+      - name: Save LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .llvm
+          key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
+
+      # Only on Linux: elsewhere the test binary can't link without libpython
+      # (pyo3's extension-module).
+      - name: Rust tests
+        if: matrix.name == 'linux-x86_64'
+        working-directory: rust/pytensor-llvm
+        run: |
+          export LLVM_SYS_231_PREFIX="$GITHUB_WORKSPACE/.llvm"
+          cargo test --release
+
+      - name: Build wheel
+        working-directory: rust/pytensor-llvm
+        env:
+          MATURIN_ARGS: ${{ matrix.maturin-args }}
+        run: |
+          export LLVM_SYS_231_PREFIX="$GITHUB_WORKSPACE/.llvm"
+          # shellcheck disable=SC2086 # MATURIN_ARGS is a list of arguments
+          maturin build --release --out dist $MATURIN_ARGS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: llvm-wheel-${{ matrix.name }}
+          path: rust/pytensor-llvm/dist/*.whl
+          retention-days: 7
+
+  test:
+    name: "test: ${{ matrix.name }} py${{ matrix.python-version }}"
+    needs: build
+    # Test the platforms whose wheel was built even if others failed (those fail at the
+    # download).
+    if: ${{ !cancelled() }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            python-version: "3.12"
+          - name: linux-x86_64
+            os: ubuntu-latest
+            python-version: "3.14"
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            python-version: "3.13"
+          - name: macos-arm64
+            os: macos-15
+            python-version: "3.13"
+          - name: windows-x86_64
+            os: windows-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: llvm-wheel-${{ matrix.name }}
+          path: wheel
+
+      # cl, for pytensor's Cython extension and the C API test harness
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        if: runner.os == 'Windows'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install wheel/*.whl -e ".[numba]" pytest pytest-mock pytest-benchmark
+          # the tests importorskip pytensor_llvm: a broken wheel must fail here instead
+          python -c "import pytensor_llvm, pytensor_llvm.ir, pytensor_llvm.interp"
+
+      - name: Run tests
+        run: python -m pytest tests/link/llvm -r A --durations=20
