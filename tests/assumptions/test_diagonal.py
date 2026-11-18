@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.assumptions import DIAGONAL, FactState
+from pytensor.assumptions import DIAGONAL, ConflictingAssumptionsError, FactState
 from pytensor.assumptions.specify import assume
 from pytensor.graph import rewrite_graph
 from pytensor.graph.fg import FunctionGraph
@@ -56,6 +56,33 @@ def test_constant_sub_matrix_ndim_is_false(data):
     c = pt.constant(data)
     _, af = make_fgraph(c)
     assert af.get(c, DIAGONAL) == FactState.FALSE
+
+
+@pytest.mark.parametrize(
+    "shape, expected",
+    [
+        ((1, 1), FactState.TRUE),
+        ((3, 1, 1), FactState.TRUE),
+        ((1, None), FactState.UNKNOWN),
+        ((1,), FactState.UNKNOWN),
+    ],
+    ids=["matrix", "batched", "partially_static", "vector"],
+)
+def test_static_unit_matrix_is_diagonal(shape, expected):
+    """A matrix whose last two axes are statically (1, 1) has no off-diagonal entries,
+    whatever produced it."""
+    x = pt.tensor("x", shape=shape)
+    y = pt.exp(x)
+    _, af = make_fgraph(y)
+    assert af.get(x, DIAGONAL) == expected
+    assert af.get(y, DIAGONAL) == expected
+
+
+def test_static_unit_matrix_declared_not_diagonal_raises():
+    x = assume(pt.tensor("x", shape=(1, 1)), diagonal=False)
+    _, af = make_fgraph(x)
+    with pytest.raises(ConflictingAssumptionsError):
+        af.get(x, DIAGONAL)
 
 
 def test_dot_of_constant_eye_reduces():
