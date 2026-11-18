@@ -2640,32 +2640,39 @@ def local_join_subtensors(fgraph, node):
         ):
             joined.append(t)
             continue
-        # x[a:b] ++ x[b:c] is x[a:c] only if a <= b <= c once clipped to the length:
-        # true for None ends, and for constants of b's sign in that order.
-        a, b, b2, c = (
-            int(v.data) if isinstance(v, Constant) else v
-            for v in (s1.start, s1.stop, s2.start, s2.stop)
-        )
+        # x[a:b] ++ x[b:c] is x[min(a, b):max(b, c)] when the bounds are all >= 0 or all
+        # negative constants, as both map monotonically onto positions. None ends stay open.
+        a, b, b2, c = s1.start, s1.stop, s2.start, s2.stop
+        ends = [v for v in (a, b, c) if v is not None]
+        neg = [isinstance(v, Constant) and v.data < 0 for v in ends]
         if not (
             b is not None
-            and (b is b2 or (isinstance(b, int) and isinstance(b2, int) and b == b2))
+            and (
+                b is b2
+                or (
+                    isinstance(b, Constant)
+                    and isinstance(b2, Constant)
+                    and b.data == b2.data
+                )
+            )
             and (
                 (a is None and c is None)
-                or (
-                    isinstance(b, int)
-                    and all(
-                        v is None or (isinstance(v, int) and (v < 0) == (b < 0))
-                        for v in (a, c)
-                    )
-                    and (a is None or a <= b)
-                    and (c is None or b <= c)
-                )
+                or all(neg)
+                or (not any(neg) and all(map(_is_provably_non_negative, ends)))
             )
         ):
             joined.append(t)
             continue
+        start, stop = (
+            None
+            if u is None
+            else int(pyf(u.data, b.data))
+            if isinstance(u, Constant) and isinstance(b, Constant)
+            else f(u, b)
+            for u, f, pyf in ((a, minimum, min), (c, maximum, max))
+        )
         new_idxs = list(idxs1)
-        new_idxs[axis] = slice(s1.start, s2.stop, s1.step)
+        new_idxs[axis] = slice(start, stop, s1.step)
         joined[-1] = prev.owner.inputs[0][tuple(new_idxs)]
     if len(joined) == len(node.inputs):
         return None
