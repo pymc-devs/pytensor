@@ -1,7 +1,9 @@
 import sys
 import time
 import warnings
+import weakref
 from dataclasses import dataclass
+from functools import singledispatch
 from io import StringIO
 from typing import Any
 
@@ -957,3 +959,145 @@ class NoOutputInplaceOnInput(Feature):
                     "nodes only, not aliased by an output."
                 )
         return True
+
+
+@singledispatch
+def op_view_parents(op, node) -> list[tuple[Variable, ...]]:
+    """Per output of `node`, the variables whose memory it may lie in (it may be a
+    view of them): the inputs `op.view_map` lists. Ops whose views follow from more
+    than their `view_map` (`OpFromGraph`: its inner graph) register their own; they
+    may also name an earlier output of the node (two outputs in the same memory)."""
+    view_map = op.view_map
+    return [
+        tuple(node.inputs[i] for i in view_map.get(k, ()))
+        for k in range(len(node.outputs))
+    ]
+
+
+class ViewFeature(Feature):
+    """Which variables of a graph may share memory, from the views its ops may return
+    (`op_view_parents`).
+
+    * ``fgraph.view_parents(var)``: the variables `var` may directly be a view of;
+    * ``fgraph.view_sources(var)``: the variables `var` may be a view of, directly or
+      through other views;
+    * ``fgraph.view_roots(var)``: the variables whose memory `var` may lie in: its
+      sources that aren't views themselves, or `var` itself for new memory;
+    * ``fgraph.undeclared_view_roots()``: the roots of views that ops don't declare in
+      their `view_map` (an `OpFromGraph` passing an input through). The
+      `DestroyHandler` doesn't see these: memory under them can't be destroyed safely.
+
+    Unlike `pytensor.compile.aliasing.alias_root`, an output may be a view of several
+    inputs, and outputs of destroying ops are new values (the `DestroyHandler`
+    validates what they overwrite). Results are computed lazily and cached. A detached
+    instance works on any graph that doesn't change (`view_feature`).
+    """
+
+    provides = (
+        "view_parents",
+        "view_sources",
+        "view_roots",
+        "undeclared_view_roots",
+    )
+
+    closure: dict[Variable, tuple[frozenset, frozenset]]
+
+    def __init__(self):
+        self.parents_of_node: dict = {}
+        #: var -> (sources, roots)
+        self.closure: dict = {}
+
+    def clone(self):
+        return type(self)()
+
+    def on_attach(self, fgraph):
+        if "view_roots" in fgraph._feature_methods:
+            raise AlreadyThere("a ViewFeature is already attached")
+
+    def on_detach(self, fgraph):
+        self.parents_of_node.clear()
+        self.closure.clear()
+
+    def on_prune(self, fgraph, node, reason):
+        self.parents_of_node.pop(node, None)
+        for o in node.outputs:
+            self.closure.pop(o, None)
+
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
+        self.parents_of_node.pop(node, None)
+        # (what is cached depends on what its parents' entries say: an entry that
+        # isn't cached has no cached dependents)
+        todo = list(node.outputs)
+        while todo:
+            v = todo.pop()
+            if self.closure.pop(v, None) is None:
+                continue
+            for client, _ in fgraph.clients.get(v, ()):
+                todo.extend(client.outputs)
+
+    def view_parents(self, fgraph, var) -> tuple[Variable, ...]:
+        node = var.owner
+        if node is None:
+            return ()
+        parents = self.parents_of_node.get(node)
+        if parents is None:
+            parents = self.parents_of_node[node] = op_view_parents(node.op, node)
+        return parents[node.outputs.index(var)]
+
+    def view_sources(self, fgraph, var) -> frozenset:
+        return self._closure(fgraph, var)[0]
+
+    def view_roots(self, fgraph, var) -> frozenset:
+        return self._closure(fgraph, var)[1]
+
+    def undeclared_view_roots(self, fgraph) -> frozenset:
+        roots: set = set()
+        for node in fgraph.apply_nodes:
+            view_map = node.op.view_map
+            for k, o in enumerate(node.outputs):
+                declared = {node.inputs[i] for i in view_map.get(k, ())}
+                for p in self.view_parents(fgraph, o):
+                    if p not in declared:
+                        roots |= self.view_roots(fgraph, p)
+        return frozenset(roots)
+
+    def _closure(self, fgraph, var) -> tuple[frozenset, frozenset]:
+        closure = self.closure
+        if var in closure:
+            return closure[var]
+        stack = [var]
+        while stack:
+            v = stack[-1]
+            if v in closure:
+                stack.pop()
+                continue
+            parents = self.view_parents(fgraph, v)
+            missing = [p for p in parents if p not in closure]
+            if missing:
+                stack.extend(missing)
+                continue
+            if parents:
+                sources = frozenset(parents).union(*(closure[p][0] for p in parents))
+                roots = frozenset().union(*(closure[p][1] for p in parents))
+            else:
+                sources, roots = frozenset(), frozenset((v,))
+            closure[v] = (sources, roots)
+            stack.pop()
+        return closure[var]
+
+
+_frozen_view_features: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def view_feature(fgraph) -> ViewFeature:
+    """The `ViewFeature` attached to `fgraph`; else a detached one, to be called with
+    `fgraph` (``view_feature(fg).view_roots(fg, var)``) while it doesn't change. Frozen
+    graphs share theirs."""
+    methods = getattr(fgraph, "_feature_methods", None)
+    if methods is not None:
+        feature = methods.get("view_roots")
+        return feature if feature is not None else ViewFeature()
+    feature = _frozen_view_features.get(fgraph)
+    if feature is None:
+        feature = _frozen_view_features[fgraph] = ViewFeature()
+    return feature
