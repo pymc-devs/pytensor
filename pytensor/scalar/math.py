@@ -12,6 +12,7 @@ import numpy as np
 from pytensor.configdefaults import config
 from pytensor.gradient import grad_not_implemented, grad_undefined
 from pytensor.scalar.basic import (
+    BaseComposite,
     BinaryScalarOp,
     ScalarOp,
     UnaryScalarOp,
@@ -30,11 +31,13 @@ from pytensor.scalar.basic import (
     identity,
     integer_types,
     isinf,
+    isnan,
     log,
     log1p,
     maximum,
     reciprocal,
     resolve_weak_dtypes,
+    sqrt,
     switch,
     true_div,
     upcast,
@@ -961,12 +964,13 @@ def _gammaincc_grad_cf(k, x, skip_loop):
     )
 
 
-def gammainc_grad(k, x):
+def _gammainc_grad_loops(k, x):
     """Gradient of the regularized lower gamma function (P) wrt to the first
-    argument (k, a.k.a. alpha).
+    argument (k, a.k.a. alpha), as a graph of `ScalarLoop`s.
 
     Differentiates the power series of P for x <= max(k, 1) and the continued
     fraction of Q = 1 - P otherwise, the split Cephes uses for P and Q.
+    It is the inner graph of `GammaIncGrad`.
     """
     dtype = upcast(k.type.dtype, x.type.dtype, "float32")
     nan_branch = (k < 0) | (x < 0)
@@ -988,11 +992,305 @@ def gammainc_grad(k, x):
     )
 
 
+# Cephes' Lanczos approximation (xsf cephes/lanczos.h), used by igam_fac
+_LANCZOS_G = 6.024680040776729583740234375
+_LANCZOS_NUM = (
+    0.006061842346248906525783753964555936883222,
+    0.5098416655656676188125178644804694509993,
+    19.51992788247617482847860966235652136208,
+    449.9445569063168119446858607650988409623,
+    6955.999602515376140356310115515198987526,
+    75999.29304014542649875303443598909137092,
+    601859.6171681098786670226533699352302507,
+    3481712.15498064590882071018964774556468,
+    14605578.08768506808414169982791359218571,
+    43338889.32467613834773723740590533316085,
+    86363131.28813859145546927288977868422342,
+    103794043.1163445451906271053616070238554,
+    56906521.91347156388090791033559122686859,
+)
+_LANCZOS_DEN = (
+    1.0,
+    66.0,
+    1925.0,
+    32670.0,
+    357423.0,
+    2637558.0,
+    13339535.0,
+    45995730.0,
+    105258076.0,
+    150917976.0,
+    120543840.0,
+    39916800.0,
+    0.0,
+)
+
+
+def _log1pmx_loop(z, skip_loop):
+    """log(1 + z) - z by its power series, for |z| < 1/2 (Cephes ``log1pmx``)."""
+    machep = np.array(np.finfo("float64").eps / 2)
+    max_iters = switch(
+        skip_loop, np.array(0, dtype="int32"), np.array(498, dtype="int32")
+    )
+
+    def inner_loop(zfac, res, n, z):
+        n += 1
+        zfac = -zfac * z
+        term = zfac / n
+        res += term
+        return (zfac, res, n), scalar_abs(term) < machep * scalar_abs(res)
+
+    zero, one = np.array(0.0), np.array(1.0)
+    _, res, _, _ = _make_scalar_loop(
+        max_iters, [z, zero, one], [z], inner_loop, name="log1pmx_series"
+    )
+    return switch(scalar_abs(z) < 0.5, res, log1p(z) - z)
+
+
+def _horner(coefs, z):
+    out = np.array(coefs[0])
+    for c in coefs[1:]:
+        out = out * z + c
+    return out
+
+
+def _igam_fac(k, x):
+    """x^k e^-x / Gamma(k), with Cephes' Lanczos form where k and x are close."""
+    maxlog = 7.09782712893383996843e2
+    g = _LANCZOS_G
+    zero = np.array(0.0)
+    ax = k * log(x) - x - gammaln(k)
+    fac_log = switch(ax < -maxlog, zero, exp(ax))
+    y = 1 / k
+    lanczos_sum = switch(
+        k > 1,
+        _horner(_LANCZOS_NUM[::-1], y) / _horner(_LANCZOS_DEN[::-1], y),
+        _horner(_LANCZOS_NUM, k) / _horner(_LANCZOS_DEN, k),
+    )
+    fac = k + (g - 0.5)
+    res = sqrt(fac / np.e) / lanczos_sum
+    small = (k < 200) & (x < 200)
+    z = (x - k - g + 0.5) / fac
+    fac_small = res * exp(k - x) * (x / fac) ** k
+    fac_large = res * exp(k * _log1pmx_loop(z, skip_loop=small) + x * (0.5 - g) / fac)
+    return switch(
+        scalar_abs(k - x) > 0.4 * scalar_abs(k),
+        fac_log,
+        switch(small, fac_small, fac_large),
+    )
+
+
+def _gammainc_and_grad_loops(k, x):
+    """P, Q and dP/dk in float64, from one series or continued fraction that carries
+    the value and its derivative in k, split as in `_gammainc_grad_loops`.
+
+    The prefactor x^k e^-x / Gamma(k) is Cephes' ``igam_fac``. Where the series has
+    P > 0.9, Q is `gammaincc`, since 1 - P would cancel, and where a loop does not
+    converge both values are `gammainc` and `gammaincc`.
+    """
+    out_dtype = upcast(k.type.dtype, x.type.dtype, "float32")
+    k, x = k.astype("float64"), x.astype("float64")
+    eps = np.array(np.finfo("float64").eps)
+    zero, one, nan = np.array(0.0), np.array(1.0), np.array(np.nan)
+
+    invalid = ~((k >= 0) & (x >= 0))
+    x_zero, x_inf, k_inf, k_zero = eq(x, 0), isinf(x), isinf(k), eq(k, 0)
+    edge = invalid | x_zero | x_inf | k_inf
+    series_branch = (x <= 1) | (x <= k)
+    log_x = log(x)
+    psi_k = psi(switch(series_branch, k + 1, k))
+    fac = _igam_fac(k, x)
+
+    # Series for P
+    skip_series = edge | ~series_branch
+    max_iters = switch(
+        skip_series, np.array(0, dtype="int32"), np.array(1e5, dtype="int32")
+    )
+
+    def series_loop(s, ds, t, dt, k_plus_n, x):
+        k_plus_n += 1
+        r = x / k_plus_n
+        dt = r * (dt - t / k_plus_n)
+        t = t * r
+        s += t
+        ds += dt
+        return (
+            (s, ds, t, dt, k_plus_n),
+            (t <= eps * s) & (scalar_abs(dt) <= eps * scalar_abs(ds)),
+        )
+
+    s, ds, *_, s_conv = _make_scalar_loop(
+        max_iters, [one, zero, one, zero, k], [x], series_loop, name="gammainc_series"
+    )
+    pre = switch(k > 0, fac / k, exp(-x))
+    p_s = switch(s_conv, pre * s, nan)
+    dp_s = switch(s_conv, pre * (s * (log_x - psi_k) + ds), nan)
+
+    # Continued fraction for Q
+    skip_cf = edge | series_branch | k_zero | eq(fac, 0)
+    max_iters = switch(
+        skip_cf, np.array(0, dtype="int32"), np.array(1e5, dtype="int32")
+    )
+
+    def cf_loop(f, df, pm2, pm1, qm2, qm1, dpm2, dpm1, dqm2, dqm1, n, k, x):
+        n += 1
+        z = x + 2 * n + 2 - k
+        yn = (n + 1 - k) * n
+        p = pm1 * z - pm2 * yn
+        q = qm1 * z - qm2 * yn
+        dp = dpm1 * z - pm1 - dpm2 * yn + pm2 * n
+        dq = dqm1 * z - qm1 - dqm2 * yn + qm2 * n
+        q_is_zero = eq(q, 0)
+        f_new = switch(q_is_zero, f, p / q)
+        df_new = switch(q_is_zero, df, (dp - f_new * dq) / q)
+        converged = (
+            ~q_is_zero
+            & (scalar_abs(f_new - f) <= eps * scalar_abs(f_new))
+            & (scalar_abs(df_new - df) <= eps * scalar_abs(df_new))
+        )
+        sc = switch(scalar_abs(p) > 1 / eps, eps, one)
+        return (
+            (
+                f_new,
+                df_new,
+                pm1 * sc,
+                p * sc,
+                qm1 * sc,
+                q * sc,
+                dpm1 * sc,
+                dp * sc,
+                dqm1 * sc,
+                dq * sc,
+                n,
+            ),
+            converged,
+        )
+
+    pm1 = x + 1
+    qm1 = (x + 2 - k) * x
+    f0 = pm1 / qm1
+    init = [f0, f0 * x / qm1, one, pm1, x, qm1, zero, zero, zero, -x, zero]
+    f, df, *_, f_conv = _make_scalar_loop(
+        max_iters, init, [k, x], cf_loop, name="gammaincc_cf"
+    )
+    fac_zero = eq(fac, 0)
+    q_c = switch(fac_zero, zero, switch(f_conv, fac * f, nan))
+    dq_c = switch(fac_zero, zero, switch(f_conv, fac * (f * (log_x - psi_k) + df), nan))
+
+    # gammainc and gammaincc where the loops cannot give the values; other elements
+    # call them on (1, 0), which returns at once
+    regular = ~edge & ~k_zero
+    loop_value = switch(series_branch, p_s, q_c)
+    need_both = regular & isnan(loop_value)
+    need_q = need_both | (regular & series_branch & (p_s > 0.9))
+    q_scipy = gammaincc(switch(need_q, k, one), switch(need_q, x, zero))
+    p_scipy = gammainc(switch(need_both, k, one), switch(need_both, x, zero))
+
+    p_series = switch(need_both, p_scipy, switch(need_q, 1 - q_scipy, p_s))
+    q_series = switch(need_both, q_scipy, switch(need_q, q_scipy, 1 - p_s))
+    p_cf = switch(need_both, p_scipy, 1 - q_c)
+    q_cf = switch(need_both, q_scipy, q_c)
+    p_reg = switch(series_branch, p_series, p_cf)
+    q_reg = switch(series_branch, q_series, q_cf)
+    dp_reg = switch(need_both, nan, switch(series_branch, dp_s, -dq_c))
+
+    p_x_zero = switch(k_zero, nan, zero)
+    p_x_inf = switch(k_inf, nan, one)
+    p_k_zero = one
+    dp_k_zero = switch(series_branch, dp_s, nan)
+    p = switch(
+        invalid,
+        nan,
+        switch(
+            x_zero,
+            p_x_zero,
+            switch(
+                x_inf, p_x_inf, switch(k_inf, zero, switch(k_zero, p_k_zero, p_reg))
+            ),
+        ),
+    )
+    q = switch(
+        invalid,
+        nan,
+        switch(
+            x_zero,
+            1 - p_x_zero,
+            switch(x_inf, 1 - p_x_inf, switch(k_inf, one, switch(k_zero, zero, q_reg))),
+        ),
+    )
+    dp = switch(
+        invalid,
+        nan,
+        switch(
+            x_zero | x_inf,
+            zero,
+            switch(k_inf, nan, switch(k_zero, dp_k_zero, dp_reg)),
+        ),
+    )
+    return [v.astype(out_dtype) for v in (p, q, dp)]
+
+
+class _GammaIncGraph(BaseComposite):
+    """A graph of the regularized gamma functions for one pair of input types.
+
+    Backends with their own implementation of a subclass dispatch on its type; the
+    others run the inner graph.
+    """
+
+    def __init__(self, k_type, x_type):
+        k, x = k_type(), x_type()
+        super().__init__([k, x], self.build_inner_graph(k, x))
+
+    def make_node(self, k, x):
+        k, x = as_scalar(k), as_scalar(x)
+        if (k.type, x.type) != self.inputs_type:
+            return type(self)(k.type, x.type).make_node(k, x)
+        return super().make_node(k, x)
+
+    def __str__(self):
+        return self.default_name
+
+
+class GammaIncGrad(_GammaIncGraph):
+    """Gradient of the regularized lower gamma function (P) wrt to the first
+    argument (k, a.k.a. alpha), with `_gammainc_grad_loops` as the inner graph.
+    """
+
+    default_name = "gammainc_grad"
+
+    @staticmethod
+    def build_inner_graph(k, x):
+        return [_gammainc_grad_loops(k, x)]
+
+
+def gammainc_grad(k, x):
+    """Gradient of the regularized lower gamma function (P) wrt to the first
+    argument (k, a.k.a. alpha).
+    """
+    k, x = as_scalar(k), as_scalar(x)
+    return GammaIncGrad(k.type, x.type)(k, x)
+
+
 def gammaincc_grad(k, x):
     """Gradient of the regularized upper gamma function (Q) wrt to the first
     argument (k, a.k.a. alpha).
     """
     return -gammainc_grad(k, x)
+
+
+class GammaIncAndGrad(_GammaIncGraph):
+    """P, Q and dP/dk of the regularized gamma functions, from one series or
+    continued fraction.
+
+    `local_gammainc_and_grad` puts it in place of `gammainc`, `gammaincc` and
+    `gammainc_grad` nodes that share inputs.
+    """
+
+    default_name = "gammainc_and_grad"
+
+    @staticmethod
+    def build_inner_graph(k, x):
+        return _gammainc_and_grad_loops(k, x)
 
 
 class Jv(BinaryScalarOp):

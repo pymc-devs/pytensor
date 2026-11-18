@@ -3,6 +3,7 @@ from math import comb
 
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor
 import pytensor.tensor as pt
@@ -16,6 +17,7 @@ from pytensor.link.numba.dispatch.elemwise import MAX_CAREDUCE_LOOPS
 from pytensor.scalar import Composite, and_, float64, or_, xor
 from pytensor.scalar import add as scalar_add
 from pytensor.scalar import mul as scalar_mul
+from pytensor.scalar.math import GammaIncAndGrad
 from pytensor.tensor import blas, matrix, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
@@ -745,6 +747,32 @@ def test_gammainc_wrt_k_grad():
         # gammainc is backed by scipy.special.cython_special, whose funcified kernel is njit-only
         eval_obj_mode=False,
     )
+
+
+def test_gammainc_value_and_grad():
+    k = pt.vector("k", dtype="float64")
+    x = pt.vector("x", dtype="float64")
+    p, q = pt.gammainc(k, x), pt.gammaincc(k, x)
+    dp_dk = grad(p.sum(), k)
+    fn = function([k, x], [p, q, dp_dk], mode="NUMBA")
+    assert [
+        type(node.op.scalar_op)
+        for node in fn.maker.fgraph.apply_nodes
+        if isinstance(node.op, Elemwise)
+    ] == [GammaIncAndGrad]
+
+    # Then P near 1, where Q is not 1 - P, and k = x = 1e9, where the loops stop
+    test_k = np.array([0.5, 5.0, 20.0, 1e-20, 1e9])
+    test_x = np.array([0.3, 5.0, 30.0, 1e-3, 1e9])
+    p_val, q_val, dp_val = fn(test_k, test_x)
+    np.testing.assert_allclose(
+        p_val, scipy.special.gammainc(test_k, test_x), rtol=1e-13
+    )
+    np.testing.assert_allclose(
+        q_val, scipy.special.gammaincc(test_k, test_x), rtol=1e-13
+    )
+    ref_dp = function([k, x], dp_dk, mode="FAST_COMPILE")(test_k, test_x)
+    np.testing.assert_allclose(dp_val, ref_dp, rtol=1e-13)
 
 
 @pytest.mark.parametrize(

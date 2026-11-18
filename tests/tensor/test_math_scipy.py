@@ -357,14 +357,15 @@ def test_gammainc_ddk_tabulated_values():
         )
 
 
-def test_gammainc_gammaincc_ddk_mpmath_values():
+@pytest.mark.parametrize("with_values", [False, True])
+def test_gammainc_gammaincc_ddk_mpmath_values(with_values):
     # Large k and x near k, where the earlier Stan-based series were off by up to
     # 60% or diverged. Values from mpmath at 50 digits; dQ/dk = -dP/dk.
     k, x = pt.vectors("k", "x")
-    f_grad = function(
-        [k, x],
-        [pt.grad(pt.gammainc(k, x).sum(), k), pt.grad(pt.gammaincc(k, x).sum(), k)],
-    )
+    p, q = pt.gammainc(k, x), pt.gammaincc(k, x)
+    outs = [pt.grad(p.sum(), k), pt.grad(q.sum(), k)]
+    # With the values in the graph, the gradient comes from GammaIncAndGrad
+    f_grad = function([k, x], [*outs, p, q] if with_values else outs)
     test_k, test_x, expected_ddk = np.array(
         [
             (5.0, 5.0, -0.18141910926729707),
@@ -381,7 +382,7 @@ def test_gammainc_gammaincc_ddk_mpmath_values():
             (1000.0, 1010.0, -0.011945731337225441),
         ]
     ).T
-    ddk_p, ddk_q = f_grad(test_k.astype(k.dtype), test_x.astype(x.dtype))
+    ddk_p, ddk_q, *_ = f_grad(test_k.astype(k.dtype), test_x.astype(x.dtype))
     rtol = 5e-12 if config.floatX == "float64" else 1e-3
     np.testing.assert_allclose(ddk_p, expected_ddk, rtol=rtol)
     np.testing.assert_allclose(ddk_q, -expected_ddk, rtol=rtol)
