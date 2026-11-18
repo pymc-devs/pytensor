@@ -2631,12 +2631,9 @@ def local_join_subtensors(fgraph, node):
             and all(
                 i1 == i2 for i, (i1, i2) in enumerate(zip(idxs1, idxs2)) if i != axis
             )
-            # For non-unit steps (perhaps except for -1) we would need to know the
-            # exact values of start and stop to know if they can be merged
-            and all(
-                st is None or (isinstance(st, Constant) and st.data == 1)
-                for st in (s1.step, s2.step)
-            )
+            # Unit steps are normalized to None by local_useless_slice
+            and s1.step is None
+            and s2.step is None
         ):
             joined.append(t)
             continue
@@ -2672,7 +2669,7 @@ def local_join_subtensors(fgraph, node):
             for u, f, pyf in ((a, minimum, min), (c, maximum, max))
         )
         new_idxs = list(idxs1)
-        new_idxs[axis] = slice(start, stop, s1.step)
+        new_idxs[axis] = slice(start, stop)
         joined[-1] = prev.owner.inputs[0][tuple(new_idxs)]
     if len(joined) == len(node.inputs):
         return None
