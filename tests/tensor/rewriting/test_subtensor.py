@@ -25,6 +25,7 @@ from pytensor.tensor.rewriting.subtensor import (
     local_adv_idx_to_slice,
     local_blockwise_inc_subtensor,
     local_inc_subtensor_remove_broadcastable_index,
+    local_join_subtensors,
     local_read_of_write_same_indices,
     local_useless_slice,
     local_write_of_write_same_indices,
@@ -2477,15 +2478,12 @@ def test_local_adv_idx_to_slice_boolean_mask():
             ),
             3,
         ),
-        (
-            0,
-            lambda stop: (
-                (slice(1, stop, None),),
-                (slice(stop, 5, None),),
-                (slice(5, 7, None)),
-            ),
-            2,
-        ),
+        # Below NotImplemented: These could be merged, but we would need to evaluate the
+        # start and stop values
+        (0, lambda _: ((slice(None, 6, 3),), (slice(6, None, 3),)), 3),
+        (0, lambda step: ((slice(None, 6, step),), (slice(6, None, step),)), 4),
+        # Below should not be merged
+        # 1 <= stop + 1 <= 5 isn't known (e.g. stop = -1), so this can't be x[1:5]
         (
             0,
             lambda stop: (
@@ -2493,13 +2491,8 @@ def test_local_adv_idx_to_slice_boolean_mask():
                 (slice(stop + 1, 5, None),),
                 (slice(5, 7, None)),
             ),
-            2,
+            6,
         ),
-        # Below NotImplemented: These could be merged, but we would need to evaluate the
-        # start and stop values
-        (0, lambda _: ((slice(None, 6, 3),), (slice(6, None, 3),)), 3),
-        (0, lambda step: ((slice(None, 6, step),), (slice(6, None, step),)), 4),
-        # Below should not be merged
         (0, lambda _: ((slice(5, None, None),), (slice(None, 5, None),)), 3),
         (0, lambda _: ((slice(None, 5, None),), (slice(4, None, None),)), 3),
         (1, lambda _: ((slice(None, 5, None),), (slice(5, None, None),)), 3),
@@ -2552,6 +2545,56 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
     f_val = np.concatenate([x_val[slice_val] for slice_val in slices_val], axis=axis)
 
     np.testing.assert_array_equal(f(x_val, stop_val), f_val)
+
+
+@pytest.mark.parametrize(
+    "slices_fn",
+    [
+        lambda s: [slice(None, -1), slice(-1, 2)],
+        lambda s: [slice(1, s), slice(s, 5)],
+        lambda s: [slice(s, 5), slice(5, 7)],
+        lambda s: [slice(None, 5), slice(5, -2)],
+    ],
+)
+def test_local_join_subtensors_unordered_bounds(slices_fn):
+    # Bounds that may not be in order once clipped (here with s = 0) must not merge
+    x, s = pt.dvector("x"), pt.iscalar("s")
+    out = pt.concatenate([x[sl] for sl in slices_fn(s)])
+    result = utt.RewriteTester([x, s], [out], custom_rewrite=local_join_subtensors)
+    result.assert_graph(out)
+
+
+def test_local_join_subtensors_min_max():
+    # x[a:b] ++ x[b:c] is x[min(a, b):max(b, c)] for bounds all >= 0 or all negative
+    x, y = pt.dvector("x"), pt.dvector("y")
+    n = y.shape[0]
+    cases = [
+        ([x[:n], x[n:]], x[:]),
+        ([x[6:8], x[8:6], x[6:9]], pt.concatenate([x[6:8], x[6:9]])),
+        ([x[-5:-3], x[-3:-1]], x[-5:-1]),
+    ]
+    for parts, expected in cases:
+        result = utt.RewriteTester(
+            [x, y], [pt.concatenate(parts)], custom_rewrite=local_join_subtensors
+        )
+        result.assert_graph(expected)
+        result.assert_eval(np.arange(10.0), np.zeros(3))
+
+    # n >= 0 as a length, so the merge holds for any n: x[min(1, n):max(n, 5)]
+    result = utt.RewriteTester(
+        [x, y], [pt.concatenate([x[1:n], x[n:5]])], custom_rewrite=local_join_subtensors
+    )
+    [out] = result.rewr_fg.outputs
+    assert isinstance(out.owner.op, Subtensor)
+    for k in (0, 3, 8):
+        result.assert_eval(np.arange(10.0), np.zeros(k))
+
+
+def test_local_join_subtensors_skips_unmergeable_pair():
+    x = pt.dvector("x")
+    out = pt.concatenate([x[0:1], x[1:2], x[2:4:2], x[4:5], x[5:6]])
+    result = utt.RewriteTester([x], [out], custom_rewrite=local_join_subtensors)
+    result.assert_graph(pt.concatenate([x[:2], x[2:4:2], x[4:6]]))
 
 
 def test_local_uint_constant_indices():
