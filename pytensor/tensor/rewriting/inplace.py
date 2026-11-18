@@ -198,7 +198,6 @@ class InplaceGraphOptimizer(GraphRewriter):
             "node_before": len(fgraph.apply_nodes),
             "nb_replaced": 0,
         }
-        large_graph = len(fgraph.apply_nodes) > 500
 
         protected_inputs = self._get_protected_inputs(fgraph)
         root_destroyer = fgraph.destroy_handler.root_destroyer
@@ -225,10 +224,6 @@ class InplaceGraphOptimizer(GraphRewriter):
         claimed, plan = set(), []
         for node in nodes:
             if not isinstance(node.op, self_op) or node.op.destroy_map:
-                continue
-
-            # If big graph and the outputs are scalar, do not make it inplace.
-            if large_graph and all(node.outputs[0].type.broadcastable):
                 continue
 
             candidate_pairs = self.filter_candidate_pairs(
