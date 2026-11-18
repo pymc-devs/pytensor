@@ -75,28 +75,47 @@ impl Jit {
             LLVMOrcJITDylibAddGenerator(jd, gen1);
 
             // glibc's vector math library, for loops the vectorizer turned into _ZGV* calls
-            let path = CString::new("libmvec.so.1").unwrap();
-            let mut gen2: LLVMOrcDefinitionGeneratorRef = std::ptr::null_mut();
-            let err = LLVMOrcCreateDynamicLibrarySearchGeneratorForPath(
-                &mut gen2,
-                path.as_ptr(),
-                prefix,
-                None,
-                std::ptr::null_mut(),
-            );
-            if err.is_null() {
-                LLVMOrcJITDylibAddGenerator(jd, gen2);
-            } else {
-                let _ = err_to_string(err);
+            if cfg!(target_os = "linux") {
+                let path = CString::new("libmvec.so.1").unwrap();
+                let mut gen2: LLVMOrcDefinitionGeneratorRef = std::ptr::null_mut();
+                let err = LLVMOrcCreateDynamicLibrarySearchGeneratorForPath(
+                    &mut gen2,
+                    path.as_ptr(),
+                    prefix,
+                    None,
+                    std::ptr::null_mut(),
+                );
+                if err.is_null() {
+                    LLVMOrcJITDylibAddGenerator(jd, gen2);
+                } else {
+                    let _ = err_to_string(err);
+                }
             }
 
-            // precompiled Rust scalar functions
+            // MSVC codegen references `_fltused` from every object that uses floating
+            // point. The CRT defines it statically, so no DLL exports it.
+            #[cfg(windows)]
+            let platform_symbols = {
+                static FLTUSED: i32 = 0;
+                vec![("_fltused", &FLTUSED as *const i32 as usize)]
+            };
+            #[cfg(not(windows))]
+            let platform_symbols = vec![];
+
+            // precompiled Rust scalar functions. Definitions take linker-level names:
+            // with the global prefix ('_' on macOS), as in the objects' symbol tables.
             let es = LLVMOrcLLJITGetExecutionSession(jit);
             let mut pairs: Vec<LLVMOrcCSymbolMapPair> = math::scalar_symbols()
                 .into_iter()
                 .chain(crate::runtime::runtime().functions.symbols())
+                .chain(platform_symbols)
                 .map(|(name, addr)| {
-                    let c = CString::new(name).unwrap();
+                    let mut mangled = Vec::with_capacity(name.len() + 1);
+                    if prefix != 0 {
+                        mangled.push(prefix as u8);
+                    }
+                    mangled.extend_from_slice(name.as_bytes());
+                    let c = CString::new(mangled).unwrap();
                     LLVMOrcCSymbolMapPair {
                         Name: LLVMOrcExecutionSessionIntern(es, c.as_ptr()),
                         Sym: LLVMJITEvaluatedSymbol {
