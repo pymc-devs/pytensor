@@ -95,6 +95,8 @@ class Cholesky(Op):
 
         """
 
+        from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
+
         dz = gradients[0]
         chol_x = outputs[0]
 
@@ -103,20 +105,15 @@ class Cholesky(Op):
             chol_x = chol_x.T
             dz = dz.T
 
-        def tril_and_halve_diagonal(mtx):
-            """Extracts lower triangle of square matrix and halves diagonal."""
-            return ptb.tril(mtx) - ptb.diag(ptb.diagonal(mtx) / 2.0)
-
-        def conjugate_solve_triangular(outer, inner):
-            """Computes L^{-T} P L^{-1} for lower-triangular L."""
-            from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
-
-            solve_upper = SolveTriangular(lower=False, b_ndim=2)
-            return solve_upper(outer.T, solve_upper(outer.T, inner.T).T)
-
-        s = conjugate_solve_triangular(
-            chol_x, tril_and_halve_diagonal(chol_x.T.dot(dz))
-        )
+        # The upper triangle of the factor is identically zero, so its cotangent is dropped. The reference
+        # expression L^{-T} Phi(L^T dz) L^{-1}, with Phi keeping the lower triangle and halving the diagonal, is
+        # evaluated as (dz - L^{-T} (L^T dz - Phi(L^T dz))) L^{-1}. The left solve against L^T then never
+        # meets L^T itself, so the result is not formed from terms that cancel.
+        dz = ptb.tril(dz)
+        product = chol_x.T.dot(dz)
+        upper_part = ptb.triu(product, k=1) + ptb.diag(ptb.diagonal(product) / 2.0)
+        solve_upper = SolveTriangular(lower=False, b_ndim=2)
+        s = solve_upper(chol_x.T, (dz - solve_upper(chol_x.T, upper_part)).T).T
 
         if self.lower:
             grad = ptb.tril(s + s.T) - ptb.diag(ptb.diagonal(s))

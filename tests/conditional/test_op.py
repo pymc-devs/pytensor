@@ -11,6 +11,7 @@ from pytensor.compile.mode import Mode
 from pytensor.conditional.op import IfElse, LazyIfElse, ifelse
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.graph.replace import vectorize_graph
 from pytensor.link.c.type import generic
 from pytensor.raise_op import CheckAndRaise
 from pytensor.sparse import matrix as sparse_matrix
@@ -51,6 +52,31 @@ def test_lazy_ifelse_perform_and_shape():
         np.testing.assert_array_equal(
             shape_fn(condition, xv, yv), [2 if condition else 3]
         )
+
+
+def test_vectorize_ifelse_with_unbatched_condition():
+    c, x, y = iscalar("c"), vector("x"), vector("y")
+    batched_x, batched_y = matrix("batched_x"), matrix("batched_y")
+    out = vectorize_graph(ifelse(c, x * 2, y), replace={x: batched_x, y: batched_y})
+    assert isinstance(out.owner.op, IfElse)
+
+    fn = function([c, batched_x, batched_y], out)
+    xv = np.arange(6, dtype=batched_x.dtype).reshape(2, 3)
+    yv = -np.ones((2, 3), dtype=batched_y.dtype)
+    np.testing.assert_array_equal(fn(1, xv, yv), xv * 2)
+    np.testing.assert_array_equal(fn(0, xv, yv), yv)
+
+
+def test_vectorize_ifelse_broadcasts_unbatched_branch():
+    c, x, y = iscalar("c"), vector("x"), vector("y")
+    batched_x = matrix("batched_x")
+    out = vectorize_graph(ifelse(c, x * 2, y), replace={x: batched_x})
+
+    fn = function([c, batched_x, y], out)
+    xv = np.arange(6, dtype=batched_x.dtype).reshape(2, 3)
+    yv = -np.ones(3, dtype=y.dtype)
+    np.testing.assert_array_equal(fn(1, xv, yv), xv * 2)
+    np.testing.assert_array_equal(fn(0, xv, yv), np.broadcast_to(yv, (2, 3)))
 
 
 class TestIfelse(utt.OptimizationTestMixin):

@@ -159,4 +159,5 @@ from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.tensor.einsum import einsum
 from pytensor.tensor.functional import vectorize
 from pytensor.tensor import random
+from pytensor.sparsity import jacobian_sparsity
 # isort: on

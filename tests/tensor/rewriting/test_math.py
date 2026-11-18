@@ -5185,6 +5185,20 @@ def test_local_batched_matmul_to_core_matmul():
     y_test = rng.normal(size=(5, 2, 2))
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
 
+    # An empty contracted axis leaves nothing to infer a -1 reshape length from
+    x = pt.tensor("x", shape=(None, None, None), dtype="float64")
+    y = pt.tensor("y", shape=(1, None, None), dtype="float64")
+    fn = pytensor.function([x, y], [x @ y, y.mT @ x.mT])
+    assert not any(
+        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    )
+
+    x_test = rng.normal(size=(5, 3, 0))
+    y_test = rng.normal(size=(1, 0, 4))
+    xy, yx = fn(x_test, y_test)
+    np.testing.assert_allclose(xy, x_test @ y_test)
+    np.testing.assert_allclose(yx, y_test.mT @ x_test.mT)
+
     # Both x and y are batched, rewrite does not apply
     x = pt.tensor("x", shape=(None, 3, 2), dtype="float64")
     y = pt.tensor("y", shape=(5, 2, 2), dtype="float64")

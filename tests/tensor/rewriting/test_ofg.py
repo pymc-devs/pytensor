@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 import pytensor
@@ -7,6 +8,23 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.rewriting import inline_ofg_expansion
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import dfs_rewriter
+from pytensor.tensor.blockwise import Blockwise
+
+
+@pytest.mark.parametrize("inline", [True, False])
+def test_blockwise_inline_ofg(inline):
+    inner = pt.matrix("inner")
+    core = OpFromGraph([inner], [inner + pt.ones((3, 3))], inline=inline)
+    batch = pt.tensor3("batch")
+    output = Blockwise(core, signature="(m,n)->(m,n)")(batch)
+    function = pytensor.function([batch], output)
+    retained = any(
+        isinstance(getattr(node.op, "core_op", node.op), OpFromGraph)
+        for node in function.maker.fgraph.toposort()
+    )
+    assert retained is not inline
+    values = np.arange(18, dtype=batch.dtype).reshape((2, 3, 3))
+    np.testing.assert_array_equal(function(values), values + 1)
 
 
 @pytest.mark.skipif(

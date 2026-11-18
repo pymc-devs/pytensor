@@ -21,9 +21,14 @@ from pytensor.basic import as_symbolic
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import HasMultipleInnerGraph, Op, _NoPythonOp
+from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import HasDataType, HasShape
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import zeros_like
+from pytensor.tensor.blockwise import vectorize_node_fallback
+from pytensor.tensor.extra_ops import broadcast_to
+from pytensor.tensor.shape import shape_padleft
+from pytensor.tensor.type import TensorType
 
 
 if TYPE_CHECKING:
@@ -384,6 +389,38 @@ class LazyIfElse(Op, HasMultipleInnerGraph):
         return IfElse(len(node.outputs)).infer_shape(
             node, [shapes[0], *branch_shapes[0], *branch_shapes[1]]
         )
+
+
+@_vectorize_node.register(IfElse)
+def vectorize_ifelse(op, node, batched_condition, *batched_branches):
+    if batched_condition.type.ndim > 0 or not all(
+        isinstance(branch.type, TensorType) for branch in batched_branches
+    ):
+        return vectorize_node_fallback(op, node, batched_condition, *batched_branches)
+
+    core_branches = node.inputs[1:]
+    batch_ndim = max(
+        batched.type.ndim - core.type.ndim
+        for batched, core in zip(batched_branches, core_branches, strict=True)
+    )
+    padded = [
+        shape_padleft(batched, batch_ndim - (batched.type.ndim - core.type.ndim))
+        for batched, core in zip(batched_branches, core_branches, strict=True)
+    ]
+    # Either branch may be taken, so each one must already carry the full batch shape.
+    batch_shape = [
+        next(
+            (branch.shape[axis] for branch in padded if branch.type.shape[axis] != 1), 1
+        )
+        for axis in range(batch_ndim)
+    ]
+    broadcasted = [
+        branch
+        if all(branch.type.shape[axis] != 1 for axis in range(batch_ndim))
+        else broadcast_to(branch, (*batch_shape, *tuple(branch.shape)[batch_ndim:]))
+        for branch in padded
+    ]
+    return op.make_node(batched_condition, *broadcasted)
 
 
 def ifelse(

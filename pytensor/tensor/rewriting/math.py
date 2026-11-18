@@ -363,10 +363,18 @@ def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
                 # Or just move one axis (the largest) if x is row
                 return None
 
-            # Ravel moved batch dims together with (m) if needed
+            # Ravel moved batch dims together with (m) if needed. The merged length is computed
+            # explicitly because -1 cannot be inferred when the contracted (k) axis is empty.
             x_stacked_shape = tuple(x_stacked.shape)
+            x_merged_length = reduce(
+                mul, x_stacked_shape[batch_ndim - n_x_axis_to_merge : -1]
+            )
             x_stacked = x_stacked.reshape(
-                (*x_stacked_shape[: batch_ndim - n_x_axis_to_merge], -1, x_shape[-1])
+                (
+                    *x_stacked_shape[: batch_ndim - n_x_axis_to_merge],
+                    x_merged_length,
+                    x_shape[-1],
+                )
             )
             dims_were_merged = True
 
@@ -382,10 +390,18 @@ def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
                 # TODO: We could allow the x rewrite to go on
                 # Or just move one axis (the largest) if y is col
                 return None
-            # Ravel moved batch dims together with (n) if needed
+            # Ravel moved batch dims together with (n) if needed, without -1 for the
+            # same reason as x
             y_stacked_shape = tuple(y_stacked.shape)
+            y_merged_length = reduce(
+                mul, y_stacked_shape[batch_ndim - n_y_axis_to_merge + 1 :]
+            )
             y_stacked = y_stacked.reshape(
-                (*y_stacked_shape[: batch_ndim - n_y_axis_to_merge], y_shape[-2], -1)
+                (
+                    *y_stacked_shape[: batch_ndim - n_y_axis_to_merge],
+                    y_shape[-2],
+                    y_merged_length,
+                )
             )
             dims_were_merged = True
 
