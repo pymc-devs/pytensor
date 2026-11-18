@@ -730,13 +730,6 @@ import ``pytensor`` and print the config variable, as in:
     Relax the tolerance of ``pytensor.tensor.math._allclose``: ``0`` leaves it
     unchanged, ``1`` relaxes it slightly, and ``2`` relaxes it further.
 
-.. attribute:: tensor__insert_inplace_optimizer_validate_nb
-
-    Int value, default: ``-1``
-
-    Number of inplace rewrites between graph validations. ``-1`` selects ``1``
-    for graphs with fewer than 500 nodes and ``10`` for larger graphs.
-
 .. attribute:: optdb__position_cutoff
 
     Float value, default: ``inf``

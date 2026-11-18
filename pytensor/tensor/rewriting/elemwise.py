@@ -1,22 +1,17 @@
-import abc
-import itertools
 import operator
-import sys
 from collections import defaultdict
-from collections.abc import Generator, Sequence
+from collections.abc import Generator
 from functools import cache, reduce
 from heapq import heapify, heappop, heappush
 from operator import or_
 from warnings import warn
 
-from pytensor.compile.aliasing import Supervisor
 from pytensor.compile.mode import optdb
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
+from pytensor.graph.destroyhandler import inplace_candidates
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     copy_stack_trace,
@@ -31,7 +26,7 @@ from pytensor.graph.rewriting.reachability import (
     update_ancestors_after_contraction_bits,
 )
 from pytensor.graph.traversal import toposort, walk_toposort
-from pytensor.graph.utils import InconsistencyError, MethodNotDefined
+from pytensor.graph.utils import MethodNotDefined
 from pytensor.scalar import (
     Add,
     Composite,
@@ -59,257 +54,8 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.variable import TensorConstant, TensorVariable
-
-
-class InplaceGraphOptimizer(GraphRewriter):
-    op: type[Op]
-
-    def add_requirements(self, fgraph):
-        fgraph.attach_feature(DestroyHandler())
-
-    @abc.abstractmethod
-    def filter_candidate_pairs(
-        self, fgraph: FunctionGraph, node: Apply, protected_inputs: Sequence[Variable]
-    ) -> Sequence[tuple[tuple[int, Variable], tuple[int, Variable]]]:
-        pass
-
-    @abc.abstractmethod
-    def create_inplace_node(
-        self, node: Apply, inplace_pattern: dict[int, Sequence[int]]
-    ) -> Apply:
-        pass
-
-    def _get_protected_inputs(self, fgraph):
-        """Collect inputs protected from in-place destruction."""
-        protected = set(
-            itertools.chain.from_iterable(
-                f.protected for f in fgraph._features if isinstance(f, Supervisor)
-            )
-        )
-        protected.update(fgraph.outputs)
-        return protected
-
-    def try_inplace_on_node(
-        self,
-        fgraph,
-        node,
-        candidate_pairs=None,
-        reason="inplace_optimizer",
-        extra_protected_inputs=frozenset(),
-    ):
-        """Try to make a single node operate in-place.
-
-        First attempts all candidate pairs at once, then falls back to
-        one-at-a-time. Returns the (possibly replaced) node.
-
-        Parameters
-        ----------
-        candidate_pairs
-            Pre-filtered and sorted list of ``((out_idx, out), (in_idx, inp))``
-            pairs. If None, computed from ``filter_candidate_pairs`` using
-            the standard protections plus ``extra_protected_inputs``.
-        extra_protected_inputs
-            Additional variables that must not be used as in-place targets,
-            only used when ``candidate_pairs`` is None.
-        """
-        if candidate_pairs is None:
-            protected_inputs = self._get_protected_inputs(fgraph)
-            protected_inputs.update(extra_protected_inputs)
-            candidate_pairs = self.filter_candidate_pairs(
-                fgraph, node, protected_inputs
-            )
-        if not candidate_pairs:
-            return node
-
-        failed_pattern = None
-        # Try in-placing all outputs at once
-        tried_inputs = set()
-        inplace_pattern = {}
-        for (o, _), (i, _) in candidate_pairs:
-            if o not in inplace_pattern and i not in tried_inputs:
-                inplace_pattern[o] = [i]
-                tried_inputs.add(i)
-
-        inplace_node = self.create_inplace_node(node, inplace_pattern)
-        if inplace_node.op.destroy_map == inplace_pattern:
-            replacements = tuple(zip(node.outputs, inplace_node.outputs))
-            try:
-                fgraph.replace_all_validate(replacements, reason=reason)
-            except InconsistencyError:
-                failed_pattern = inplace_pattern
-            else:
-                copy_stack_trace(node.outputs, inplace_node.outputs)
-                return inplace_node
-
-        # Fall back to one output/input at a time
-        tried_inputs = set()
-        inplace_pattern = {}
-        original_node = node
-        for (o, _), (i, _) in candidate_pairs:
-            if o not in inplace_pattern and i not in tried_inputs:
-                inplace_pattern[o] = [i]
-                tried_inputs.add(i)
-
-                if node is original_node and inplace_pattern == failed_pattern:
-                    inplace_pattern.pop(o)
-                    tried_inputs.discard(i)
-                    continue
-
-                inplace_node = self.create_inplace_node(node, inplace_pattern)
-                if inplace_node.op.destroy_map != inplace_pattern:
-                    # This Op can't respect this partial inplace pattern,
-                    # We assume it can't support any other cases
-                    break
-                replacements = tuple(zip(node.outputs, inplace_node.outputs))
-                try:
-                    fgraph.replace_all_validate(replacements, reason=reason)
-                    node = inplace_node
-                except InconsistencyError:
-                    inplace_pattern.pop(o)
-                    # The input wasn't consumed, so let another output try to
-                    # reuse it in place.
-                    tried_inputs.discard(i)
-        if node is not original_node:
-            copy_stack_trace(original_node.outputs, node.outputs)
-        return node
-
-    def apply(self, fgraph):
-        r"""
-
-        Attempts to replace all `Op`\s by versions of them that operate
-        inplace. It operates greedily: for each `Op` that is encountered,
-        it tries to inplace all the valid inputs at once (if the Op supports it),
-        if that fails, it tries to inplace one input at a time.
-
-        Examples
-        --------
-
-            x + y + z -> x += y += z
-            (x + y) * (x * y) -> (x += y) *= (x * y) or (x + y) *= (x *= y)
-
-        """
-        # We should not validate too often as this takes too much time to execute!
-        # It is the _dfs_toposort() fct in pytensor/graph/destroyhandler.py
-        # that takes so much time.
-        # Should we try to use another lib that does toposort?
-        #   igraph: http://igraph.sourceforge.net/
-        #   networkx: https://networkx.lanl.gov/
-        # Should we try to use cython?
-        #   Compiling only that fct is not enough, should we try to add the
-        #   deque class too?
-        #   And init the deque and other list to an upper bound number of
-        #   elements?
-        # Maybe PyTensor should do online toposort as in
-        #   http://code.google.com/p/acyclic
-        #
-        # The next longest rewriter is the canonizer phase.
-        # Then I think it is the [io_?]toposort (need to validate) so check if
-        # the solution is also applicable there.
-
-        # 2025: The above comment is not specific to Elemwise, if we have concerns about this approach, we should
-        # tackle them in a more general way. The whole try/except approach is probably suboptimal.
-        # We can consider restricting inputs with static shapes that are large enough.
-
-        if config.tensor__insert_inplace_optimizer_validate_nb != -1:
-            warn(
-                "tensor__insert_inplace_optimizer_validate_nb config is deprecated. Setting it will fail in a future release.",
-                FutureWarning,
-            )
-
-        reason = f"{self.op}_inplace_optimizer"
-        prof = {
-            "opt": self,
-            "node_before": len(fgraph.apply_nodes),
-            "nb_eager_inconsistent": 0,
-            "nb_inconsistent": 0,
-            "nb_replaced": 0,
-        }
-        large_graph = len(fgraph.apply_nodes) > 500
-
-        protected_inputs = self._get_protected_inputs(fgraph)
-        root_destroyer = fgraph.destroy_handler.root_destroyer
-
-        self_op = self.op
-        update_mapping = fgraph.update_mapping or {}
-        op_updates: dict[TensorVariable, TensorVariable] = {
-            out: fgraph.inputs[update_mapping[out_idx]]
-            for out_idx, out in enumerate(fgraph.outputs)
-            if (
-                out_idx in update_mapping
-                and out.owner
-                and isinstance(out.owner.op, self_op)
-            )
-        }
-        set_op_updates = set(op_updates.keys())
-
-        for node in fgraph.toposort():
-            if not isinstance(node.op, self_op) or node.op.destroy_map:
-                continue
-
-            # If big graph and the outputs are scalar, do not make it inplace.
-            if large_graph and all(node.outputs[0].type.broadcastable):
-                continue
-
-            candidate_pairs = self.filter_candidate_pairs(
-                fgraph, node, protected_inputs
-            )
-
-            if not candidate_pairs:
-                continue
-
-            sorted_candidate_pairs = candidate_pairs
-            if op_updates and (node_updates := set(node.outputs) & set_op_updates):
-                # If the fgraph has updates, we try to prioritize in-placing on the pairs that correspond to the update
-                direct_update_pairs = []
-                indirect_update_pairs = []
-                other_update_pairs = []
-                for pair in candidate_pairs:
-                    ((_o, out), (_i, inp)) = pair
-                    if out in node_updates:
-                        direct_update_inp = op_updates[out]
-                        if direct_update_inp is inp:
-                            # This pair is the whole graph update
-                            direct_update_pairs.append(pair)
-                            continue
-                        elif (inp_node := inp.owner) is not None and any(
-                            root_destroyer.get(up_inp, None) is inp_node
-                            for up_inp in op_updates.values()
-                        ):
-                            # This pair connects to an updated input
-                            indirect_update_pairs.append(pair)
-                            continue
-                    other_update_pairs.append(pair)
-
-                sorted_candidate_pairs = (
-                    direct_update_pairs + indirect_update_pairs + other_update_pairs
-                )
-
-            result = self.try_inplace_on_node(
-                fgraph, node, sorted_candidate_pairs, reason=reason
-            )
-            if result is not node:
-                prof["nb_replaced"] += 1
-
-        return prof
-
-    @classmethod
-    def print_profile(cls, stream, prof, level=0):
-        blanc = "    " * level
-        print(blanc, cls.__name__, file=stream)
-        for k in [
-            "node_before",
-            "nb_eager_inconsistent",
-            "nb_inconsistent",
-            "nb_replaced",
-        ]:
-            print(blanc, k, prof[k], file=stream)
-
-    def print_summary(self, stream=sys.stdout, level=0, depth=-1):
-        print(
-            f"{' ' * level}{self.__class__.__name__}",
-            file=stream,
-        )
+from pytensor.tensor.rewriting.inplace import InplaceGraphOptimizer
+from pytensor.tensor.variable import TensorConstant
 
 
 class InplaceElemwiseOptimizer(InplaceGraphOptimizer):

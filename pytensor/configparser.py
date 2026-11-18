@@ -96,7 +96,6 @@ class PyTensorConfigParser:
     # add_tensor_configvars
     tensor__cmp_sloppy: int
     lib__amdlibm: bool
-    tensor__insert_inplace_optimizer_validate_nb: int
     # add_traceback_configvars
     traceback__limit: int
     traceback__compile_limit: int

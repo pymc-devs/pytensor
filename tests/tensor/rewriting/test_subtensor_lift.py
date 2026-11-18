@@ -269,6 +269,24 @@ class TestLocalSubtensorOfBatchDims:
         result.assert_graph(pt.exp(x[rows, cols]))
         result.assert_eval(np.arange(25.0).reshape(5, 5))
 
+    def test_multi_output_elemwise(self):
+        x, y = pt.vectors("x", "y")
+        a, b = ps.float64("a"), ps.float64("b")
+        op = Elemwise(ps.Composite([a, b], [a + b, a - b]))
+        _, diff = op(x, y)
+        RewriteTester(
+            [x, y],
+            [diff[1:]],
+            include=None,
+            custom_rewrite=local_subtensor_of_batch_dims,
+        ).assert_graph(op(x[1:], y[1:])[1])
+        # The other output is still needed in full, so lifting would recompute it
+        summ, diff = op(x, y)
+        out = [diff[1:], summ]
+        RewriteTester(
+            [x, y], out, include=None, custom_rewrite=local_subtensor_of_batch_dims
+        ).assert_graph(*out)
+
     def test_blockwise(self):
         class CoreTestOp(Op):
             itypes = [dvector, dvector]

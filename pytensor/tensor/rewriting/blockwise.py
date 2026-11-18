@@ -20,10 +20,8 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.elemwise import (
-    InplaceGraphOptimizer,
-    apply_local_dimshuffle_merge,
-)
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
+from pytensor.tensor.rewriting.inplace import InplaceGraphOptimizer
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,

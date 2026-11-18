@@ -216,7 +216,7 @@ Optimization                                              o4             o3  o2 
         modify just the subtensor in question (possibly a single element).  It
         is much more efficient to modify that element inplace.
 
-        See :func:`local_inplace_setsubtensor`
+        See :class:`~pytensor.tensor.rewriting.subtensor.InplaceIncSubtensorOptimizer`
 
     gemm
         Numerical libraries such as MKL and ATLAS implement the BLAS-level-3
