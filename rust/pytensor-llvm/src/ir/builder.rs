@@ -331,10 +331,9 @@ pub struct BuilderState {
     strict_fp: Cell<bool>,
 }
 
-/// Alias information of a node function (DESIGN.md, "Aliasing"): pointers into arrays
-/// (`mark_array`, and everything derived from them by GEPs or captured into parallel
-/// bodies) carry an alias scope, the scopes they don't alias, and type-based (TBAA)
-/// tags per accessed type. Domain and TBAA root are per function: claims never cross
+/// Alias information of a node function: pointers into arrays (`mark_array`, and
+/// everything derived from them by GEPs or captured into parallel bodies) carry an alias
+/// scope, the scopes they don't alias, and type-based (TBAA) tags per accessed type. Domain and TBAA root are per function: claims never cross
 /// node functions, which may share memory (inlined into one unit) in other dtypes.
 struct AliasInfo {
     domain: LLVMMetadataRef,
@@ -2205,8 +2204,8 @@ impl Builder {
 
     // ------------------------------------------------------------ memory
 
-    /// Start alias information for this function (DESIGN.md, "Aliasing"): a scope
-    /// domain and a TBAA root named after `name` (unique in the module).
+    /// Start alias information for this function: a scope domain and a TBAA root named
+    /// after `name` (unique in the module).
     fn alias_domain(&self, py: Python<'_>, name: &str) -> PyResult<()> {
         self.with(py, |cx| cx.alias_domain(name))
     }

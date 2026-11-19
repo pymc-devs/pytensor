@@ -39,6 +39,7 @@ with PyTensor itself.
     creating_an_op
     creating_a_c_op
     creating_a_numba_jax_op
+    creating_an_llvm_op
     pipeline
     type
     ctype

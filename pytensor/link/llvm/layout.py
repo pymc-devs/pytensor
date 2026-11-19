@@ -1,4 +1,4 @@
-"""Static layout facts about arrays (DESIGN.md, section 1a).
+"""Static layout facts about arrays.
 
 A `Layout` says what is known, before the program runs, about the byte strides of an
 array value. Every axis is

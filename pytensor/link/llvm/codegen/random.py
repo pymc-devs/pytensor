@@ -1,7 +1,7 @@
 """Random variables.
 
-Random numbers come from the call context's random state (DESIGN.md, section 5a): the
-graph's random generator values are tokens without data, so a RandomVariable node has
+Random numbers come from the call context's random state: the graph's random generator
+values are tokens without data, so a RandomVariable node has
 no generator argument and its next-generator output has no value.
 
 The draws follow the output's shape: `size` when given, else the parameters' broadcast

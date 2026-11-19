@@ -1,4 +1,4 @@
-"""LLVM representations of PyTensor types (DESIGN.md, section 1)."""
+"""LLVM representations of PyTensor types."""
 
 from __future__ import annotations
 
@@ -185,8 +185,8 @@ class NoneRepr:
 
 def is_absent(t) -> bool:
     """Types whose values aren't passed at all: NoneTypeT, and random generators (random
-    numbers come from the call context, see DESIGN.md: the graph's rng values are
-    tokens without data)."""
+    numbers come from the call context: the graph's rng values are tokens without
+    data)."""
     from pytensor.tensor.random.type import RandomType
     from pytensor.tensor.type_other import NoneTypeT
 

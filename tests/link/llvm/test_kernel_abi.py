@@ -1,4 +1,4 @@
-"""What kernels check about the arguments they are called with (DESIGN.md, section 6):
+"""What kernels check about the arguments they are called with:
 every `PtArray` carries the number of axes and the dtype of its array, and a call the
 number of its inputs and outputs."""
 

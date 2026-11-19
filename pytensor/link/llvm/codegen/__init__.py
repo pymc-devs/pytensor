@@ -1,4 +1,4 @@
-"""Code generation from Python: see ../DESIGN.md.
+"""Code generation from Python.
 
 * `types`: LLVM representations of PyTensor types;
 * `emit`: arrays, outputs, errors, temporary memory, casts, loops;
