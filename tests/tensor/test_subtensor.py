@@ -1723,6 +1723,24 @@ class TestIncSubtensor:
     functions.
     """
 
+    @pytest.mark.parametrize(
+        "op, index_dtype, index_shape, indexed_ndim",
+        [
+            pytest.param(IncSubtensor, "int64", (), 1, id="scalar"),
+            pytest.param(AdvancedIncSubtensor, "int64", (None, None), 3, id="matrix"),
+            pytest.param(AdvancedIncSubtensor, "bool", (None, None), 1, id="mask"),
+        ],
+    )
+    def test_update_rank(self, op, index_dtype, index_shape, indexed_ndim):
+        x = matrix("x")
+        idx = tensor("idx", dtype=index_dtype, shape=index_shape)
+        y = tensor("y", shape=(1,) * (indexed_ndim + 1))
+        write = op((0,))
+
+        with pytest.raises(TypeError, match=f"increment a {indexed_ndim}-dimensional"):
+            write(x, y, idx)
+        assert write(x, y.squeeze(0), idx).type == x.type
+
     def test_simple_2d(self):
         # Increments or sets part of a tensor by a scalar using full slice and
         # a partial slice depending on a scalar.

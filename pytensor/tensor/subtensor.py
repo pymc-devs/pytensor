@@ -1545,11 +1545,6 @@ class IncSubtensor(BaseSubtensor, COp):
         tell to use inputs[0] as the first dim.
         """
         x, y = map(as_tensor_variable, [x, y])
-        if y.ndim > x.ndim:
-            raise ValueError(
-                f"Trying to increment a {int(x.ndim)}-dimensional "
-                f"subtensor with a {int(y.ndim)}-dimensional value."
-            )
         inputs = tuple(map(as_scalar_index_variable, inputs))
 
         idx_list = list(self.idx_list)
@@ -1559,6 +1554,13 @@ class IncSubtensor(BaseSubtensor, COp):
         if len(inputs) != self.n_index_vars:
             raise ValueError(
                 "Not enough inputs to fill in the Subtensor template.", inputs, idx_list
+            )
+
+        indexed_ndim = x.ndim - sum(isinstance(idx, int) for idx in idx_list)
+        if y.ndim > indexed_ndim:
+            raise TypeError(
+                f"Trying to increment a {indexed_ndim}-dimensional "
+                f"subtensor with a {y.ndim}-dimensional value."
             )
 
         return Apply(self, (x, y, *inputs), [x.type()])
@@ -2550,6 +2552,26 @@ class AdvancedIncSubtensor(BaseSubtensor, COp):
         x = as_tensor_variable(x)
         y = as_tensor_variable(y)
 
+        indexed_ndim = x.ndim
+        advanced_ndim = 0
+        for slot in self.idx_list:
+            if not isinstance(slot, int):
+                continue
+            idx = index_variables[slot]
+            if idx.dtype == "bool":
+                # A mask consumes one axis per dimension and contributes a vector.
+                indexed_ndim -= idx.ndim
+                advanced_ndim = max(advanced_ndim, 1)
+            else:
+                indexed_ndim -= 1
+                advanced_ndim = max(advanced_ndim, idx.ndim)
+        indexed_ndim += advanced_ndim
+        if y.ndim > indexed_ndim:
+            raise TypeError(
+                f"Trying to increment a {indexed_ndim}-dimensional "
+                f"subtensor with a {y.ndim}-dimensional value."
+            )
+
         return Apply(
             self,
             [x, y, *index_variables],
@@ -2765,26 +2787,22 @@ def inc_subtensor(
     Consider using :meth:`pytensor.tensor.variable.TensorVariable.inc` instead.
 
     """
-    # First of all, y cannot have a higher dimension than x,
-    # nor have non-broadcastable dimensions where x is broadcastable.
-
     x = as_tensor_variable(x)
     y = as_tensor_variable(y)
 
-    if y.ndim > x.ndim:
-        raise TypeError(
-            f"Trying to increment a {int(x.ndim)}-dimensional "
-            f"subtensor with a {int(y.ndim)}-dimensional value."
-        )
-
     dim_offset = x.ndim - y.ndim
-    for dim in range(y.ndim):
-        if x.broadcastable[dim + dim_offset] and not y.broadcastable[dim]:
-            # It is acceptable to try to increment a subtensor with a
-            # broadcastable dim with a tensor that is not broadcastable
-            # on that dimension. However, its length must then be 1.
-            # We insert a SpecifyShape Op to make sure it is the case.
-            y = specify_broadcastable(y, dim)
+    if dim_offset < 0:
+        # These wrappers change the update's rank before the write op sees it.
+        if isinstance(x.owner_op, DimShuffle | Reshape):
+            raise TypeError(
+                f"Trying to increment a {x.ndim}-dimensional "
+                f"subtensor with a {y.ndim}-dimensional value."
+            )
+    else:
+        for dim in range(y.ndim):
+            if x.broadcastable[dim + dim_offset] and not y.broadcastable[dim]:
+                # The update must have length one along this broadcastable axis.
+                y = specify_broadcastable(y, dim)
 
     if x.owner is None:
         raise TypeError("x must be the result of a subtensor operation")
