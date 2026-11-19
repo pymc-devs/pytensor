@@ -15,11 +15,11 @@ work=llvm-work # relative and short: Windows path length
 args=()
 case "$(uname -s)" in
 MINGW* | MSYS* | CYGWIN*)
-    # Static CRT, like the Rust side (+crt-static): Python doesn't ship msvcp140.dll.
+    # MSVC's cl, from the developer environment the workflow sets up; MSVC's default,
+    # dynamic runtime (the wheel gets msvcp140.dll, see the workflow)
     args+=(
         -DCMAKE_C_COMPILER=cl
         -DCMAKE_CXX_COMPILER=cl
-        -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
     )
     ;;
 esac

@@ -12,7 +12,7 @@
 # linker, but the libraries must all exist).
 #
 # CI builds it with ci/build-llvm.sh (version: llvm-version.txt), which also sets the
-# Windows specifics (cl, static CRT). By hand (from an llvm-project checkout matching
+# Windows specifics (cl). By hand (from an llvm-project checkout matching
 # llvm-sys, i.e. LLVM 23.1):
 #
 #   cmake -G Ninja -S llvm -B build-llvm \
