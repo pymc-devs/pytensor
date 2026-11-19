@@ -2,7 +2,7 @@ from pytensor.link.basic import JITLinker
 
 
 class LLVMLinker(JITLinker):
-    """Compile a FunctionGraph with the LLVM backend (see DESIGN.md).
+    """Compile a FunctionGraph with the LLVM backend.
 
     The graph is planned in Python (`program.py`) into tasks that run Rust kernels,
     code generated from Python, or numba implementations; a Rust interpreter runs them.

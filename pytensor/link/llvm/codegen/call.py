@@ -1,9 +1,9 @@
-"""Calls from generated code to other kernels (DESIGN.md, section 2a).
+"""Calls from generated code to other kernels.
 
 Rust kernels, numba kernels and subprograms all have the kernel ABI the interpreter
-calls (section 6). Generated code calls them the same way: it packs the arguments into
-`PtArray`s (with the number of axes and the dtype of each), calls the kernel through its entry in the link table and reads back what
-the kernel wrote. A node implemented by such a kernel then has a node function like
+calls. Generated code calls them the same way: it packs the arguments into `PtArray`s
+(with the number of axes and the dtype of each), calls the kernel through its entry in
+the link table and reads back what the kernel wrote. A node implemented by such a kernel then has a node function like
 any other (`build_node_function(..., kernel=...)`), so units and generated loops can
 contain it.
 

@@ -1,7 +1,7 @@
 """Compiled units: several nodes generated as one function.
 
-A unit has the signature of a node (DESIGN.md, section 2): its inputs and outputs are the
-values that cross its boundary. Inside, every node's function is called (and inlined):
+A unit has the signature of a node: its inputs and outputs are the values that cross
+its boundary. Inside, every node's function is called (and inlined):
 
 * provided outputs of inner nodes are temporaries in the unit's temporary memory, or the
   unit's own provided output memory when the value is a unit output;

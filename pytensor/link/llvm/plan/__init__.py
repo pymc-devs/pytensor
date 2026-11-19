@@ -1,4 +1,4 @@
-"""Planning a program (DESIGN.md, section 8), in stages:
+"""Planning a program, in stages:
 
 1. `flatten`: the graph becomes *items* (nodes, units, subprograms) that read and
    write *values* (`values.Values`); scalars are grouped into units.

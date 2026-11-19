@@ -226,8 +226,8 @@ class Builder:
     def aggregate(self, ty: Type, members: Sequence[Value]) -> Value:
         """A struct or array value from its members."""
     def alias_domain(self, name: str) -> None:
-        """Start alias information for this function (DESIGN.md, "Aliasing"): a scope
-        domain and a TBAA root named after `name` (unique in the module).
+        """Start alias information for this function: a scope domain and a TBAA root named
+        after `name` (unique in the module).
         """
     def alloca(self, ty: Type, count: int = 1) -> Value:
         """Stack memory for `count` values of `ty`, in the entry block (64-byte aligned)."""

@@ -1,3 +1,4 @@
+(libdoc_link_llvm)=
 # The LLVM backend
 
 The graph stays in PyTensor. Code is generated from Python: a dispatch function per Op
@@ -6,7 +7,7 @@ node — its types, constants, `view_map`/`destroy_map`, `infer_shape`. Rust pro
 wrapper, the compiler (optimization, machine code, JIT, object cache), the runtime
 (interpreter, memory, buffers, C API) and Rust kernels for the hard ops.
 
-`TUTORIAL.md` shows how to implement an op.
+{doc}`/extending/creating_an_llvm_op` shows how to implement an op.
 
 How much is compiled together is decided in the graph: an `OpFromGraph` with
 `execution=Execution.COMPILED` becomes a unit (one kernel), one with

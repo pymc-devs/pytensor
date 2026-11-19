@@ -1,14 +1,13 @@
+(creating_an_llvm_op)=
 # Adding an op to the LLVM backend
 
 This tutorial implements a new op for the LLVM backend, start to finish. It first
 introduces the interface the implementation is written with, `pytensor_llvm.ir`, and
 then uses it for a small tensor op and a scalar op, and explains layouts (what the
 backend knows about the strides of each array, and how an op takes part in that),
-views and writing over inputs, temporary memory and random variables. `DESIGN.md`
-explains why things are the way they are; this file only shows how to use them.
-
-Every `python` block below is run, in order, by `tests/link/llvm/test_tutorial.py`, so
-the code is known to work. You can paste the blocks into one session and follow along.
+views and writing over inputs, temporary memory and random variables.
+{doc}`/library/link/llvm` explains why things are the way they are; this page
+only shows how to use them.
 
 ## 1. Three ways to implement an op
 

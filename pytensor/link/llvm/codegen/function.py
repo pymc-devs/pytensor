@@ -1,7 +1,4 @@
-"""Generated functions: signatures, node functions and kernel ABI wrappers.
-
-See DESIGN.md, sections 2, 3 and 6.
-"""
+"""Generated functions: signatures, node functions and kernel ABI wrappers."""
 
 from __future__ import annotations
 
@@ -319,7 +316,7 @@ def build_node_function(
     body=None,
     inplace=None,
 ) -> NodeFunction:
-    """The LLVM function of one node (DESIGN.md, section 2), always inlined.
+    """The LLVM function of one node, always inlined.
 
     * `temporary_outputs`: allocated outputs that are temporaries of a compiled unit;
       they go into temporary memory instead of runtime buffers;
@@ -364,9 +361,9 @@ def build_node_function(
         module=module,
         name=name,
     )
-    # Aliasing (DESIGN.md): what LLVM is told. Every array the function writes (a
-    # provided or returned output, an input overwritten in place) overlaps no other
-    # array of the function; inputs that are only read may overlap each other.
+    # Aliasing: what LLVM is told. Every array the function writes (a provided or
+    # returned output, an input overwritten in place) overlaps no other array of the
+    # function; inputs that are only read may overlap each other.
     b.alias_domain(name)
     written = [
         f"o{j}"

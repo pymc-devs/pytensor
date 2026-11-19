@@ -181,7 +181,7 @@ pub type KernelFn = unsafe extern "C-unwind" fn(
     config: *const u8,
 ) -> i32;
 
-/// How an output comes to be (DESIGN.md, section 3).
+/// How an output comes to be.
 #[pyclass(module = "pytensor_llvm.interp", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputMode {
