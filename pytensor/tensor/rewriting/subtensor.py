@@ -85,6 +85,7 @@ from pytensor.tensor.subtensor import (
     get_constant_idx,
     get_slice_elements,
     indices_from_subtensor,
+    slice_len,
     unflatten_index_variables,
 )
 from pytensor.tensor.type import TensorType
@@ -2288,32 +2289,19 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
     n_trailing = base.type.ndim - len(write_indices)
     full_write = list(write_indices) + [slice(None)] * n_trailing
 
-    # Compute where the advanced axis lands in the result of x[indices], per
-    # numpy semantics: hoisted to position 0 if the adv indices are split by
-    # slices, otherwise kept in place at the position of the first adv axis
-    # (counting only slice axes that come before it, since collapsed adv
-    # axes share one output dim).
-    adv_axes = [
-        i for i, idx in enumerate(full_write) if isinstance(idx, TensorVariable)
+    # NumPy places separated advanced indices at the front.
+    adv_pos = (
+        0
+        if _non_consecutive_adv_indexing(full_write)
+        else next(i for i, idx in enumerate(full_write) if not isinstance(idx, slice))
+    )
+    slice_shapes = [
+        slice_len(idx, length)
+        for idx, length in zip(
+            full_write, get_simplified_shape(base, fgraph=fgraph), strict=True
+        )
+        if isinstance(idx, slice)
     ]
-    if _non_consecutive_adv_indexing(full_write):
-        adv_pos = 0
-        slice_shapes = [
-            base.shape[i] for i in range(base.type.ndim) if i not in set(adv_axes)
-        ]
-    else:
-        first_adv = min(adv_axes)
-        last_adv = max(adv_axes)
-        pre = [
-            base.shape[i] for i in range(first_adv) if isinstance(full_write[i], slice)
-        ]
-        post = [
-            base.shape[i]
-            for i in range(last_adv + 1, base.type.ndim)
-            if isinstance(full_write[i], slice)
-        ]
-        adv_pos = len(pre)
-        slice_shapes = pre + post
 
     # Bring v to its full natural shape so we can index the adv axis directly.
     natural_shape_v = [*slice_shapes[:adv_pos], n_write, *slice_shapes[adv_pos:]]

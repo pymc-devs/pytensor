@@ -23,6 +23,7 @@ from pytensor.tensor.rewriting.subtensor import (
     _slice_to_arange,
     local_add_of_sparse_write,
     local_adv_idx_to_slice,
+    local_advanced_read_of_write_constant_indices,
     local_blockwise_inc_subtensor,
     local_inc_subtensor_remove_broadcastable_index,
     local_join_subtensors,
@@ -42,6 +43,7 @@ from pytensor.tensor.subtensor import (
     advanced_inc_subtensor1,
     inc_subtensor,
     set_subtensor,
+    slice_len,
 )
 from pytensor.tensor.type import (
     bmatrix,
@@ -1782,6 +1784,26 @@ class TestReadOfWriteConstantIndices:
         self.mode = mode.including(
             "local_advanced_read_of_write_constant_indices",
         ).excluding("fusion", "local_adv_idx_to_slice")
+
+    def test_set_with_non_full_slice(self):
+        x = matrix("x", dtype="float64")
+        v = matrix("v", dtype="float64", shape=(2, 1))
+        stop = pt.lscalar("stop")
+        out = x[[0, 1], :stop].set(v)[[1, 0], :stop]
+
+        result = utt.RewriteTester(
+            [x, v, stop],
+            [out],
+            include=None,
+            custom_rewrite=local_advanced_read_of_write_constant_indices,
+        )
+        written = pt.alloc(v, 2, slice_len(slice(None, stop), x.shape[1]))
+        result.assert_graph(written[[1, 0], :])
+
+        dx = np.arange(12.0).reshape(3, 4)
+        dv = np.array([[10.0], [20.0]])
+        for stop_value in (0, 2):
+            result.assert_eval(dx, dv, stop_value)
 
     def test_inc_multi_axis_unique_const(self):
         """Multi-axis ``x[idx_a, idx_b].inc(v)[idx_a, idx_b]`` with
