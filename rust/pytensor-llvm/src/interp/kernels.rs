@@ -1,5 +1,5 @@
 //! Rust kernels that move data: views and copies. (`linalg.rs` and `sort.rs` have the
-//! others, `scan.rs` the Scan kernel.)
+//! others.)
 //!
 //! A kernel's config holds its parameters and the mode of each output, which Python
 //! chooses per node (the kernel never infers it from the arguments).

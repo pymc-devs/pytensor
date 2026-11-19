@@ -242,7 +242,7 @@ impl<'a> PtArrayRef<'a> {
         }
         // SAFETY: the array has one element, a valid aligned value of `dtype` (the
         // type's invariant).
-        Ok(unsafe { crate::interp::consts::read_scalar(self.data, self.dtype).1 })
+        Ok(unsafe { read_scalar(self.data, self.dtype).1 })
     }
 }
 
@@ -814,6 +814,59 @@ impl OwnedArray {
     /// API, numpy).
     pub fn into_parts(self) -> (OwnedBuf, *mut u8, Vec<i64>, Vec<i64>) {
         (self.buf, self.data, self.shape, self.strides)
+    }
+}
+
+/// Read one element as (f64, i64).
+///
+/// # Safety
+/// `p` points to a valid, aligned element of `dt`.
+pub unsafe fn read_scalar(p: *const u8, dt: DType) -> (f64, i64) {
+    // SAFETY: the function's contract.
+    unsafe {
+        match dt {
+            DType::Float64 => {
+                let v = *(p as *const f64);
+                (v, if v.is_finite() { v as i64 } else { 0 })
+            }
+            DType::Float32 => {
+                let v = *(p as *const f32) as f64;
+                (v, if v.is_finite() { v as i64 } else { 0 })
+            }
+            DType::Int64 => {
+                let v = *(p as *const i64);
+                (v as f64, v)
+            }
+            DType::Int32 => {
+                let v = *(p as *const i32) as i64;
+                (v as f64, v)
+            }
+            DType::Int16 => {
+                let v = *(p as *const i16) as i64;
+                (v as f64, v)
+            }
+            DType::Int8 => {
+                let v = *(p as *const i8) as i64;
+                (v as f64, v)
+            }
+            DType::Uint8 | DType::Bool => {
+                let v = *p as i64;
+                (v as f64, v)
+            }
+            DType::Uint16 => {
+                let v = *(p as *const u16) as i64;
+                (v as f64, v)
+            }
+            DType::Uint32 => {
+                let v = *(p as *const u32) as i64;
+                (v as f64, v)
+            }
+            DType::Uint64 => {
+                // the i64 wraps above i64::MAX
+                let v = *(p as *const u64);
+                (v as f64, v as i64)
+            }
+        }
     }
 }
 

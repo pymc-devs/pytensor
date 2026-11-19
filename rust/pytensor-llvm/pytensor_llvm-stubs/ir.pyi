@@ -367,6 +367,12 @@ class Builder:
         """
     def rt_decref(self, ctx: Value, buffer: Value) -> None:
         """Give up a buffer reference (`buffer`: a PtBuffer pointer, may be null)."""
+    def rt_error_context(self, ctx: Value, context: str) -> None:
+        """Prefix the error reported on `ctx` with `context` ("context: message")."""
+    def rt_clock_ns(self) -> Value:
+        """Nanoseconds on a monotonic clock (i64), for profiling."""
+    def rt_counter_add(self, counter: Value, n: Operand) -> None:
+        """Add `n` (i64) to the u64 at `counter`, atomically (profiling counters)."""
     def rt_fail(self, ctx: Value, message: str) -> None:
         """Report an error on `ctx` (the function should then return nonzero)."""
     def rt_scratch(self, ctx: Value, nbytes: Operand, at_entry: bool = False) -> Value:

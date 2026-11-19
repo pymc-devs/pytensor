@@ -1,5 +1,4 @@
-"""Scan on LLVM: as a generated loop (its body inlined, kernels called for the rest), and as
-the Rust kernel running its body as a subprogram."""
+"""Scan on LLVM: a generated loop (its body inlined, kernels called for the rest)."""
 
 import numpy as np
 import pytest
@@ -14,7 +13,6 @@ pytest.importorskip("pytensor_llvm")
 
 LLVM = get_mode("LLVM")
 GEN = LLVM.clone(link_kwargs={"numba_fallback": False})
-KERNEL = LLVM.clone(link_kwargs={"numba_fallback": False, "generate_scan": False})
 REF = Mode(linker="py", optimizer="fast_run")
 rng = np.random.default_rng(5)
 
@@ -24,28 +22,12 @@ def scan(*args, **kwargs):
 
 
 def scan_tasks(f):
-    """Descriptions of the program's Scan tasks."""
+    """The program's items that run a Scan."""
     dump = f.maker.linker.program.dump()
-    return [line for line in dump.split("tasks:")[1].splitlines() if "Scan" in line]
+    return [line for line in dump.split("items:")[1].splitlines() if "Scan" in line]
 
 
-def generated(f):
-    """Are the top-level Scan tasks generated loops? (A generated task is described by
-    the op, "Scan{...}"; the kernel's by just "Scan". Scans inside units are skipped.)"""
-    tops = [
-        s.split(")  ", 1)[1]
-        for s in scan_tasks(f)
-        if s.split(")  ", 1)[1].startswith("Scan")
-    ]
-    return (
-        all(t.startswith("Scan{") for t in tops)
-        and any(t.startswith("Scan{") for t in tops)
-        if tops
-        else None
-    )
-
-
-def compare(inputs, outputs, values, modes=(GEN, KERNEL)):
+def compare(inputs, outputs, values, modes=(GEN,)):
     ref = pytensor.function(inputs, outputs, mode=REF, on_unused_input="ignore")(
         *values
     )
@@ -66,8 +48,6 @@ def compare(inputs, outputs, values, modes=(GEN, KERNEL)):
             )
             np.testing.assert_allclose(r, e, rtol=1e-12, atol=1e-14)
         assert scan_tasks(f), "no Scan task"
-        g = generated(f)
-        assert g is None or g == (mode is not KERNEL), scan_tasks(f)
         fs.append(f)
     return fs
 
@@ -103,19 +83,6 @@ def test_loop_without_scratch_memory_calls_no_runtime_functions():
     kernel = ir[ir.index("; ===== Scan") :].split("; =====")[1].split("define")[1]
     loop = kernel.split("\nfold:")[1].split("\nfold.exit:")[0]
     assert "@ptl_rt_scratch" not in loop
-
-
-def test_ir_includes_the_modules_of_the_loop_body():
-    # the kernel runs the body as a subprogram, planned by a planner of its own: its
-    # generated modules are listed with the program's
-    eps = pt.vector("eps")
-    xs = scan(
-        lambda e, x: pt.exp(x) * 0.5 + e, sequences=[eps], outputs_info=[pt.zeros(())]
-    )
-    f = pytensor.function([eps], xs, mode=KERNEL)
-    stats = f.maker.linker.stats
-    assert len(stats.modules) > stats.n_modules
-    assert "define" in f.maker.linker.ir()
 
 
 def test_mit_sot_taps():
@@ -163,7 +130,7 @@ def test_multiple_outputs_mixed_kinds():
 def test_while_loop_truncates():
     w0 = pt.dscalar("w0")
     ws = scan(lambda w: (w * 2, until(w > 1000)), outputs_info=[w0], n_steps=100)
-    f, _ = compare([w0], ws, [np.array(1.5)])
+    (f,) = compare([w0], ws, [np.array(1.5)])
     assert f(np.array(1.5)).shape[0] < 100
 
 
@@ -238,10 +205,9 @@ def test_zero_steps_and_n_steps_input():
     xs = scan(lambda x: x + 1, outputs_info=[x0], n_steps=n)
     for nv in [0, 1, 5]:
         ref = pytensor.function([x0, n], xs, mode=REF)(np.array(2.0), nv)
-        for mode in (GEN, KERNEL):
-            np.testing.assert_allclose(
-                pytensor.function([x0, n], xs, mode=mode)(np.array(2.0), nv), ref
-            )
+        np.testing.assert_allclose(
+            pytensor.function([x0, n], xs, mode=GEN)(np.array(2.0), nv), ref
+        )
 
 
 def test_n_steps_shorter_than_the_sequence():
@@ -301,7 +267,7 @@ def test_untraced_state_of_dynamic_shape():
     x0 = pt.vector("x0")
     seq = pt.matrix("seq")
     xs = scan(lambda s, x: pt.tanh(x) + s, sequences=[seq], outputs_info=[x0])
-    f, _ = compare([x0, seq], xs[-1], [rng.normal(size=4), rng.normal(size=(6, 4))])
+    (f,) = compare([x0, seq], xs[-1], [rng.normal(size=4), rng.normal(size=(6, 4))])
     from pytensor.scan.op import Scan
 
     (node,) = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, Scan)]

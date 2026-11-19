@@ -3,12 +3,12 @@
 //! Get the table with `pytensor_llvm.interp.c_api_table()` (or `program.c_api_table()`), and
 //! a function with `program.c_function()`.
 //!
-//! A `PtFunction*` is `Arc::into_raw` of a [`Function`]: the program plus the Python
-//! objects that own its machine code and kernel environments, so the function outlives
-//! the Python object it came from. A `PtSession*` owns a clone of that Arc and one
-//! [`CallMemory`]. Every entry point catches panics so they never unwind into C.
+//! A `PtFunction*` is `Arc::into_raw` of a [`Function`]: the compiled function plus the
+//! Python objects that own its machine code and kernel environments, so the function
+//! outlives the Python object it came from. A `PtSession*` owns a clone of that Arc and
+//! a context. Every entry point catches panics so they never unwind into C.
 
-use super::program::{CallMemory, Program};
+use super::function::{Destination, Function as Compiled};
 use crate::abi::{ABI_VERSION, OwnedBuf, PtArray, PtBuffer, overlaps};
 use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
@@ -30,9 +30,10 @@ pub struct PtTypeInfo {
 
 /// What a `PtFunction*` points to.
 pub struct Function {
-    pub prog: Arc<Program>,
-    /// compiled modules, kernels and subprograms the tasks point into; dropped
-    /// (possibly without the GIL: pyo3 defers the decref) after the last reference
+    pub prog: Arc<Compiled>,
+    /// compiled modules, kernels and link tables the function's code points into;
+    /// dropped (possibly without the GIL: pyo3 defers the decref) after the last
+    /// reference
     pub keepalive: Vec<Py<PyAny>>,
     /// static shape per input, then per output (-1: known at run time), handed out by
     /// `input_type` / `output_type`
@@ -40,10 +41,12 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn new(prog: Arc<Program>, keepalive: Vec<Py<PyAny>>) -> Function {
-        let shapes = (0..prog.n_inputs())
-            .map(|k| prog.input_shape(k))
-            .chain((0..prog.n_outputs()).map(|o| prog.output_shape(o)))
+    pub fn new(prog: Arc<Compiled>, keepalive: Vec<Py<PyAny>>) -> Function {
+        let shapes = prog
+            .inputs
+            .iter()
+            .chain(&prog.outputs)
+            .map(|t| t.shape_or_unknown())
             .collect();
         Function {
             prog,
@@ -60,15 +63,11 @@ impl Function {
 
 pub struct PtSession {
     f: Arc<Function>,
-    memory: CallMemory,
     /// the session's context: scratch, errors, the random state
     ctx: PtCtx,
     /// byte ranges of the inputs and of the provided outputs of the current call
     in_ranges: Vec<(usize, usize)>,
     out_ranges: Vec<(usize, usize)>,
-    /// per output of the current call: provided memory the result is written into
-    /// directly
-    direct: Vec<bool>,
     err: CString,
 }
 
@@ -130,7 +129,7 @@ unsafe extern "C" fn input_type(f: *const Function, i: usize, out: *mut PtTypeIn
     // SAFETY: `out` is writable; the shape lives as long as `f`.
     unsafe {
         *out = PtTypeInfo {
-            dtype: f.prog.input_dtype(i).code(),
+            dtype: f.prog.inputs[i].dtype.code(),
             ndim: sh.len() as i32,
             static_shape: sh.as_ptr(),
         }
@@ -148,7 +147,7 @@ unsafe extern "C" fn output_type(f: *const Function, o: usize, out: *mut PtTypeI
     // SAFETY: `out` is writable; the shape lives as long as `f`.
     unsafe {
         *out = PtTypeInfo {
-            dtype: f.prog.output_dtype(o).code(),
+            dtype: f.prog.outputs[o].dtype.code(),
             ndim: sh.len() as i32,
             static_shape: sh.as_ptr(),
         }
@@ -162,14 +161,11 @@ unsafe extern "C" fn session_new(f: *const Function) -> *mut PtSession {
         Arc::increment_strong_count(f);
         Arc::from_raw(f)
     };
-    let memory = f.prog.take_memory();
     let s = PtSession {
         f,
-        memory,
         ctx: PtCtx::new(),
         in_ranges: vec![],
         out_ranges: vec![],
-        direct: vec![],
         err: CString::default(),
     };
     Box::into_raw(Box::new(s))
@@ -235,11 +231,11 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
         // of `call`).
         _ => unsafe { std::slice::from_raw_parts_mut(outputs, n_out) },
     };
-    let ctx = &mut s.ctx;
-    let mut call = prog.begin(&mut s.memory)?;
     s.in_ranges.clear();
+    let mut ins = Vec::with_capacity(n_in);
     for (k, a) in inputs.iter().enumerate() {
-        check_header("input", k, a, prog.input_ndim(k), prog.input_dtype(k))?;
+        let t = &prog.inputs[k];
+        check_header("input", k, a, t.ndim(), t.dtype)?;
         // SAFETY: the header was just checked against the function's type; what the
         // constructor can't check is the caller's side of the contract of `call`: the
         // shape and strides arrays have `ndim` entries, and the memory they describe
@@ -247,14 +243,15 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
         let a =
             unsafe { PtArrayRef::from_raw_checked(a) }.map_err(|e| format!("input {k}: {e}"))?;
         s.in_ranges.push(a.extent());
-        call.set_input(k, a)?;
+        ins.push(a);
     }
     s.out_ranges.clear();
-    s.direct.clear();
-    s.direct.resize(n_out, false);
+    let mut dests = Vec::with_capacity(n_out);
     for (o, a) in outputs.iter().enumerate() {
-        check_header("output", o, a, prog.output_ndim(o), prog.output_dtype(o))?;
+        let t = &prog.outputs[o];
+        check_header("output", o, a, t.ndim(), t.dtype)?;
         if a.data.is_null() {
+            dests.push(Destination::New);
             continue;
         }
         // SAFETY: as for the inputs, for memory to write: the caller's side of the
@@ -275,43 +272,26 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
             ));
         }
         s.out_ranges.push(r);
-        // written in place by the producing task when it has the layout we'd choose;
-        // otherwise copied there below (the view is made again then: this one ends
-        // here)
-        s.direct[o] = call.provide(o, a)?.is_none();
+        dests.push(Destination::Into(a));
     }
-    let done = call.run(ctx)?;
+    let results = prog.call(&mut s.ctx, &ins, dests)?;
+    drop(ins);
     // outputs we hand over, taken back if a later one fails
     let mut taken: Vec<usize> = vec![];
-    let r = (|| -> Result<(), String> {
-        for (o, a) in outputs.iter_mut().enumerate() {
-            if a.data.is_null() {
-                let out = done.take_output(o)?;
-                // SAFETY: shape and strides point to caller arrays of length ndim,
-                // ours during the call (the contract of `call`; the header was
-                // checked above), and no memory is provided.
-                unsafe { OutSlot::from_raw(a) }
-                    .and_then(|slot| slot.set(out))
-                    .map_err(|e| format!("output {o}: {e}"))?;
-                taken.push(o);
-            } else if !s.direct[o] {
-                let result = done.output(o)?;
-                // SAFETY: as when it was provided above (the same checks passed, and
-                // that view is gone).
-                let mut memory = unsafe { PtArrayMut::from_raw_checked(a) }
-                    .map_err(|e| format!("provided output {o}: {e}"))?;
-                if result.shape() != memory.shape() {
-                    return Err(format!(
-                        "provided output {o}: shape mismatch: the result has shape {:?}, got {:?}",
-                        result.shape(),
-                        memory.shape()
-                    ));
-                }
-                memory.copy_from(&result)?;
-            }
+    let mut r = Ok(());
+    for (o, (a, res)) in outputs.iter_mut().zip(results).enumerate() {
+        let Some(out) = res else { continue };
+        // SAFETY: shape and strides point to caller arrays of length ndim, ours during
+        // the call (the contract of `call`; the header was checked above), and no
+        // memory is provided.
+        r = unsafe { OutSlot::from_raw(a) }
+            .and_then(|slot| slot.set(out))
+            .map_err(|e| format!("output {o}: {e}"));
+        if r.is_err() {
+            break;
         }
-        Ok(())
-    })();
+        taken.push(o);
+    }
     if r.is_err() {
         for o in taken {
             // SAFETY: the reference we just put there; take it back.

@@ -110,7 +110,8 @@ def test_ir_of_the_generated_code():
     x = pt.vector("x")
     f = pytensor.function([x], pt.exp(x) * 2 + 1, mode=LLVM)
     linker = f.maker.linker
-    assert len(linker.stats.modules) == linker.stats.n_modules >= 1
+    # the items' modules and the program's function
+    assert len(linker.stats.modules) == linker.stats.n_modules + 1 >= 2
     text = linker.ir()
     assert text.startswith("; =====") and "define" in text
     assert "define" in linker.ir(optimized=True)
@@ -216,6 +217,9 @@ def test_interpreted_ofg():
     out = inner(x)
     f = compare([x], [out[0], out[1] + 1], [rng.random(6)])
     assert any(s.startswith("program:") for s in info(f)["tasks"])
+    # the subprogram's modules are listed with the program's (and both functions)
+    stats = info(f)["stats"]
+    assert len(stats.modules) >= stats.n_modules + 2
 
 
 def test_nested_ofg_kinds():
@@ -292,37 +296,29 @@ def test_repeated_calls_and_threads():
 def test_profiling_with_subprograms():
     import pytensor
 
-    x = pt.dmatrix("x")
-    w = pt.dvector("w")
-    res = pytensor.scan(
-        lambda r, acc: acc + pt.exp(r) @ w,
-        sequences=[x],
-        outputs_info=[pt.zeros(())],
-        return_updates=False,
+    y = pt.dvector("y")
+    inner = OpFromGraph(
+        [y], [pt.cumsum(pt.exp(y)) * 2], execution=Execution.INTERPRETED
     )
-    # the Scan kernel runs its loop body as a subprogram (a generated Scan has none)
-    mode = get_mode("LLVM").clone(link_kwargs={"generate_scan": False})
-    f = pytensor.function([x, w], [res[-1], pt.sort(x, axis=None)], mode=mode)
+    x = pt.dvector("x")
+    f = pytensor.function([x], [inner(x).sum(), pt.sort(x)], mode=get_mode("LLVM"))
     p = f.maker.linker.program
-    xv, wv = np.ones((5, 3)), np.ones(3)
-    f(xv, wv)
+    xv = np.ones(5)
+    f(xv)
     assert all(secs == 0 for *_, secs in p.profile())
     p.set_profiling(True)
     for _ in range(3):
-        f(xv, wv)
+        f(xv)
     rows = p.profile()
     top = [r for r in rows if r[0] == 0]
     nested = [r for r in rows if r[0] == 1]
     assert top and nested
-    assert all(calls == 3 for _, _, calls, _ in top)
-    assert all(
-        calls == 15 for _, _, calls, _ in nested
-    )  # the loop body ran 5 times per call
+    assert all(calls == 3 for _, _, calls, _ in rows)
     assert sum(s for *_, s in top) > 0
-    assert "Scan" in p.profile_report()
+    assert "program:" in p.profile_report()
     p.reset_profile()
     p.set_profiling(False)
-    f(xv, wv)
+    f(xv)
     assert all(secs == 0 and calls == 0 for _, _, calls, secs in p.profile())
 
 

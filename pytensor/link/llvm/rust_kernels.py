@@ -1,4 +1,4 @@
-"""Precompiled Rust kernels for nodes the interpreter runs directly.
+"""Precompiled Rust kernels: what generated code calls for nodes it doesn't generate.
 
 `rust_kernel(op, node, in_layouts)` returns a `pytensor_llvm.interp.RustKernel` (function
 address + config) or None when the node has no Rust kernel; `in_layouts` are the
@@ -130,7 +130,6 @@ def _float_dtype(node):
 
 
 def _register_more():
-    from pytensor.scan.op import Scan
     from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
     from pytensor.tensor.linalg.decomposition.eigen import Eigh, Eigvalsh
     from pytensor.tensor.linalg.decomposition.lu import (
@@ -312,80 +311,6 @@ def _register_more():
         return interp().MatrixPinv(
             fresh_mode(node.outputs[0]), dt, bool(op.hermitian), linalg_parallel()
         )
-
-    @rust_kernel.register(Scan)
-    def _(op, node, in_layouts=None):
-        import dataclasses
-
-        from pytensor.link.llvm.program import Planner, current_options
-
-        info = op.info
-        # the body's inputs aren't graph inputs: their layouts come from the kernel
-        planner = Planner(dataclasses.replace(current_options(), input_layout="any"))
-        # the loop body returns every output allocated; static ones use memory the
-        # Scan kernel provides
-        body_modes = [
-            OutputMode.PROVIDED
-            if all(s is not None for s in getattr(o.type, "shape", (None,)))
-            else OutputMode.RETURNED
-            for o in op.fgraph.outputs
-        ]
-        body = planner.plan(
-            op.fgraph,
-            output_modes=body_modes,
-            input_layouts=_body_input_layouts(op, node, in_layouts),
-        )
-
-        def taps(slices):
-            return [[int(t) for t in s] for s in slices]
-
-        return interp().Scan(
-            info.n_seqs,
-            taps(info.mit_mot_in_slices),
-            taps(info.mit_mot_out_slices),
-            taps(info.mit_sot_in_slices),
-            taps(info.sit_sot_in_slices),
-            info.n_untraced_sit_sot,
-            info.n_nit_sot,
-            info.n_non_seqs,
-            bool(info.as_while),
-            body,
-            [np.dtype(i.type.dtype) for i in node.inputs],
-            [np.dtype(o.type.dtype) for o in op.fgraph.outputs],
-        )
-
-
-def _body_input_layouts(op, node, in_layouts):
-    """What the Scan kernel passes the loop body: rows of the sequences, rows of its
-    own C-contiguous state buffers, whole untraced buffers (C-contiguous) and the
-    non-sequences as they are."""
-    from pytensor.link.llvm.layout import Layout, itemsize_of, remove_axis, shape_of
-
-    info = op.info
-    if in_layouts is None:
-        in_layouts = [None] * len(node.inputs)
-    inner = op.fgraph.inputs
-    lays = []
-    for j in range(info.n_seqs):
-        outer, lay = node.inputs[1 + j], in_layouts[1 + j]
-        lays.append(
-            None
-            if lay is None
-            else remove_axis(lay, 0, shape_of(outer), itemsize_of(outer))
-        )
-    n_taps = (
-        sum(len(t) for t in info.mit_mot_in_slices)
-        + sum(len(t) for t in info.mit_sot_in_slices)
-        + len(info.sit_sot_in_slices)
-        + info.n_untraced_sit_sot
-    )
-    for k in range(n_taps):
-        lays.append(Layout.c(inner[len(lays)].type.ndim))
-    first_ns = len(node.inputs) - info.n_non_seqs
-    lays += list(in_layouts[first_ns:])
-    if len(lays) != len(inner):
-        return None
-    return lays
 
 
 _register_more()

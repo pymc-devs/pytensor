@@ -36,7 +36,7 @@ class UnitItem:
 
 @dataclass
 class SubprogramItem:
-    """An interpreted OpFromGraph: a subprogram."""
+    """An OpFromGraph with `execution=INTERPRETED`: a subprogram, compiled on its own."""
 
     node: Apply
     inputs: list[int]

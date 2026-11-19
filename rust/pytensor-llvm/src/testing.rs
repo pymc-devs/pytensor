@@ -1,4 +1,4 @@
-//! Calling Rust kernels as the interpreter does, on arrays made by hand (tests only).
+//! Calling Rust kernels as generated code does, on arrays made by hand (tests only).
 //!
 //! Inputs live in memory of the test and may have any strides (`In`); outputs are
 //! provided by the test, between guard bytes, or allocated by the kernel (`Out`).
@@ -215,8 +215,8 @@ pub fn call<K: Kernel>(kernel: &K, inputs: &[In], outputs: Vec<Out>) -> Result<V
     call_in(&mut PtCtx::new(), kernel, inputs, outputs)
 }
 
-/// `call` in the context `ctx`, with the scratch mark the interpreter puts around a
-/// task.
+/// `call` in the context `ctx`, with the scratch mark generated code puts around a
+/// kernel call.
 pub fn call_in<K: Kernel>(
     ctx: &mut PtCtx,
     kernel: &K,

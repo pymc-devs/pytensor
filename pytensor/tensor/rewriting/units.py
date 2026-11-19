@@ -3,7 +3,7 @@
 A late rewrite that wraps runs of small, statically shaped nodes in
 ``OpFromGraph(execution=Execution.COMPILED)``: the backend generates each group as one
 function, so a chain of tiny Elemwise / CAReduce / DimShuffle / DeepCopy nodes doesn't become one
-interpreter step (and one compiled function) per node.
+kernel call (and one compiled function) per node.
 
 Groups are convex: no path leaves a group and comes back into it.
 

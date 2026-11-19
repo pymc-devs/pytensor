@@ -25,10 +25,10 @@ from pytensor.link.llvm.codegen.function import (
     llvm_inplace,
     node_outputs,
 )
-from pytensor.link.llvm.plan.memory import plan_memory
+from pytensor.link.llvm.plan.memory import lifetimes, place_temporaries
 from pytensor.link.llvm.program import Options, build_program
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
-from tests.link.llvm.test_aliasing import task, values_of
+from tests.link.llvm.test_aliasing import item
 
 
 # (fused, a chain of Elemwise is one loop and has nothing to overwrite)
@@ -307,20 +307,17 @@ def test_a_value_that_stands_for_several_variables_is_not_overwritten():
 
 
 def test_an_overwritten_value_lives_on_under_another_name():
-    v = values_of((8,), (8,), (8,), (8,), (8,))
-    tasks = [
-        task([0], [1], [P]),
-        task([1], [2], [I], [(0,)]),  # 2 is 1, overwritten
-        task([0], [3], [P]),
-        task([2, 3], [4], [P]),
+    items = [
+        item([0], [1], [P]),
+        item([1], [2], [I], [(0,)]),  # 2 is 1, overwritten
+        item([0], [3], [P]),
+        item([2, 3], [4], [P]),
     ]
-    m = plan_memory(v, tasks, in_ids=[0], out_ids=[4])
-    assert m.same == {2: 1} and m.value(2) == 1 and m.value(3) == 3
-    assert 2 not in m.kind and m.kind[1] == "provided"
-    assert (m.defined[1], m.end[1]) == (0, 3)  # alive until 2 was read
-    assert m.offsets[1] != m.offsets[3]
+    _, end = lifetimes(items, kept=[4])
+    assert end[1] == 3  # alive until 2 was read
+    offsets, _ = place_temporaries(items, {1: 64, 3: 64}, kept=[4])
+    assert offsets[1] != offsets[3]
 
-    # overwriting the program's output: the buffer handed back
-    tasks = [task([0], [1], [P]), task([1], [2], [I], [(0,)])]
-    m = plan_memory(v, tasks, in_ids=[0], out_ids=[2])
-    assert m.same == {2: 1} and 1 not in m.offsets and m.arena_bytes == 0
+    # overwriting the function's output: alive until the end
+    _, end = lifetimes([item([0], [1], [P]), item([1], [2], [I], [(0,)])], kept=[2])
+    assert end[1] == 2

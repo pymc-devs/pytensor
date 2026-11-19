@@ -1883,6 +1883,46 @@ impl Cx<'_> {
         Ok(())
     }
 
+    fn rt_error_context(&self, ctx: Value, context: &str) -> PyResult<()> {
+        self.open()?;
+        if ctx.ty != Ty::Ptr {
+            return err("ctx must be a ptr");
+        }
+        let msg = self.cstr(context)?;
+        let (f, fnty) = self.declare(
+            "ptl_rt_error_context",
+            &[Ty::Ptr, Ty::Ptr],
+            &Ty::Void,
+            false,
+        );
+        let mut raw = [self.v(&ctx)?, self.v(&msg)?];
+        self.call_raw(fnty, f, &mut raw, &Ty::Void);
+        Ok(())
+    }
+
+    fn rt_clock_ns(&self) -> PyResult<Value> {
+        self.open()?;
+        let (f, fnty) = self.declare("ptl_rt_clock_ns", &[], &Ty::Int(64), false);
+        Ok(self.call_raw(fnty, f, &mut [], &Ty::Int(64)).unwrap())
+    }
+
+    fn rt_counter_add(&self, counter: Value, n: Operand) -> PyResult<()> {
+        self.open()?;
+        let n = self.i64_of("rt_counter_add n", n)?;
+        if counter.ty != Ty::Ptr || n.ty != Ty::Int(64) {
+            return err("rt_counter_add(counter: ptr, n: i64)");
+        }
+        let (f, fnty) = self.declare(
+            "ptl_rt_counter_add",
+            &[Ty::Ptr, Ty::Int(64)],
+            &Ty::Void,
+            false,
+        );
+        let mut raw = [self.v(&counter)?, self.v(&n)?];
+        self.call_raw(fnty, f, &mut raw, &Ty::Void);
+        Ok(())
+    }
+
     fn ret(&self, value: Option<Operand>) -> PyResult<()> {
         self.open()?;
         let ret_ty = self.ret.borrow().clone();
@@ -2370,6 +2410,21 @@ impl Builder {
     /// Give up a buffer reference (`buffer`: a PtBuffer pointer, may be null).
     fn rt_decref(&self, py: Python<'_>, ctx: Value, buffer: Value) -> PyResult<()> {
         self.with(py, |cx| cx.rt_decref(ctx, buffer))
+    }
+
+    /// Prefix the error reported on `ctx` with `context` ("context: message").
+    fn rt_error_context(&self, py: Python<'_>, ctx: Value, context: &str) -> PyResult<()> {
+        self.with(py, |cx| cx.rt_error_context(ctx, context))
+    }
+
+    /// Nanoseconds on a monotonic clock (i64), for profiling.
+    fn rt_clock_ns(&self, py: Python<'_>) -> PyResult<Value> {
+        self.with(py, |cx| cx.rt_clock_ns())
+    }
+
+    /// Add `n` (i64) to the u64 at `counter`, atomically (profiling counters).
+    fn rt_counter_add(&self, py: Python<'_>, counter: Value, n: Operand) -> PyResult<()> {
+        self.with(py, |cx| cx.rt_counter_add(counter, n))
     }
 
     /// Mark the scratch position (an i64 token for `rt_scratch_release`).

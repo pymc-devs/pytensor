@@ -4,8 +4,9 @@ from pytensor.link.basic import JITLinker
 class LLVMLinker(JITLinker):
     """Compile a FunctionGraph with the LLVM backend.
 
-    The graph is planned in Python (`program.py`) into tasks that run Rust kernels,
-    code generated from Python, or numba implementations; a Rust interpreter runs them.
+    The graph is planned in Python (`program.py`) into items that run Rust kernels,
+    code generated from Python, or numba implementations; a generated function, the
+    program's, runs them.
     """
 
     # llvm_units keeps ScalarType values inside compiled units: they don't cross the
@@ -31,7 +32,6 @@ class LLVMLinker(JITLinker):
         "check_layouts",
         "parallel",
         "linalg_parallel",
-        "generate_scan",
         "debug_info",
     )
 
@@ -45,7 +45,6 @@ class LLVMLinker(JITLinker):
         check_layouts=False,
         parallel=True,
         linalg_parallel=None,
-        generate_scan=True,
         debug_info=False,
         **kwargs,
     ):
@@ -60,7 +59,6 @@ class LLVMLinker(JITLinker):
         if linalg_parallel is None:
             linalg_parallel = parallel
         self.linalg_parallel = linalg_parallel
-        self.generate_scan = generate_scan
         self.debug_info = debug_info
         self.program = None
         self.stats = None
@@ -77,12 +75,10 @@ class LLVMLinker(JITLinker):
         return new
 
     def fgraph_convert(self, fgraph, **kwargs):
-        from pytensor.link.llvm.program import Options, build_program
+        from pytensor.link.llvm.program import Options, compile_program
 
         opts = Options(**{k: getattr(self, k) for k in self.OPTIONS})
-        fn, self.stats = build_program(fgraph, opts)
-        # the interp.Program (fn wraps it when generators are passed through)
-        self.program = getattr(fn, "program", fn)
+        self.program, fn, self.stats = compile_program(fgraph, opts)
         return fn
 
     def jit_compile(self, fn):
@@ -91,8 +87,9 @@ class LLVMLinker(JITLinker):
     def ir(
         self, optimized=False, opt_level=None, remarks=False, locations=False
     ) -> str:
-        """The LLVM IR of the code generated for the compiled graph, one module per
-        generated task, each under a comment naming the task (see `program.dump()`).
+        """The LLVM IR of the code generated for the compiled graph: the module of
+        every item compiled on its own and the program's function, each under a comment
+        naming it (see `program.dump()`).
         With `optimized`, the IR after the optimization pipeline, i.e. what the machine
         code is generated from (at `opt_level`, default the one compiled with); with
         `remarks` too, LLVM's optimization remarks first (what the loop vectorizer did

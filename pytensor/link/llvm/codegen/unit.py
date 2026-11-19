@@ -1,10 +1,13 @@
-"""Compiled units: several nodes generated as one function.
+"""Compiled units: several items generated as one function.
 
 A unit has the signature of a node: its inputs and outputs are the values that cross
-its boundary. Inside, every node's function is called (and inlined):
+its boundary. Inside, every item's function is called (and inlined): a node's generated
+code, or a call of a kernel. A program's top level is generated the same way
+(`program.py`), its items mostly calls of kernels compiled on their own.
 
-* provided outputs of inner nodes are temporaries in the unit's temporary memory, or the
-  unit's own provided output memory when the value is a unit output;
+* provided outputs of inner items are temporaries in the unit's arena (one piece of
+  memory, laid out by liveness: `plan.memory.place_temporaries`), or the unit's own
+  provided output memory when the value is a unit output;
 * allocated outputs of inner nodes go into temporary memory too, except for unit outputs,
   which the node allocates straight into the unit's output slot;
 * views and scalars are read back from their slots;
@@ -25,6 +28,7 @@ from pytensor.link.llvm.codegen.emit import (
     constant,
     copy,
     pack,
+    packed_array,
     read_slot,
     store,
     unpack,
@@ -48,6 +52,12 @@ from pytensor.link.llvm.codegen.types import (
     slot_type,
 )
 from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.plan.memory import place_temporaries
+
+
+#: the cells of a profile (`build_unit_function`'s `profile`): profiling on (nonzero),
+#: number of calls, then nanoseconds per item
+PROFILE_ON, PROFILE_CALLS, PROFILE_ITEMS = 0, 1, 2
 
 
 def build_unit_function(
@@ -62,6 +72,8 @@ def build_unit_function(
     output_aliases: list[tuple[int, ...]] | None = None,
     parallel=True,
     links=None,
+    profile=None,
+    inline=True,
 ) -> NodeFunction:
     """A function computing `outputs` from `inputs` by running the items `resolved`.
 
@@ -78,7 +90,14 @@ def build_unit_function(
       says whether its code is generated or which kernel it calls. A kernel's handle
       goes into `links` (the returned function's `links`: call it with that config).
       Buffers kernels allocate for values inside the unit are released when it returns;
-    * `constants`: {vid: (type, ndarray)} (0-d ones folded, arrays from the link table).
+    * `constants`: {vid: (type, ndarray)} (0-d ones folded, arrays from the link table);
+    * `profile`: a uint64 array of `PROFILE_ITEMS + len(resolved)` cells, read and
+      written by the code (`emit_items`);
+    * `inline`: inline the function into its callers (units are; a program's top level
+      is called through its kernel wrapper).
+
+    The returned function's `arena` holds the offsets of the temporaries and the
+    arena's size, its `constants` the link entries of the array constants.
     """
     from pytensor.link.llvm.codegen.call import LinkTable
 
@@ -106,12 +125,14 @@ def build_unit_function(
         if o.mode not in (OutputMode.PROVIDED, OutputMode.RETURNED):
             raise NotImplementedError(f"unit outputs can't be {o.mode}")
     sig = Signature(tuple(in_reprs), tuple(outs))
-    nodes = ", ".join(debug_name(r.item.node) for r in resolved)
+    nodes = ", ".join(
+        debug_name(r.item.node) if r.kernel is None else r.description for r in resolved
+    )
     fn = module.function(
         name,
         sig.param_types(),
         ir.i32,
-        inline=ir.Inline.Always,
+        inline=ir.Inline.Always if inline else ir.Inline.Default,
         debug_name=f"unit: {nodes}"[:300],
     )
     b = fn.builder()
@@ -135,14 +156,30 @@ def build_unit_function(
         if mode is OutputMode.PROVIDED:
             t = Destination(array=unpack(b, o.repr, v), layout=o.repr.layout)
         else:
-            t = Destination(slot=v)
+            # new memory in the output's layout (a view may also be copied: then C)
+            lay = Layout.c(o.repr.ndim) if o.aliases else o.layout
+            t = Destination(slot=v, layout=lay)
         out_targets.append(t)
         targets.setdefault(vid, t)
     # (temporaries are freed before the function returns)
     with cg.scratch_scope(function=True):
-        bind_constants(cg, constants, vals)
-
-        written, owned = emit_items(cg, module, name, resolved, vals, targets)
+        entries = bind_constants(cg, constants, vals)
+        sizes = {
+            vid: int(np.prod(o.repr.shape, dtype=np.int64)) * itemsize(o.repr.dtype)
+            for r in resolved
+            for vid, o in zip(r.item.outputs, r.signature.outputs, strict=True)
+            if o.mode is OutputMode.PROVIDED
+            and not fits(targets.get(vid), o)
+            and o.repr.static
+        }
+        offsets, nbytes = place_temporaries(
+            resolved, sizes, [vid for vid, _, _ in outputs]
+        )
+        arena = (cg.temp_memory(b.i64(nbytes)), offsets) if offsets else None
+        cells = None if profile is None else links.link_array(profile, share=False)
+        written, owned = emit_items(
+            cg, module, name, resolved, vals, targets, arena=arena, profile=cells
+        )
 
         # unit outputs that weren't produced in place: views of the inputs where they are
         # (and may be), else copies
@@ -183,7 +220,7 @@ def build_unit_function(
             b.if_else(inside, view, copied)
         release(cg, owned)
     b.ret(0)
-    return NodeFunction(fn, sig, links)
+    return NodeFunction(fn, sig, links, arena=(offsets, nbytes), constants=entries)
 
 
 def _bounds(b, a: Array):
@@ -210,11 +247,28 @@ def _lies_in(b, a: Array, base: Array):
 @dataclass
 class Destination:
     """Where a value may be produced directly: memory (`array`, in `layout`), or an
-    output slot (`slot`) for a value allocated C-contiguous."""
+    output slot (`slot`) for a value allocated in new memory (in `layout`)."""
 
     array: Array | None = None
     layout: Layout | None = None
     slot: object = None
+
+
+def fits(t: Destination | None, o: Output) -> bool:
+    """Can an item produce its output `o` straight in `t`? Provided memory whose layout
+    implies the declared one, or a slot for new memory in a layout implying the
+    slot's."""
+    if t is None or t.layout is None:
+        return False
+    shape, size = o.repr.shape, itemsize(o.repr.dtype)
+    if o.mode is OutputMode.PROVIDED:
+        return t.array is not None and t.layout.implies(o.layout, shape, size)
+    return (
+        o.mode is OutputMode.RETURNED
+        and not o.aliases
+        and t.slot is not None
+        and o.layout.implies(t.layout, shape, size)
+    )
 
 
 def release(cg, owned):
@@ -225,10 +279,12 @@ def release(cg, owned):
         )
 
 
-def bind_constants(cg, constants, vals):
+def bind_constants(cg, constants, vals) -> dict:
     """Values of `constants` ({vid: (type, ndarray)}): 0-d ones folded into the code,
-    arrays from the links (C-contiguous copies kept alive with it)."""
+    arrays from the links, in their memory order (`Layout.of_const`; equal ones share
+    their memory). Returns {vid: link entry} of the arrays."""
     b = cg.b
+    entries = {}
     for vid, (t, data) in constants.items():
         r = repr_of(t)
         data = np.asarray(data, dtype=t.dtype)
@@ -245,11 +301,19 @@ def bind_constants(cg, constants, vals):
                 raise NotImplementedError("array constants need a links")
             from pytensor.link.llvm.codegen.call import linked
 
-            arr = np.ascontiguousarray(data)
-            ptr = linked(cg, cg.links.link_array(arr))
-            shape = [b.i64(n) for n in arr.shape]
-            strides = [b.i64(st) for st in arr.strides]
-            vals[vid] = c_array(t.dtype, ptr, shape, strides)
+            layout = Layout.of_const(data)
+            order = list(layout.order)
+            memory = np.ascontiguousarray(data.transpose(order))
+            arr = memory.transpose(np.argsort(order))
+            entries[vid] = cg.links.link_array(memory)
+            vals[vid] = Array(
+                t.dtype,
+                linked(cg, entries[vid]),
+                [b.i64(n) for n in arr.shape],
+                [b.i64(st) for st in arr.strides],
+                layout,
+            )
+    return entries
 
 
 def unit_input_layouts(types, layouts) -> list:
@@ -258,7 +322,17 @@ def unit_input_layouts(types, layouts) -> list:
     return [repr_of(t, lay).layout for t, lay in zip(types, layouts, strict=True)]
 
 
-def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
+def emit_items(
+    cg,
+    module,
+    name,
+    resolved,
+    vals,
+    targets=None,
+    on_fail=None,
+    arena=None,
+    profile=None,
+):
     """Emit the items `resolved` (`plan.resolve.Resolved`, in order) into the function
     being built in `cg`: each node's function is called (and inlined), or its kernel.
 
@@ -268,54 +342,55 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
     * `targets`: vid -> `Destination`: where a value may be produced directly (PROVIDED
       outputs whose declared layout the target's implies; returned new C-contiguous
       memory into a slot); other values go into temporary memory or kernel buffers;
-    * `on_fail()`: emits the caller's cleanup before an error is returned.
+    * `on_fail()`: emits the caller's cleanup before an error is returned (which says
+      which item failed);
+    * `arena`: (pointer, {vid: offset}): where the provided outputs that aren't produced
+      in their targets go (`plan.memory.place_temporaries`); others get temporary
+      memory of their own;
+    * `profile`: the link entry of the profile cells (`PROFILE_*`): while profiling is
+      on, each item's wall time is added to its cell.
 
     Returns (written, owned): the vids produced in their targets, and the slots of
     buffers kernels allocated for other values, for the caller to `release` when they
     are no longer used (on failure, they are released here)."""
+    from pytensor.link.llvm.codegen.call import build_call_function, linked
+
     b = cg.b
     ctx, config = cg.ctx, cg.config
     targets = targets or {}
     written = set()
     owned = []  # (slot, ndim): buffers kernels allocated
     lays = {}  # vid -> Layout of what the items produced
+    if profile is not None:
+        cells = linked(cg, profile)
+        profiling = b.ne(b.load(ir.i64, cells), b.i64(0))
+        with b.if_(profiling):
+            b.rt_counter_add(b.gep(ir.i64, cells, PROFILE_CALLS), b.i64(1))
+        start = b.alloca(ir.i64)
     for n, r in enumerate(resolved):
-        item, node, kernel, nsig, in_lays = (
-            r.item,
-            r.item.node,
-            r.kernel,
-            r.signature,
-            r.in_layouts,
-        )
+        item, kernel, nsig, in_lays = r.item, r.kernel, r.signature, r.in_layouts
+        node = getattr(item, "node", None)
+        present = r.arguments
         # provided outputs: their target if its layout implies the declared one; else a
         # temporary in the declared layout (copied by the caller if needed)
-        in_place = {}
-        for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True)):
-            t = targets.get(vid)
-            if (
-                o.mode is OutputMode.PROVIDED
-                and t is not None
-                and t.array is not None
-                and vid not in written
-                and t.layout is not None
-                and t.layout.implies(o.layout, o.repr.shape, itemsize(o.repr.dtype))
-            ):
-                in_place[j] = t.array
+        in_place = {
+            j: targets[vid].array
+            for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True))
+            if o.mode is OutputMode.PROVIDED
+            and vid not in written
+            and fits(targets.get(vid), o)
+        }
         for vid, o in zip(item.outputs, nsig.outputs, strict=True):
             if o.layout is not None:
                 lays[vid] = o.layout
 
         def into_slot(vid, o):
             # an allocated value with a slot target: allocated straight into it if the
-            # node allocates it C-contiguous
-            t = targets.get(vid)
+            # node allocates it in a layout the slot takes
             return (
                 o.mode is OutputMode.RETURNED
-                and not o.aliases
-                and t is not None
-                and t.slot is not None
                 and vid not in written
-                and o.layout.is_c(o.repr.shape)
+                and fits(targets.get(vid), o)
             )
 
         temporaries = {
@@ -323,27 +398,25 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
             for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True))
             if o.mode is OutputMode.RETURNED and not into_slot(vid, o)
         }
-        nf = build_node_function(
-            module,
-            node,
-            f"{name}_n{n}",
-            temporary_outputs=frozenset(temporaries),
-            in_layouts=in_lays,
-            parallel=cg.parallel,
-            kernel=kernel,
-            links=cg.links,
-            body=r.body,
-        )
+        if node is None:
+            nf = build_call_function(module, f"{name}_n{n}", nsig, kernel, cg.links)
+        else:
+            nf = build_node_function(
+                module,
+                node,
+                f"{name}_n{n}",
+                temporary_outputs=frozenset(temporaries),
+                in_layouts=in_lays,
+                parallel=cg.parallel,
+                kernel=kernel,
+                links=cg.links,
+                body=r.body,
+            )
         args = [ctx, config]
-        present = [
-            vid
-            for vid, var in zip(item.inputs, node.inputs, strict=True)
-            if not is_absent(var.type)
-        ]
         for vid, rep in zip(present, nsig.inputs, strict=True):
             if vid not in vals:
                 raise ValueError(
-                    f"{name}: {node.op} reads a value that isn't computed yet"
+                    f"{name}: {r.description} reads a value that isn't computed yet"
                 )
             v = vals[vid]
             if isinstance(rep, ScalarRepr):
@@ -351,16 +424,17 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                 continue
             if not v.layout.implies(rep.layout, rep.shape, itemsize(rep.dtype)):
                 raise AssertionError(
-                    f"{name}: {node.op} was resolved for an input with layout {rep.layout}, got {v.layout}"
+                    f"{name}: {r.description} was resolved for an input with layout {rep.layout}, got {v.layout}"
                 )
             args.append(pack(b, rep, v))
         reads = []  # (vid, slot, how)
-        for j, (vid, var, o) in enumerate(
-            zip(item.outputs, node.outputs, nsig.outputs, strict=True)
-        ):
+        for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True)):
             if o.mode is OutputMode.ABSENT:
                 continue
-            if o.mode is OutputMode.PROVIDED:
+            if o.mode is OutputMode.INPLACE:
+                # (no argument: the input's memory, overwritten)
+                vals[vid] = vals[present[o.aliases[0]]]
+            elif o.mode is OutputMode.PROVIDED:
                 if j in in_place:
                     a = in_place[j]
                     written.add(vid)
@@ -368,7 +442,13 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                     lay = (
                         o.layout if o.layout.fully_packed(o.repr.shape) else None
                     )  # (C implies any)
-                    a = cg.temporary(var.type.dtype, list(var.type.shape), lay)
+                    shape = list(o.repr.shape)
+                    if arena is not None and vid in arena[1]:
+                        data = b.gep_bytes(arena[0], arena[1][vid])
+                        dims = [b.i64(m) for m in shape]
+                        a = packed_array(b, o.repr.dtype, data, dims, lay)
+                    else:
+                        a = cg.temporary(o.repr.dtype, shape, lay)
                 vals[vid] = a
                 args.append(pack(b, o.repr, a))
             elif o.mode is OutputMode.SCALAR:
@@ -388,9 +468,19 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
                 # a temporary of a generated node is scratch memory it took (or a view)
                 how = "scratch" if kernel is None and j in temporaries else "array"
                 reads.append((vid, slot, how, o))
+        if profile is not None:
+            with b.if_(profiling):
+                b.store(b.rt_clock_ns(), start)
         rc = b.call(nf.function, args)
+        if profile is not None:
+            with b.if_(profiling):
+                b.rt_counter_add(
+                    b.gep(ir.i64, cells, PROFILE_ITEMS + n),
+                    b.sub(b.rt_clock_ns(), b.load(ir.i64, start)),
+                )
         failed = b.ne(rc, 0)
         with b.if_(failed):
+            b.rt_error_context(ctx, " ".join(r.description.split())[:200])
             release(cg, owned)
             if on_fail is not None:
                 on_fail()
@@ -399,9 +489,8 @@ def emit_items(cg, module, name, resolved, vals, targets=None, on_fail=None):
             if how == "scalar":
                 vals[vid] = b.load(o.repr.ir_type, slot)
             else:
-                var = node.outputs[item.outputs.index(vid)]
                 vals[vid] = read_slot(
-                    b, slot, var.type.dtype, list(var.type.shape), lays.get(vid)
+                    b, slot, o.repr.dtype, list(o.repr.shape), lays.get(vid)
                 )
                 if how == "scratch":
                     # (`SlotOutput.temporary`: the owner is the scratch memory)
@@ -421,6 +510,9 @@ def _mem_type(dtype):
 
 
 __all__ = [
+    "PROFILE_CALLS",
+    "PROFILE_ITEMS",
+    "PROFILE_ON",
     "Destination",
     "TensorRepr",
     "bind_constants",

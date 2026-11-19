@@ -4,15 +4,15 @@
 //!
 //! * `ir` (Python: `pytensor_llvm.ir`): the IR builder Python generates code with,
 //!   modules, compilation;
-//! * `interp` (Python: `pytensor_llvm.interp`): the program interpreter, Rust kernels,
-//!   the C API;
+//! * `interp` (Python: `pytensor_llvm.interp`): compiled functions, Rust kernels, the C
+//!   API;
 //! * `abi`: the kernel ABI (arrays, buffers); `array`: the arrays as Rust uses them;
 //! * `runtime`: the process-wide runtime (runtime functions, JIT, thread pool) and the
 //!   context of a call;
 //! * `jit`, `target`: the JIT and LLVM setup; `perf`: perf maps;
 //! * `math`, `random`, `parallel`: what generated code calls;
-//! * `kernel`: what Rust kernels are written with; `linalg`, `sort`, `interp::kernels`,
-//!   `interp::scan`: the kernels; `testing`: calling them in tests.
+//! * `kernel`: what Rust kernels are written with; `linalg`, `sort`, `interp::kernels`:
+//!   the kernels; `testing`: calling them in tests.
 
 use pyo3::prelude::*;
 
