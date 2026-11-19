@@ -29,8 +29,11 @@ from pytensor.link.llvm.codegen.function import (  # noqa: E402
     output_aliases,
 )
 from pytensor.link.llvm.layout import Layout  # noqa: E402
-from pytensor.link.llvm.plan.memory import first_fit, plan_memory  # noqa: E402
-from pytensor.link.llvm.plan.values import Values  # noqa: E402
+from pytensor.link.llvm.plan.memory import (  # noqa: E402
+    first_fit,
+    lifetimes,
+    place_temporaries,
+)
 
 
 STRICT = get_mode("LLVM").clone(link_kwargs={"numba_fallback": False})
@@ -69,70 +72,55 @@ def test_how_an_output_comes_to_be_follows_from_the_op_and_the_type():
 # ------------------------------------------------------------------ memory planning
 
 
-def task(inputs, outputs, modes, aliases=None):
+def item(inputs, outputs, modes, aliases=None):
+    """An item as `plan.memory` sees it: arguments, outputs, their modes and aliases
+    (argument positions)."""
+    aliases = aliases or [()] * len(outputs)
+    outs = [SimpleNamespace(mode=m, aliases=a) for m, a in zip(modes, aliases)]
     return SimpleNamespace(
-        inputs=inputs,
-        outputs=outputs,
-        modes=modes,
-        aliases=aliases or [()] * len(outputs),
+        arguments=inputs,
+        item=SimpleNamespace(outputs=outputs),
+        signature=SimpleNamespace(outputs=outs),
     )
 
 
-def values_of(*shapes):
-    v = Values()
-    for shape in shapes:
-        v.new(pt.tensor(dtype="float64", shape=shape).type)
-    return v
-
-
 def test_a_value_lives_as_long_as_what_may_alias_it():
-    v = values_of((8,), (8,), (8,), (8,), (8,))
-    tasks = [
-        task([0], [1], [P]),  # 1: new
-        task([1], [2], [R], [(0,)]),  # 2 may be a view of 1
-        task([2], [3], [R], [(0,)]),  # 3 may be a view of 2 (and so of 1)
-        task([0], [4], [P]),  # 4: new, while 3 is still needed
-        task([3, 4], [5], [P]),
+    items = [
+        item([0], [1], [P]),  # 1: new
+        item([1], [2], [R], [(0,)]),  # 2 may be a view of 1
+        item([2], [3], [R], [(0,)]),  # 3 may be a view of 2 (and so of 1)
+        item([0], [4], [P]),  # 4: new, while 3 is still needed
+        item([3, 4], [5], [P]),
     ]
-    v.new(pt.tensor(dtype="float64", shape=(8,)).type)
-    m = plan_memory(v, tasks, in_ids=[0], out_ids=[5])
-    assert m.kind == {
-        0: "input",
-        1: "provided",
-        2: "returned",
-        3: "returned",
-        4: "provided",
-        5: "provided",
-    }
-    assert m.aliases == {2: [1], 3: [2]}
-    assert (
-        m.end[1] == m.end[2] == m.end[3] == 4
-    )  # the chain keeps 1 alive until 3 is read
-    assert m.offsets[1] != m.offsets[4]  # so 4 can't take 1's place
-    assert m.release_points(len(tasks))[4] == [1, 2, 3, 4]
+    _, end = lifetimes(items, kept=[5])
+    assert end[1] == end[2] == end[3] == 4  # the chain keeps 1 alive until 3 is read
+    offsets, _ = place_temporaries(items, {1: 64, 4: 64}, kept=[5])
+    assert offsets[1] != offsets[4]  # so 4 can't take 1's place
 
 
 def test_several_candidates_are_all_kept_alive():
-    v = values_of((8,), (8,), (8,), (8,), (8,), (8,))
-    tasks = [
-        task([0], [1], [P]),
-        task([0], [2], [P]),
-        task([1, 2], [3], [R], [(0, 1)]),  # a view of 1 or of 2
-        task([0], [4], [P]),
-        task([3, 4], [5], [P]),
+    items = [
+        item([0], [1], [P]),
+        item([0], [2], [P]),
+        item([1, 2], [3], [R], [(0, 1)]),  # a view of 1 or of 2
+        item([0], [4], [P]),
+        item([3, 4], [5], [P]),
     ]
-    m = plan_memory(v, tasks, in_ids=[0], out_ids=[5])
-    assert m.aliases[3] == [1, 2]
-    assert m.end[1] == m.end[2] == 4
-    assert len({m.offsets[1], m.offsets[2], m.offsets[4]}) == 3
+    _, end = lifetimes(items, kept=[5])
+    assert end[1] == end[2] == 4
+    offsets, _ = place_temporaries(items, {1: 64, 2: 64, 4: 64}, kept=[5])
+    assert len(set(offsets.values())) == 3
 
 
 def test_arena_space_is_reused_when_nothing_needs_it():
-    v = values_of((8,), (8,), (8,), (8,))
-    tasks = [task([0], [1], [P]), task([1], [2], [P]), task([2], [3], [P])]
-    m = plan_memory(v, tasks, in_ids=[0], out_ids=[3])
-    assert m.offsets == {1: 0, 2: 64}  # (3 is the output: a fresh buffer)
-    assert m.arena_bytes == 128
+    items = [item([0], [1], [P]), item([1], [2], [P]), item([2], [3], [P])]
+    # (3 is the output: not a temporary)
+    assert place_temporaries(items, {1: 8, 2: 8}, kept=[3]) == ({1: 0, 2: 64}, 128)
+    items.append(item([3], [4], [P]))
+    assert place_temporaries(items, {1: 8, 2: 8, 3: 8}, kept=[4]) == (
+        {1: 0, 2: 64, 3: 0},
+        128,
+    )
     offsets, total = first_fit(
         [(0, 1, 100, "a"), (1, 2, 10, "b"), (2, 3, 100, "c"), (3, 3, 10, "d")]
     )

@@ -719,7 +719,7 @@ class Codegen:
     @contextmanager
     def scratch_scope(self, function: bool = False):
         """The scratch memory taken inside is freed at its end (on the way out of the
-        code emitted inside, unless that returned; on errors the task's mark releases
+        code emitted inside, unless that returned; on errors the caller's mark releases
         it). The code emitted inside must be one region of control flow: a function body
         (`function`, also a parallel body), a loop iteration, a branch."""
         taken = _ScratchScope(function)

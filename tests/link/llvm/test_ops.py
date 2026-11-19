@@ -66,7 +66,7 @@ def test_dump_lists_values_and_tasks():
     f = compare([x], pt.exp(x).sum(axis=1) + x[:, 0], [rng.random((3, 4))])
     text = f.maker.linker.program.dump()
     assert text.startswith("program: 1 inputs, 1 outputs")
-    assert "input 0" in text and "tasks:" in text and "outputs:" in text
+    assert "input 0" in text and "items:" in text and "outputs:" in text
 
 
 @pytest.mark.parametrize(

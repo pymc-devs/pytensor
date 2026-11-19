@@ -343,7 +343,7 @@ np.testing.assert_array_equal(f(values), [1.0, 3.0, 3.0, 5.0, 5.0])
 ```
 
 `f.maker.linker.program` is the compiled program. Its dump lists the values and the
-tasks, and `f.maker.linker.stats` counts what the planner used:
+items its function runs, and `f.maker.linker.stats` counts what the planner used:
 
 ```python
 program = f.maker.linker.program
@@ -353,16 +353,16 @@ assert f.maker.linker.stats.numba == []  # the ops that fell back to numba
 ```
 
 ```text
-program: 1 inputs, 1 outputs, 1 tasks, arena 0 bytes
+program: 1 inputs, 1 outputs, 1 items, arena 0 bytes
 values:
   %0    float64[?]               input 0
-  %1    float64[?]               allocated by its task
-tasks:
+  %1    float64[?]               allocated by its item
+items:
   0    (%0) -> (%1)  CumMax
-outputs: %1 (allocated)
+outputs: %1 (returned)
 ```
 
-The length of `x` is unknown here, so the task allocates its output. With a static
+The length of `x` is unknown here, so the node allocates its output. With a static
 shape the caller provides the memory and the lengths are constants in the generated
 code; the emitter is the same.
 

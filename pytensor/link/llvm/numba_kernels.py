@@ -3,7 +3,7 @@
 For such an Op we take PyTensor's numba implementation (``numba_funcify``) and wrap it in
 a numba ``cfunc`` with the arguments of the kernel ABI, ``int32(PtCtx *ctx, PtArray *args,
 int32 n_inputs, int32 n_outputs, void *config)``, run by the runtime's ``numba_entry``
-kernel (the task's config is the cfunc's address):
+kernel (its config is the cfunc's address):
 
 * inputs become numba arrays that view the caller's memory (data, shape, strides; no copy),
   or plain scalars for inputs of ``ScalarType``,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import singledispatch
 from typing import TYPE_CHECKING
 
@@ -132,7 +132,7 @@ def llvm_inplace(op, node) -> dict:
     The default is none, which is always correct: an implementation may ignore that it
     is allowed to destroy an input. An op that registers this must write such an
     output with `out.overwrite(cg, x)` (or `out.allocate`, which is then the input's
-    memory, still holding the input's values). The planner decides per task whether the
+    memory, still holding the input's values). The planner decides per node whether the
     output really is the input's memory; if not, both give new memory."""
     return {}
 
@@ -298,6 +298,10 @@ class NodeFunction:
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
     links: LinkTable | None = None
+    #: of a unit: ({vid: offset} of its temporaries in its arena, arena bytes)
+    arena: tuple = ({}, 0)
+    #: of a unit: {vid: link entry} of its array constants
+    constants: dict = field(default_factory=dict)
 
 
 def debug_name(node) -> str:
@@ -472,21 +476,15 @@ def build_node_function(
     # (the op's scratch memory is freed before the function returns)
     with cg.scratch_scope(function=True):
         if kernel is not None:
-            from pytensor.link.llvm.codegen.call import call_kernel
+            from pytensor.link.llvm.codegen.call import call_destroying
 
             if links is None:
                 raise ValueError("a node function calling a kernel needs a links")
-            from pytensor.link.llvm.codegen.emit import Array, copy
-
-            ins = []
-            for pos, (a, var) in enumerate(zip(inputs, node.inputs, strict=True)):
-                if pos in kernel.destroys and isinstance(a, Array):
-                    # (the kernel would overwrite memory it wasn't given)
-                    mine = cg.temporary(a.dtype, a.shape)
-                    copy(cg, a, mine)
-                    a = mine
-                ins.append((a, getattr(var.type, "dtype", None)))
-            call_kernel(cg, kernel, links.link_kernel(kernel), ins, outputs)
+            ins = [
+                (a, getattr(var.type, "dtype", None))
+                for a, var in zip(inputs, node.inputs, strict=True)
+            ]
+            call_destroying(cg, kernel, links.link_kernel(kernel), ins, outputs)
         else:
             llvm_emit(node.op, node, cg, inputs, outputs)
     if not b.terminated:

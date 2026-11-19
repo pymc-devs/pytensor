@@ -139,7 +139,10 @@ def test_batch_loops_without_scratch_call_no_scratch_functions():
     x = pt.tensor3("x", shape=(2, 3, 4))
     cum = Blockwise(CumOp(axis=0, mode="add"), signature="(n)->(n)")
     f = pytensor.function([x], cum(x), mode=STRICT)
-    assert "@ptl_rt_scratch" not in f.maker.linker.ir(optimized=True)
+    (loop,) = [
+        m for m in f.maker.linker.stats.modules if m.description.startswith("Blockwise")
+    ]
+    assert "@ptl_rt_scratch" not in loop.optimized_ir()
     v = np.random.default_rng(3).random((2, 3, 4))
     np.testing.assert_allclose(f(v), np.cumsum(v, axis=-1))
 

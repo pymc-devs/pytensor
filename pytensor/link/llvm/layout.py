@@ -444,7 +444,7 @@ def predict_layouts(node, in_layouts) -> list[Layout | None]:
     """The layouts the planner will (most likely) give `node`'s outputs: what the node's
     `llvm_layout` declares (provided memory in the layout asked for).
 
-    The planner is authoritative (it knows which tasks fall back to numba, for one);
+    The planner is authoritative (it knows which nodes fall back to numba, for one);
     this is its prediction for graph rewrites and inspection."""
     from pytensor.compile.builders import Execution, OpFromGraph
     from pytensor.link.llvm.codegen.function import node_outputs

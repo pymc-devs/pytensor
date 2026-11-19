@@ -1,14 +1,15 @@
 """Stage 2: how each node is run.
 
 A node is run by generated code (an emitter, `llvm_emit`), by a Rust kernel, by a numba
-kernel, or, for an interpreted OpFromGraph, by a subprogram. `Resolver` decides, and
+kernel, or, for an OpFromGraph with `execution=INTERPRETED`, by a subprogram: its inner
+graph planned and compiled on its own. `Resolver` decides, and
 says what the choice means for the node's outputs (how they come to be, and their layouts): a
 `CalledKernel` describes a kernel, `None` stands for generated code.
 
-Tasks of a program and nodes inside generated code (a unit, a Scan's loop body) choose
-differently:
+The items of a program (`program.py`) and nodes inside generated code (a unit, a Scan's
+loop body) choose differently:
 
-* A task prefers a Rust kernel: there is nothing to compile.
+* An item of a program prefers a Rust kernel: there is nothing to compile.
 * Inside generated code, generated code is preferred: it is inlined into its
   surroundings, a kernel is a call.
 
@@ -51,11 +52,23 @@ from pytensor.tensor.blockwise import Blockwise
 
 
 @dataclass
+class Call:
+    """An item that is a kernel called with values, not a node: what the planner
+    compiled on its own (a node, a compiled unit)."""
+
+    #: the values passed, one per argument of the kernel's signature
+    inputs: list
+    #: the values produced, one per output of the signature
+    outputs: list
+    description: str
+
+
+@dataclass
 class Resolved:
     """An item of generated code with everything decided."""
 
-    item: NodeItem
-    #: the layouts of its inputs
+    item: NodeItem | Call
+    #: the layouts of its inputs (of a `Call`: of its arguments)
     in_layouts: list
     #: the kernel it calls; None: its code is generated (and inlined)
     kernel: CalledKernel | None
@@ -63,6 +76,25 @@ class Resolved:
     signature: Signature
     #: for a generated Scan: its loop body
     body: Body | None = None
+
+    @property
+    def arguments(self) -> list:
+        """The values passed, one per input of the signature."""
+        if isinstance(self.item, Call):
+            return self.item.inputs
+        return [
+            vid
+            for vid, var in zip(self.item.inputs, self.item.node.inputs, strict=True)
+            if not is_absent(var.type)
+        ]
+
+    @property
+    def description(self) -> str:
+        if isinstance(self.item, Call):
+            return self.item.description
+        if self.kernel is not None:
+            return self.kernel.description
+        return str(self.item.node.op)
 
 
 @dataclass
@@ -85,14 +117,10 @@ class Resolver:
 
     # ------------------------------------------------------------ the kinds of kernels
 
-    def generates_scan(self, node) -> bool:
-        """A Scan whose loop we generate (its body is inlined into the loop)."""
-        return isinstance(node.op, Scan) and self.opts.generate_scan
-
     def has_body(self, node) -> bool:
         """A node whose generated code runs a resolved inner graph (`Body`): a Scan
-        whose loop we generate, or a Blockwise (its core node)."""
-        return self.generates_scan(node) or isinstance(node.op, Blockwise)
+        (its loop body, inlined into the loop), or a Blockwise (its core node)."""
+        return isinstance(node.op, Scan | Blockwise)
 
     def body(self, node, in_layouts) -> Body:
         """The resolved inner graph of a node that `has_body`."""
@@ -151,7 +179,8 @@ class Resolver:
         return self.numba(node)
 
     def subprogram(self, node, in_layouts) -> CalledKernel:
-        """A subprogram for an OpFromGraph: its inner graph, planned on its own."""
+        """A subprogram for an OpFromGraph: its inner graph, planned and compiled on its
+        own (a `Program`, whose function is the kernel)."""
         from pytensor.link.llvm.program import Planner
 
         if any(isinstance(o.type, ScalarType) for o in node.outputs):
@@ -207,7 +236,7 @@ class Resolver:
             and getattr(node.op, "execution", None) is Execution.INTERPRETED
         ):
             return self.subprogram(node, in_layouts), None
-        if self.generates_scan(node):
+        if isinstance(node.op, Scan):
             return None, self.scan_body(node, in_layouts)
         if isinstance(node.op, Blockwise):
             try:

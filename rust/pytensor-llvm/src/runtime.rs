@@ -18,6 +18,9 @@
 //!     void  (*scratch_release)(PtCtx *, int64_t mark);
 //!     ...                                          // see `runtime_functions!`
 //!     void  (*scratch_free)(PtCtx *, void *p);   // give up one piece of scratch
+//!     void  (*error_context)(PtCtx *, const char *prefix);
+//!     uint64_t (*clock_ns)(void);
+//!     void  (*counter_add)(uint64_t *counter, uint64_t n);
 //! } PtRuntime;
 //! ```
 //!
@@ -88,6 +91,13 @@ runtime_functions! {
     /// memory already released are ignored. The memory is reused once everything
     /// taken after it is freed too (or released).
     scratch_free: fn(*mut PtCtx, *mut u8) = rt_scratch_free;
+    /// Prefix the error set on the context with `context` ("context: message"), e.g.
+    /// the task that failed.
+    error_context: fn(*mut PtCtx, *const c_char) = rt_error_context;
+    /// Nanoseconds on a monotonic clock (profiling).
+    clock_ns: fn() -> u64 = rt_clock_ns;
+    /// Add to a counter, atomically (profiling: calls may run concurrently).
+    counter_add: fn(*mut u64, u64) = rt_counter_add;
 }
 
 /// The process-wide runtime: the function table every context points to, and the
@@ -432,6 +442,26 @@ unsafe extern "C" fn rt_set_error(ctx: *mut PtCtx, code: i32, msg: *const c_char
     unsafe { context(ctx) }.error = Some((code, message));
 }
 
+unsafe extern "C" fn rt_error_context(ctx: *mut PtCtx, prefix: *const c_char) {
+    // SAFETY: the contract of the runtime functions.
+    let ctx = unsafe { context(ctx) };
+    // SAFETY: `prefix` is a NUL-terminated string (the ABI contract).
+    let prefix = unsafe { CStr::from_ptr(prefix) }.to_string_lossy();
+    let (code, message) = ctx.error.take().unwrap_or((1, String::new()));
+    ctx.error = Some((code, format!("{prefix}: {message}")));
+}
+
+unsafe extern "C" fn rt_clock_ns() -> u64 {
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+unsafe extern "C" fn rt_counter_add(counter: *mut u64, n: u64) {
+    // SAFETY: `counter` is an aligned u64 that lives as long as the code using it
+    // (the caller's contract); all writers go through here, atomically.
+    unsafe { std::sync::atomic::AtomicU64::from_ptr(counter) }.fetch_add(n, Ordering::Relaxed);
+}
+
 unsafe extern "C" fn rt_scratch_mark(ctx: *mut PtCtx) -> i64 {
     // SAFETY: the contract of the runtime functions.
     unsafe { context(ctx) }.scratch_mark()
@@ -461,8 +491,8 @@ impl PtCtx {
     }
 
     /// Mark the scratch position; `scratch_release(token)` frees everything handed out
-    /// since (and releases later marks). The interpreter marks around every task;
-    /// generated code and kernels that call other code (Scan) mark too.
+    /// since (and releases later marks). Generated code marks around every kernel it
+    /// calls, and around a call of a compiled function (`interp::function`).
     pub fn scratch_mark(&mut self) -> i64 {
         self.marks.push(self.scratch.mark());
         (self.marks.len() - 1) as i64

@@ -69,7 +69,10 @@ pub trait Kernel: Send + Sync + 'static {
 /// The kernel contract: `ctx` is the live context of the call, used by nobody else
 /// during it, `config` points to a `K`, and `args` holds `n_inputs` arrays, then
 /// `n_outputs` outputs (see `Args::from_raw`).
-pub unsafe extern "C-unwind" fn entry<K: Kernel>(
+///
+/// A panic in the kernel is caught and reported as an error: it must not unwind into
+/// the generated code that called the kernel.
+pub unsafe extern "C" fn entry<K: Kernel>(
     ctx: *mut PtCtx,
     args: *mut PtArray,
     n_inputs: i32,
@@ -78,20 +81,30 @@ pub unsafe extern "C-unwind" fn entry<K: Kernel>(
 ) -> i32 {
     // SAFETY: the function's contract.
     let (kernel, ctx) = unsafe { (&*(config as *const K), &mut *ctx) };
-    // SAFETY: the function's contract.
-    let result = unsafe { Args::from_raw(args, n_inputs, n_outputs) }.and_then(|args| {
-        let arity = (args.inputs.len(), args.outputs.len());
-        if arity != kernel.arity() {
-            return Err(format!(
-                "the kernel takes {} inputs and {} outputs, but was called with {} and {}",
-                kernel.arity().0,
-                kernel.arity().1,
-                arity.0,
-                arity.1
-            ));
-        }
-        kernel.run(ctx, args)
-    });
+    let run = |ctx: &mut PtCtx| {
+        // SAFETY: the function's contract.
+        unsafe { Args::from_raw(args, n_inputs, n_outputs) }.and_then(|args| {
+            let arity = (args.inputs.len(), args.outputs.len());
+            if arity != kernel.arity() {
+                return Err(format!(
+                    "the kernel takes {} inputs and {} outputs, but was called with {} and {}",
+                    kernel.arity().0,
+                    kernel.arity().1,
+                    arity.0,
+                    arity.1
+                ));
+            }
+            kernel.run(ctx, args)
+        })
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(ctx)))
+        .unwrap_or_else(|p| {
+            let msg = p
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
+            Err(format!("internal error (panic): {}", msg.unwrap_or_default()))
+        });
     match result {
         Ok(()) => 0,
         Err(message) => ctx.fail(1, &message),
@@ -110,7 +123,7 @@ pub fn address<K: Kernel>() -> usize {
 ///
 /// # Safety
 /// The kernel contract, with `config` the address of such a cfunc.
-pub unsafe extern "C-unwind" fn numba_entry(
+pub unsafe extern "C" fn numba_entry(
     ctx: *mut PtCtx,
     args: *mut PtArray,
     n_inputs: i32,

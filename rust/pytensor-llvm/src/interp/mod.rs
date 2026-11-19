@@ -1,9 +1,8 @@
-//! The interpreter: programs planned in Python, the Rust kernels they run, the C API.
+//! Compiled functions for Python and the C API, and the Rust kernels generated code
+//! calls.
 
 pub mod capi;
-pub mod consts;
+pub mod function;
 pub mod kernels;
 pub mod layout;
-pub mod program;
 pub mod py;
-pub mod scan;

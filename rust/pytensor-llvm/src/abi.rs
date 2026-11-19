@@ -170,10 +170,10 @@ pub fn is_c_contiguous(shape: &[i64], strides: &[i64], itemsize: usize) -> bool 
 
 /// The kernel ABI: `int32 f(ctx, args, n_inputs, n_outputs, config)`.
 ///
-/// Kernels use the "C-unwind" ABI: a panic in a Rust kernel (a bug, or e.g. an
-/// out-of-memory) unwinds to `Program::execute`, which turns it into an error, instead
-/// of aborting the process. Generated and numba kernels never unwind.
-pub type KernelFn = unsafe extern "C-unwind" fn(
+/// Kernels never unwind: they are called from generated code, whose frames can't be
+/// unwound. A Rust kernel catches its panics (a bug, or e.g. an out-of-memory) and
+/// reports them as errors (`kernel::entry`).
+pub type KernelFn = unsafe extern "C" fn(
     ctx: *mut PtCtx,
     args: *mut PtArray,
     n_inputs: i32,
@@ -363,30 +363,6 @@ pub const MAX_NDIM: usize = 32;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    unsafe extern "C-unwind" fn panicking_kernel(
-        _ctx: *mut PtCtx,
-        _args: *mut PtArray,
-        _n_inputs: i32,
-        _n_outputs: i32,
-        _config: *const u8,
-    ) -> i32 {
-        panic!("kernel bug")
-    }
-
-    #[test]
-    fn kernel_panic_unwinds_to_the_caller() {
-        // what Program::execute relies on: a panic in a KernelFn called through a
-        // function pointer is catchable, not an abort
-        let f: KernelFn = panicking_kernel;
-        let mut ctx = PtCtx::new();
-        // SAFETY: the kernel uses none of its arguments.
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-            f(&mut ctx, std::ptr::null_mut(), 0, 0, std::ptr::null())
-        }));
-        let msg = r.unwrap_err();
-        assert_eq!(*msg.downcast_ref::<&str>().unwrap(), "kernel bug");
-    }
 
     #[test]
     fn buffers_are_counted() {

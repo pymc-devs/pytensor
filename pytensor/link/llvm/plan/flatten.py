@@ -54,7 +54,7 @@ def flatten(
                 )
             except NotImplementedError:
                 # can't be one unit (e.g. it contains an interpreted OpFromGraph):
-                # run its nodes as tasks
+                # its nodes are items of their own
                 items += flatten(values, inner.toposort(), sub, inside_unit)
                 _inlined_outputs(values, inner, node, sub, scope)
                 continue
