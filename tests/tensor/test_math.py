@@ -3955,3 +3955,13 @@ def test_median(ndim, axis):
 
     assert np.allclose(result_odd, expected_odd)
     assert np.allclose(result_even, expected_even)
+
+
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_median_propagates_nan(axis):
+    x = matrix("x", dtype="float64")
+    f = function([x], median(x, axis=axis))
+    data = np.array(
+        [[0.0, -1.5, np.inf, np.nan], [1.0, 2.0, 3.0, 4.0], [np.nan, 1.0, 2.0, np.inf]]
+    )
+    np.testing.assert_array_equal(f(data), np.median(data, axis=axis))
