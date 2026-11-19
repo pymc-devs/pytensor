@@ -1419,7 +1419,7 @@ def local_merge_alloc(fgraph, node):
         dim_outer = dims_outer[-1 - i]
         if dim_inner == dim_outer:
             continue
-        if isinstance(dim_inner, Constant) and dim_inner.data == 1:
+        if node.inputs[0].type.shape[-1 - i] == 1:
             continue
         dims_outer[-1 - i] = Assert(
             "You have a shape error in your graph. To see a better"
