@@ -187,6 +187,10 @@ warn_return_any = true
 warn_unreachable = true
 files = ["pytensor", "tests"]
 
+[tool.ty.environment]
+# the type stubs of the LLVM backend's extension (not in its editable install)
+extra-paths = ["rust/pytensor-llvm"]
+
 [tool.cibuildwheel]
 build = "*"
 # Uncomment to skip builds that compile but fail when trying to test (maybe due to incompatibility with runner)

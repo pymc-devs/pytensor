@@ -31,11 +31,12 @@ from pytensor.link.llvm.codegen.emit import (
     memory_type,
     size,
     store,
+    unknown_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
-from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.layout import Layout, Stride
 from pytensor.scalar.basic import ScalarType, add
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor
@@ -249,7 +250,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         elif isinstance(spec, Write):
             plain_out[i] = loop_view(b, res, shape, zero_axes=(spec.axis,))
         else:
-            plain_out[i] = Array(res.dtype, res.data, shape, res.strides)
+            plain_out[i] = Array(res.dtype, res.data, shape, res.strides, unknown_layout(shape))
 
     def index_value(k, i):
         """idx[i] for index array input k, wrapped and bounds-checked against `n`."""
@@ -559,7 +560,7 @@ def reduced_view(b, acc: Array, shape, axes) -> Array:
     nd = len(shape)
     kept = [a for a in range(nd) if a not in axes]
     strides = [b.i64(0)] * nd
-    kinds = [0] * nd
+    kinds: list[Stride] = [0] * nd
     for k, a in enumerate(kept):
         strides[a] = acc.strides[k]
         kinds[a] = acc.layout.strides[k]

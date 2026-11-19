@@ -155,10 +155,11 @@ class CompiledModule:
     @property
     def ir(self) -> str:
         """The module's LLVM IR as compiled, before optimization."""
-    def optimized_ir(self, opt_level: int | None = None) -> str:
+    def optimized_ir(self, opt_level: int | None = None, remarks: bool = False) -> str:
         """The IR after optimization (by default at the level the module was compiled
         with), computed on demand from `ir`: the same whether the object was compiled,
-        read from the disk cache or already in the process."""
+        read from the disk cache or already in the process. `remarks`: start with
+        LLVM's optimization remarks, as comments."""
     @property
     def source(self) -> str: ...
     @property
@@ -167,7 +168,9 @@ class CompiledModule:
     def total_s(self) -> float: ...
 
 class Module:
-    def __init__(self, name: str, fastmath: bool = True) -> None: ...
+    def __init__(
+        self, name: str, fastmath: bool = True, debug_info: bool = False
+    ) -> None: ...
     @property
     def name(self) -> str: ...
     label: str
@@ -178,6 +181,7 @@ class Module:
         ret: Type,
         exported: bool = False,
         inline: Inline = ...,
+        debug_name: str | None = None,
     ) -> Function: ...
     def ir(self) -> str:
         """The module as LLVM IR text."""

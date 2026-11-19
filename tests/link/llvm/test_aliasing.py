@@ -14,7 +14,12 @@ from pytensor.graph.op import Op
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.emit import Array, load, set_output  # noqa: E402
+from pytensor.link.llvm.codegen.emit import (  # noqa: E402
+    Array,
+    load,
+    set_output,
+    unknown_layout,
+)
 from pytensor.link.llvm.codegen.function import (  # noqa: E402
     OutputMode,
     build_node_function,
@@ -277,12 +282,13 @@ def test_inputs_are_read_only():
     m = ir.Module("m")
     f = m.function("f", [ir.ptr], ir.i32)
     b = f.builder()
-    x = Array("float64", f.params[0], [b.i64(4)], [b.i64(8)], base=0, writable=False)
+    shape, strides = [b.i64(4)], [b.i64(8)]
+    layout = unknown_layout(shape)
+    x = Array("float64", f.params[0], shape, strides, layout, base=0, writable=False)
     with pytest.raises(ValueError, match="storing into an input"):
         x.store(b, 1.0, 0)
     with pytest.raises(ValueError, match="storing into an input"):
         x.at(b, 0).store(b, 1.0)  # views of an input are read-only too
     assert x.view(x.data, x.shape, x.strides).base == 0
-    Array("float64", f.params[0], [b.i64(4)], [b.i64(8)]).store(
-        b, 1.0, 0
-    )  # other memory is fine
+    # other memory is fine
+    Array("float64", f.params[0], shape, strides, layout).store(b, 1.0, 0)

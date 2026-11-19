@@ -8,7 +8,7 @@ import pytest
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.emit import Array  # noqa: E402
+from pytensor.link.llvm.codegen.emit import Array, unknown_layout  # noqa: E402
 from pytensor.link.llvm.codegen.num import Num  # noqa: E402
 from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
@@ -19,12 +19,11 @@ def run(build, *arrays):
     m = ir.Module("array")
     f = m.function("f", [ir.ptr] * len(arrays), ir.f64, exported=True)
     b = f.builder()
-    wrapped = [
-        Array(
-            str(a.dtype), p, [b.i64(n) for n in a.shape], [b.i64(s) for s in a.strides]
-        )
-        for a, p in zip(arrays, f.params, strict=True)
-    ]
+    wrapped = []
+    for a, p in zip(arrays, f.params, strict=True):
+        shape = [b.i64(n) for n in a.shape]
+        strides = [b.i64(s) for s in a.strides]
+        wrapped.append(Array(str(a.dtype), p, shape, strides, unknown_layout(shape)))
     b.ret(build(b, *wrapped))
     c = m.compile(cache=False)
     fn = ctypes.CFUNCTYPE(ctypes.c_double, *[ctypes.c_void_p] * len(arrays))(
@@ -93,7 +92,7 @@ def test_at_keeps_what_the_layout_says():
     assert c.at(b, i).layout.is_c((4,))  # a row of a C-contiguous matrix is contiguous
     column = c.at(b, i, axis=1)  # a column is strided
     assert str(column.layout) == "[32]" and column.strides[0].const_int == 32
-    unknown = Array("float64", p, [n, n], [n, n])
+    unknown = Array("float64", p, [n, n], [n, n], unknown_layout([n, n]))
     assert unknown.at(b, 0).layout == Layout.make((None,), (0,), (DYNAMIC,))
     fortran = Array(
         "float64",
@@ -110,7 +109,7 @@ def test_mistakes_raise():
     f = m.function("f", [ir.ptr, ir.i64], ir.f64)
     b = f.builder()
     p, n = f.params
-    a = Array("float64", p, [n, n], [n, n])
+    a = Array("float64", p, [n, n], [n, n], unknown_layout([n, n]))
     with pytest.raises(ValueError, match="1 indices for an array with 2 axes"):
         a.load(b, 0)
     with pytest.raises(TypeError, match="convert with astype"):

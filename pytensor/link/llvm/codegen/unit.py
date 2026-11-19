@@ -57,9 +57,9 @@ def build_unit_function(
     outputs,
     resolved,
     constants,
-    input_layouts=None,
-    output_layouts=None,
-    output_aliases=None,
+    input_layouts: list[Layout | None] | None = None,
+    output_layouts: list[Layout | None] | None = None,
+    output_aliases: list[tuple[int, ...]] | None = None,
     parallel=True,
     links=None,
 ) -> NodeFunction:

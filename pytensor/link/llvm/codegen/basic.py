@@ -14,6 +14,7 @@ from pytensor.link.llvm.codegen.emit import (
     load,
     size,
     store,
+    unknown_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import ir, is_float, memory_type
@@ -95,7 +96,7 @@ def _(op, node, cg, inputs, outputs):
             strides.append(b.select(one, 0, v.strides[a]))
         else:
             strides.append(v.strides[a])
-    src = Array(v.dtype, v.data, shape, strides)
+    src = Array(v.dtype, v.data, shape, strides, unknown_layout(shape))
 
     def body(p):
         store(b, out.dtype, cast(b, load(b, v.dtype, p[0]), v.dtype, out.dtype), p[1])
@@ -195,7 +196,7 @@ def _(op, node, cg, inputs, outputs):
 
     def fresh():
         dst = out.allocate(shape)
-        src = Array(x.dtype, x.data, x.shape, x.strides)
+        src = Array(x.dtype, x.data, x.shape, x.strides, unknown_layout(x.shape))
         _copy_reshaped(cg, src, dst)
         return []
 
@@ -225,7 +226,7 @@ def _copy_reshaped(cg, src: Array, dst: Array):
         )
         b.store(b.add(i, 1), k)
 
-    for_each(b, src.shape, [Array(src.dtype, src.data, src.shape, src.strides)], body)
+    for_each(b, src.shape, [Array(src.dtype, src.data, src.shape, src.strides, unknown_layout(src.shape))], body)
 
 
 @llvm_emit.register(Join)
@@ -260,6 +261,7 @@ def _(op, node, cg, inputs, outputs):
             b.gep_bytes(out.data, b.mul(offset, out.strides[axis], nsw=True)),
             x.shape,
             out.strides,
+            unknown_layout(x.shape),
         )
         copy(cg, x, dst)
         offset = (

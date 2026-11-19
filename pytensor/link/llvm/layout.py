@@ -75,6 +75,13 @@ class Layout:
         return Layout(tuple(range(ndim)), (DYNAMIC,) * ndim)
 
     @staticmethod
+    def unknown(shape) -> Layout:
+        """Nothing known but what the static lengths `shape` (None where dynamic) fix:
+        `dynamic`, canonical for `shape`."""
+        nd = len(shape)
+        return Layout.make(shape, range(nd), (DYNAMIC,) * nd)
+
+    @staticmethod
     def make(shape, order, strides) -> Layout:
         """The canonical layout for static lengths `shape` (None where dynamic):
         length-1 axes become PACKED; only the order of the packed axes matters."""
@@ -405,7 +412,7 @@ def common_order(layouts, shape) -> list[int] | None:
     """The memory order (outermost first) most of `layouts` are packed in over the axes
     of `shape` that aren't statically 1, if one covers them all (else None)."""
     real = [a for a in range(len(shape)) if not _is_one(shape[a])]
-    votes = {}
+    votes: dict[tuple[int, ...], int] = {}
     for lay in layouts:
         if lay is None or lay.ndim != len(shape):
             continue
@@ -414,7 +421,7 @@ def common_order(layouts, shape) -> list[int] | None:
             votes[block] = votes.get(block, 0) + len(block)
     if not votes:
         return None
-    block = max(votes, key=votes.get)
+    block = max(votes, key=votes.__getitem__)
     if sorted(block) != real:
         return None
     rest = [a for a in range(len(shape)) if a not in block]
