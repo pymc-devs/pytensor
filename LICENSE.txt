@@ -26,3 +26,16 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+END OF TERMS AND CONDITIONS
+
+Contains code from NumPy, Copyright (c) 2005-2016, NumPy Developers.
+Contains code from Aesara, Copyright (c) 2021-2022, Aesara Developers.
+All rights reserved.
+
+theano/scan/*.py[c]: Razvan Pascanu, Frederic Bastien, James Bergstra, Pascal Lamblin, Arnaud Bergeron, PyMC Developers, PyTensor Developers, (c) 2010, Universite de Montreal
+theano/tensor/sharedvar.py: James Bergstra, (c) 2010, Universite de Montreal, 3-clause BSD License
+theano/gradient.py: James Bergstra, Razvan Pascanu, Arnaud Bergeron, Ian Goodfellow, PyMC Developers, PyTensor Developers, (c) 2011, Universite de Montreal, 3-clause BSD License
+theano/compile/monitormode.py: this code was initially copied from the 'pyutools' package by its original author, and re-licensed under Theano's license.
+
+Contains frozendict code from slezica’s python-frozendict(https://github.com/slezica/python-frozendict/blob/master/frozendict/__init__.py), Copyright (c) 2012 Santiago Lezica. All rights reserved.
