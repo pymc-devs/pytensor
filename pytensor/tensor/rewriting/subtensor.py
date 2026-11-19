@@ -1213,35 +1213,75 @@ def local_useless_inc_subtensor(fgraph, node):
     return [r]
 
 
-def broadcastable_axes_index_shape(fgraph, x, idx_list, index_vars):
-    """Return the indexed singleton axes and index shape, or two empty lists."""
-    adv_axes = []
-    indices = []
+def broadcastable_index_axes(x, idx_list, index_vars):
+    """Partition integer-indexed axes by whether they have length one."""
+    broadcastable_axes = []
+    other_axes = []
     for axis, idx in enumerate(idx_list):
         if not isinstance(idx, int):
             continue
         index = index_vars[idx]
-        if x.type.shape[axis] != 1 or index.type.numpy_dtype.kind not in "iu":
+        if index.type.numpy_dtype.kind not in "iu":
             return [], []
-        adv_axes.append(axis)
-        indices.append(index)
-    if not adv_axes:
-        return [], []
+        if x.type.shape[axis] == 1:
+            broadcastable_axes.append(axis)
+        else:
+            other_axes.append(axis)
+    return broadcastable_axes, other_axes
 
+
+def joint_integer_index_shape(fgraph, indices):
+    """Compute the joint index shape assuming static broadcasting."""
     index_ndim = max(index.ndim for index in indices)
-    index_shape = get_simplified_broadcast_shape(
+    return get_simplified_broadcast_shape(
         *(shape_padleft(index, index_ndim - index.ndim) for index in indices),
         fgraph=fgraph,
     )
-    # A known nonbroadcast extent determines the length of the joint dimension.
-    for index in indices:
-        for dim, length in enumerate(index.type.shape, start=index_ndim - index.ndim):
-            if length not in (None, 1):
-                index_shape[dim] = length
-    return adv_axes, [
-        int(length.data) if isinstance(length, Constant) else length
-        for length in index_shape
+
+
+def remove_broadcastable_index_arrays(node, index_vars, broadcastable_axes, other_axes):
+    """Replace array indices with scalar zero when the other indices supply the shape."""
+    idx_list = node.op.idx_list
+    # Match only arrays so a replacement scalar zero cannot match again.
+    drop_slots = [
+        idx_list[axis] for axis in broadcastable_axes if index_vars[idx_list[axis]].ndim
     ]
+    if not drop_slots:
+        return None
+
+    keep_slots = [idx_list[axis] for axis in other_axes]
+    index_ndim = max(index_vars[slot].ndim for slot in drop_slots + keep_slots)
+    kept_patterns = [
+        (True,) * (index_ndim - index.ndim) + index.type.broadcastable
+        for index in (index_vars[slot] for slot in keep_slots)
+    ]
+    kept_broadcastable = tuple(all(dims) for dims in zip(*kept_patterns, strict=True))
+    for slot in drop_slots:
+        index = index_vars[slot]
+        # A surviving nonbroadcastable dimension supplies the same extent.
+        # Otherwise, removing the array would require expanding another index.
+        if any(
+            kept and not dropped
+            for kept, dropped in zip(
+                kept_broadcastable[index_ndim - index.ndim :],
+                index.type.broadcastable,
+                strict=True,
+            )
+        ):
+            # TODO Reconsider this bailout if a broadcast view can replace Alloc.
+            return None
+
+    # A dropped index can still supply leading length-one dimensions.
+    carrier_slot = max(keep_slots, key=lambda slot: index_vars[slot].ndim)
+    carrier = index_vars[carrier_slot]
+    index_vars[carrier_slot] = shape_padleft(carrier, index_ndim - carrier.ndim)
+    zero = tensor_constant(0, dtype="int64")
+    for slot in drop_slots:
+        index_vars[slot] = zero
+
+    new_out = node.op(*node.inputs[: -len(index_vars)], *index_vars)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
 
 
 @register_canonicalize("shape_unsafe")
@@ -1262,14 +1302,16 @@ def local_advanced_subtensor_remove_broadcastable_index(fgraph, node):
 
     A symbolic index dimension can be empty. Index dimensions broadcast only
     when they are statically length one.
+    When indexing both broadcastable and nonbroadcastable axes, replace
+    singleton-axis index arrays with zero if the other indices supply the joint shape.
     """
     x, *index_vars = node.inputs
     idx_list = node.op.idx_list
-    adv_axes, index_shape = broadcastable_axes_index_shape(
-        fgraph, x, idx_list, index_vars
-    )
+    adv_axes, other_axes = broadcastable_index_axes(x, idx_list, index_vars)
     if not adv_axes:
         return None
+    if other_axes:
+        return remove_broadcastable_index_arrays(node, index_vars, adv_axes, other_axes)
 
     basic_idx_list, bound_positions = flatten_index_variables(
         [slice(None) if isinstance(idx, int) else idx for idx in idx_list]
@@ -1281,16 +1323,21 @@ def local_advanced_subtensor_remove_broadcastable_index(fgraph, node):
     )
     position = 0 if _non_consecutive_adv_indexing(idx_list) else adv_axes[0]
 
+    [old_out] = node.outputs
     kept_axes = [axis for axis in range(x.type.ndim) if axis not in adv_axes]
-    order = kept_axes[:position] + ["x"] * len(index_shape) + kept_axes[position:]
+    index_ndim = old_out.ndim - len(kept_axes)
+    order = kept_axes[:position] + ["x"] * index_ndim + kept_axes[position:]
     new_out = base.dimshuffle(order)
 
-    if any(length != 1 for length in index_shape):
+    if new_out.type.broadcastable != old_out.type.broadcastable:
+        index_shape = joint_integer_index_shape(
+            fgraph, [index_vars[idx_list[axis]] for axis in adv_axes]
+        )
         target_shape = list(shape_tuple(new_out))
-        target_shape[position : position + len(index_shape)] = index_shape
+        target_shape[position : position + index_ndim] = index_shape
         new_out = broadcast_to(new_out, target_shape)
 
-    copy_stack_trace(node.outputs[0], new_out)
+    copy_stack_trace(old_out, new_out)
     return [new_out]
 
 
@@ -1330,18 +1377,28 @@ def local_advanced_inc_subtensor_remove_broadcastable_index(fgraph, node):
     Accumulating increments count each broadcast copy and require y to have x's dtype.
     A provably empty selection returns x. If the selection might be empty at
     runtime, keep the advanced write.
+    When indexing both broadcastable and nonbroadcastable axes, replace
+    singleton-axis index arrays with zero if the other indices supply the joint shape.
     """
     op = node.op
     x, y, *index_vars = node.inputs
+    adv_axes, other_axes = broadcastable_index_axes(x, op.idx_list, index_vars)
+    if not adv_axes:
+        return None
+    if other_axes:
+        return remove_broadcastable_index_arrays(node, index_vars, adv_axes, other_axes)
+
     accumulates = not (op.set_instead_of_inc or op.ignore_duplicates)
     if accumulates and y.type.dtype != x.type.dtype:
         return None
 
-    adv_axes, index_shape = broadcastable_axes_index_shape(
-        fgraph, x, op.idx_list, index_vars
+    index_shape = joint_integer_index_shape(
+        fgraph, [index_vars[op.idx_list[axis]] for axis in adv_axes]
     )
-    if not adv_axes:
-        return None
+    index_shape = [
+        int(length.data) if isinstance(length, Constant) else length
+        for length in index_shape
+    ]
     if 0 in index_shape:
         return [x]
     if not all(_is_provably_positive(length) for length in index_shape):

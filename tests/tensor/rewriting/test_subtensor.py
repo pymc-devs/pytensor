@@ -752,6 +752,33 @@ class TestAdvancedSubtensorRemoveBroadcastableIndex:
             np.array([-1], dtype=idx.dtype),
         )
 
+    def test_mixed_indices(self):
+        x = tensor("x", shape=(1, 3))
+        i, j = pt.lvectors("i", "j")
+        outputs = [x[i, j], x[j, j], x[i[None], j]]
+
+        result = utt.RewriteTester([x, i, j], outputs)
+        zero = pt.constant(0, dtype="int64")
+        result.assert_graph(
+            x[zero, j],
+            x[zero, j],
+            x[zero, j[None]],
+        )
+        result.assert_eval(
+            np.array([[10, 20, 30]], dtype=x.dtype),
+            np.array([0, 0], dtype=i.dtype),
+            np.array([-1, 0], dtype=j.dtype),
+        )
+
+    def test_mixed_indices_need_broadcast(self):
+        x = tensor("x", shape=(1, 3))
+        i = tensor("i", shape=(2, 1), dtype="int64")
+        j = tensor("j", shape=(3,), dtype="int64")
+        outputs = [x[i, j]]
+
+        result = utt.RewriteTester([x, i, j], outputs)
+        result.assert_graph(*outputs)
+
     def test_runtime_broadcast_shape_unsafe(self):
         """Document the assumption about runtime broadcasting of index arrays."""
         x = tensor("x", shape=(1, 1))
@@ -869,6 +896,21 @@ class TestAdvancedIncSubtensorRemoveBroadcastableIndex:
 
         result = utt.RewriteTester([x, idx, y], outputs)
         result.assert_graph(*outputs)
+
+    def test_mixed_indices(self):
+        x = tensor("x", shape=(1, 3), dtype="int8")
+        idx = pt.lvector("idx")
+        y = pt.vector("y", dtype="float64")
+        outputs = [x[idx, idx].inc(y)]
+
+        result = utt.RewriteTester([x, idx, y], outputs)
+        zero = pt.constant(0, dtype="int64")
+        result.assert_graph(x[zero, idx].inc(y))
+        result.assert_eval(
+            np.array([[10, 20, 30]], dtype=x.dtype),
+            np.array([0, -1, 0], dtype=idx.dtype),
+            np.array([1.2, 2.4, 3.6], dtype=y.dtype),
+        )
 
 
 class TestSubtensorIncSubtensor:

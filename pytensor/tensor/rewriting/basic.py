@@ -89,7 +89,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq, variadic_add
-from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.shape import Shape_i, shape_tuple
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
@@ -135,18 +135,20 @@ def get_simplified_shape(x: TensorVariable, *, fgraph) -> tuple:
     if not any(d is None for d in static_shape):
         return static_shape
 
-    return tuple(x.shape)
+    return shape_tuple(x)
 
 
 def get_simplified_broadcast_shape(first, *others, fgraph, batch_ndim=None) -> list:
-    """Per-axis fold of ``first`` with ``others``, prioritizing non-broadcastable lengths.
+    """Fold the shapes of ``first`` and ``others`` one axis at a time.
 
-    The shape entry from ``first`` wins on every axis where ``first`` is not
-    broadcastable; only axes where ``first`` is broadcastable look to ``others``
-    for a non-broadcastable length to substitute. Callers therefore pass the
-    "preferred shape source" first (Elemwise's standard broadcast joining is
-    commutative, but the resulting symbolic shape is not — we want the
-    simplest/most-static expression).
+    On each axis, use the first constant nonbroadcastable length, if available.
+    Otherwise use the first symbolic nonbroadcastable length, or one if all
+    inputs broadcast on that axis. The fold assumes that nonbroadcastable lengths
+    agree on each axis.
+
+    Input order determines which expression supplies an extent when several
+    inputs have the same priority. Pass the preferred shape source first to
+    favor its symbolic nonbroadcastable lengths when no constant is available.
 
     With ``batch_ndim`` only the leading ``batch_ndim`` dimensions are folded and
     returned, so inputs may differ on their trailing (core) dimensions, as with
@@ -155,20 +157,24 @@ def get_simplified_broadcast_shape(first, *others, fgraph, batch_ndim=None) -> l
     if batch_ndim is None:
         batch_ndim = first.type.ndim
 
-    first_broadcastable = first.type.broadcastable[:batch_ndim]
-    if not (any(first_broadcastable) and others):
-        return list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
-
-    broadcastable_dims = list(first_broadcastable)
-    broadcast_shape = list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
-    for other in others:
-        other_shape = get_simplified_shape(other, fgraph=fgraph)
-        for i in range(batch_ndim):
-            if other.type.broadcastable[i] or not broadcastable_dims[i]:
-                # Doesn't provide any new info
+    inputs = (first, *others)
+    shapes = {}
+    broadcast_shape = []
+    constant_types = Constant | int | np.integer
+    for axis in range(batch_ndim):
+        length = None
+        for inp in inputs:
+            if inp.type.broadcastable[axis]:
                 continue
-            broadcast_shape[i] = other_shape[i]
-            broadcastable_dims[i] = False  # Don't override again
+            if inp not in shapes:
+                shapes[inp] = get_simplified_shape(inp, fgraph=fgraph)
+            extent = shapes[inp][axis]
+            if isinstance(extent, constant_types):
+                length = extent
+                break
+            if length is None:
+                length = extent
+        broadcast_shape.append(1 if length is None else length)
     return broadcast_shape
 
 
@@ -201,11 +207,10 @@ def broadcast_like_elemwise(
         The function graph containing the node (used to simplify shapes).
     ref_input_idx
         If given, ``node.inputs[ref_input_idx]`` is moved to the front when
-        computing the broadcast shape, so its shape entries dominate on axes
-        where it is not broadcastable (see ``get_simplified_broadcast_shape``).
-        Use this when the rewrite "keeps" one specific input and that input's
-        shape should dominate (e.g. ``second(a, b) -> b`` with
-        ``ref_input_idx=1`` drops the dependency on ``a`` — shape_unsafe).
+        computing the broadcast shape. Its nonbroadcastable axes supply the
+        symbolic lengths when no input supplies a constant length on those
+        axes. Use this when the rewrite keeps a specific input, as in
+        ``second(a, b) -> b`` with ``ref_input_idx=1``.
     stack_trace
         If ``True``, copy the stack trace from ``node.outputs[0]`` onto every
         returned variable.
