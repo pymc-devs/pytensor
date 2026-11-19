@@ -21,7 +21,7 @@ from pytensor.link.llvm.codegen.emit import (
     load,
     size,
     store,
-    unknown_layout,
+    view_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize
@@ -215,8 +215,9 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
     views = []
     for k, (var, x) in enumerate(zip(params_vars, params, strict=True)):
         strides = []
+        off = nd - var.type.ndim
         for a in range(nd):
-            pa = a - (nd - var.type.ndim)
+            pa = a - off
             if pa < 0 or var.type.shape[pa] == 1:
                 strides.append(b.i64(0))
             else:
@@ -233,7 +234,14 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
                 x.data,
                 list(shape),
                 strides,
-                x.layout if same_ndim else unknown_layout(shape),
+                x.layout
+                if same_ndim
+                else view_layout(
+                    x,
+                    shape,
+                    strides,
+                    [a - off if a >= off else None for a in range(nd)],
+                ),
             )
         )
 

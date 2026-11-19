@@ -10,7 +10,7 @@ from pytensor.link.llvm.codegen.emit import (
     load,
     set_output,
     store,
-    unknown_layout,
+    view_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -131,7 +131,14 @@ def _(op, node, cg, inputs, outputs):
                 "IncSubtensor: shape mismatch between the value and the indexed view",
             )
             ystrides.append(b.select(one, 0, y.strides[a]))
-    ys = Array(y.dtype, y.data, view.shape, ystrides, unknown_layout(view.shape))
+    source = [None] * off + list(range(ytype.ndim))
+    ys = Array(
+        y.dtype,
+        y.data,
+        view.shape,
+        ystrides,
+        view_layout(y, view.shape, ystrides, source),
+    )
     dt = out.dtype
 
     def body(p):

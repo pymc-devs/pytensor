@@ -21,7 +21,7 @@ from pytensor.link.llvm.codegen.emit import (
     index_bounds,
     load,
     store,
-    unknown_layout,
+    view_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -98,15 +98,20 @@ def operands(cg, base: Array, pat: Pattern):
     k, nb = len(pat.indices), len(pat.bshape)
     first = pat.first
     bst = list(base.strides[:first]) + [zero] * nb + list(base.strides[first + k :])
-    base_op = Array(base.dtype, base.data, pat.view_shape, bst, unknown_layout(pat.view_shape))
+    source = [*range(first), *[None] * nb, *range(first + k, base.ndim)]
+    lay = view_layout(base, pat.view_shape, bst, source)
+    base_op = Array(base.dtype, base.data, pat.view_shape, bst, lay)
     idx_ops = []
     for arr, var in pat.indices:
         off = nb - var.type.ndim
         st = [zero] * len(pat.view_shape)
+        source_shape: list[int | None] = [None] * len(pat.view_shape)
         for d in range(var.type.ndim):
             if var.type.shape[d] != 1:
                 st[first + off + d] = arr.strides[d]
-        idx_ops.append(Array(arr.dtype, arr.data, pat.view_shape, st, unknown_layout(pat.view_shape)))
+                source_shape[first + off + d] = d
+        lay = view_layout(arr, pat.view_shape, st, source_shape)
+        idx_ops.append(Array(arr.dtype, arr.data, pat.view_shape, st, lay))
     return base_op, idx_ops
 
 
@@ -183,7 +188,8 @@ def _(op, node, cg, inputs, outputs):
             "shape mismatch: value array could not be broadcast to the indexing result",
         )
         yst.append(b.select(one, 0, y.strides[a]))
-    ys = Array(y.dtype, y.data, vs, yst, unknown_layout(vs))
+    source = [None] * off + list(range(yt.ndim))
+    ys = Array(y.dtype, y.data, vs, yst, view_layout(y, vs, yst, source))
     k = len(idx_ops)
     dt = out.dtype
 

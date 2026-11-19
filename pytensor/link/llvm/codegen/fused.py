@@ -31,7 +31,6 @@ from pytensor.link.llvm.codegen.emit import (
     memory_type,
     size,
     store,
-    unknown_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -250,7 +249,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         elif isinstance(spec, Write):
             plain_out[i] = loop_view(b, res, shape, zero_axes=(spec.axis,))
         else:
-            plain_out[i] = Array(res.dtype, res.data, shape, res.strides, unknown_layout(shape))
+            plain_out[i] = loop_view(b, res, shape)
 
     def index_value(k, i):
         """idx[i] for index array input k, wrapped and bounds-checked against `n`."""
