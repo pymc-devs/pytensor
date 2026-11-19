@@ -149,7 +149,7 @@ def test_c_inputs_are_checked_by_the_c_api():
     st = new(fn)
     v = np.arange(10.0)
     out = np.empty(5)
-    ins, k1 = as_ptarrays([v[::2]])
+    ins, _k1 = as_ptarrays([v[::2]])
     outs, _k2 = as_ptarrays([out])
     assert call(st, ins, outs) != 0 and b"must be C-contiguous" in err(st)
     ins, _k1 = as_ptarrays([v[:5]])

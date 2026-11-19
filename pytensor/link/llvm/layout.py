@@ -480,7 +480,7 @@ def infer_layouts(fgraph, input_layouts=None) -> dict:
     for node in fgraph.toposort():
         ins = [lays[i] if i in lays else _default_layout(i) for i in node.inputs]
         for o, lay in zip(node.outputs, predict_layouts(node, ins), strict=True):
-            lays[o] = lay
+            lays[o] = lay  # noqa: PERF403
     return lays
 
 

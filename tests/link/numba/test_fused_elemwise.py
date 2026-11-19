@@ -1175,7 +1175,13 @@ def test_chained_writes_from_same_elemwise_without_inplace():
     ab = z @ L.T
     logp = (-0.5 * (y - ab[g, 0] - ab[g, 1] * x) ** 2).sum() - 0.5 * (z**2).sum()
     outs = [logp, *pt.grad(logp, [z, L])]
-    vals = [rng.normal(size=(5, 2)), rng.normal(size=(2, 2)), rng.normal(size=30), rng.normal(size=30), rng.integers(0, 5, 30)]
+    vals = [
+        rng.normal(size=(5, 2)),
+        rng.normal(size=(2, 2)),
+        rng.normal(size=30),
+        rng.normal(size=30),
+        rng.integers(0, 5, 30),
+    ]
     ref = function([z, L, x, y, g], outs, mode="FAST_COMPILE")(*vals)
     for mode in [get_mode("NUMBA"), get_mode("NUMBA").excluding("inplace")]:
         res = function([z, L, x, y, g], outs, mode=mode)(*vals)

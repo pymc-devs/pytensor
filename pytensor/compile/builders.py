@@ -351,7 +351,9 @@ class OpFromGraph(HasInnerFunction, Op):
 
         self.is_inline = inline
         if execution is not None and not isinstance(execution, Execution):
-            raise TypeError(f"execution must be an Execution or None, got {execution!r}")
+            raise TypeError(
+                f"execution must be an Execution or None, got {execution!r}"
+            )
         self.execution = execution
 
         if fgraph is not None:
@@ -537,7 +539,9 @@ class OpFromGraph(HasInnerFunction, Op):
         )
 
     def __hash__(self):
-        return hash((type(self), self.fgraph, self.is_inline, getattr(self, "execution", None)))
+        return hash(
+            (type(self), self.fgraph, self.is_inline, getattr(self, "execution", None))
+        )
 
     def __str__(self):
         name = self.__class__.__name__ if self.name is None else self.name

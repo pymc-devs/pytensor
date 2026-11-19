@@ -31,7 +31,7 @@ def run_node(node, *values, provided=None, provided_layouts=None):
     ins = []
     it = iter(values)
     for i in node.inputs:
-        ins.append(
+        ins.append(  # noqa: PERF401
             np.asarray(
                 i.data if isinstance(i, Constant) else next(it), dtype=i.type.dtype
             )
