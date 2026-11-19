@@ -19,7 +19,7 @@ from pytensor.link.llvm.codegen.types import (
     memory_type,
     value_type,
 )
-from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout
 
 
 if TYPE_CHECKING:
@@ -157,6 +157,52 @@ def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
 def unknown_layout(shape) -> Layout:
     """`Layout.unknown` for the lengths `shape` (i64 values)."""
     return Layout.unknown([n.const_int for n in shape])
+
+
+def view_layout(a: Array, shape, strides, source) -> Layout:
+    """The layout of a view of `a` with `shape` and `strides` (i64 values) whose axis k
+    is axis `source[k]` of `a` (None: an axis of its own, e.g. a broadcast one).
+
+    An axis that keeps `a`'s stride keeps its kind, but PACKED only while the packed
+    axes inside it (in `a`'s memory order) keep their strides and lengths: a packed
+    stride is the product of those lengths. A zero stride is 0; any other is DYNAMIC."""
+    kept = {
+        k: s
+        for k, s in enumerate(source)
+        if s is not None and strides[k] is a.strides[s]
+    }
+    view_axis = {s: k for k, s in kept.items()}
+    static = a.static_shape()
+    still_packed = set()
+    for ax in reversed(a.layout.order):
+        if a.layout.strides[ax] is not PACKED:
+            break
+        if ax not in view_axis:
+            if static[ax] == 1:  # (contributes nothing to the products)
+                continue
+            break
+        still_packed.add(ax)
+        if not _same_length(shape[view_axis[ax]], a.shape[ax]):
+            break
+    kinds: list = []
+    for k, st in enumerate(strides):
+        s = kept.get(k)
+        kind = DYNAMIC if s is None else a.layout.strides[s]
+        if kind is PACKED and s not in still_packed:
+            kind = DYNAMIC
+        if kind is DYNAMIC and st.const_int == 0:
+            kind = 0
+        kinds.append(kind)
+    # own axes first; `a`'s axes in its memory order (which orders the packed ones)
+    pos = {ax: i for i, ax in enumerate(a.layout.order)}
+    order = sorted(
+        range(len(shape)), key=lambda k: (k in kept, pos.get(kept.get(k), k))
+    )
+    return Layout.make([n.const_int for n in shape], order, kinds)
+
+
+def _same_length(m, n) -> bool:
+    return m is n or (m.const_int is not None and m.const_int == n.const_int)
 
 
 def loop_view(b, a: Array, shape, zero_axes=()) -> Array:

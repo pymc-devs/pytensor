@@ -8,7 +8,11 @@ import pytest
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.emit import Array, unknown_layout  # noqa: E402
+from pytensor.link.llvm.codegen.emit import (  # noqa: E402
+    Array,
+    unknown_layout,
+    view_layout,
+)
 from pytensor.link.llvm.codegen.num import Num  # noqa: E402
 from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
@@ -103,6 +107,32 @@ def test_at_keeps_what_the_layout_says():
     )
     assert fortran.at(b, i, axis=1).layout.is_c((3,))  # a column of a Fortran matrix
 
+
+def test_views_keep_what_still_holds_of_the_layout():
+    m = ir.Module("array")
+    f = m.function("f", [ir.ptr, ir.i64], ir.f64)
+    b = f.builder()
+    p, n = f.params
+    shape = [b.i64(2), b.i64(3), b.i64(4)]
+    c = Array("float64", p, shape, [b.i64(96), b.i64(32), b.i64(8)], Layout.c(3))
+    # a slice along axis 1 (with c's strides): the axes inside it stay packed, the
+    # outer one's stride counts all of c's axis 1
+    part = [shape[0], n, shape[2]]
+    assert view_layout(c, part, c.strides, range(3)) == Layout.make(
+        (2, None, 4), range(3), (DYNAMIC, PACKED, PACKED)
+    )
+    # a broadcast over a new outer axis: stride 0 there, the rest as it was
+    zero = b.i64(0)
+    rows = [n, *shape]
+    assert view_layout(c, rows, [zero, *c.strides], [None, 0, 1, 2]) == Layout.make(
+        (None, 2, 3, 4), range(4), (0, PACKED, PACKED, PACKED)
+    )
+    # the innermost axis replaced (advanced indexing): nothing outside it is packed
+    indexed = [shape[0], shape[1], n]
+    strides = [c.strides[0], c.strides[1], zero]
+    assert view_layout(c, indexed, strides, [0, 1, None]) == Layout.make(
+        (2, 3, None), range(3), (DYNAMIC, DYNAMIC, 0)
+    )
 
 def test_mistakes_raise():
     m = ir.Module("array")

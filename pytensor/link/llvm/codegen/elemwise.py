@@ -20,7 +20,7 @@ from pytensor.link.llvm.codegen.emit import (
     memory_type,
     size,
     store,
-    unknown_layout,
+    view_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -182,18 +182,21 @@ def _(op, node, cg, inputs, outputs):
     # partial: accumulate into an array of the accumulator dtype
     acc_arr = res if acc == out_dtype else cg.temporary(acc, out_shape)
     for_each(b, out_shape, [acc_arr], lambda p: store(b, acc, init, p[0]))
-    acc_strides, k = [], 0
+    acc_strides, source, k = [], [], 0
     for r in reduced:
         if r:
             acc_strides.append(b.i64(0))
+            source.append(None)
         else:
             acc_strides.append(acc_arr.strides[k])
+            source.append(k)
             k += 1
     # loop in x's memory order; if its innermost memory axis is reduced, that axis is
     # accumulated in a register (for a transposed x and axis=0 that's the unit-stride one)
     order = loop_order(x.shape, [x])
     inner = order[-1]
-    accs = Array(acc, acc_arr.data, x.shape, acc_strides, unknown_layout(x.shape))
+    lay = view_layout(acc_arr, x.shape, acc_strides, source)
+    accs = Array(acc, acc_arr.data, x.shape, acc_strides, lay)
 
     def body(p):
         cur = load(b, acc, p[1])
