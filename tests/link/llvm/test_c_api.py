@@ -223,9 +223,9 @@ def test_c_errors_are_reported(harness):
     f = pytensor.function([x, y], x + y, mode=LLVM)
     fn = f.maker.linker.program.c_function()
     a = api()
-    ins, keep = as_ptarrays([np.zeros(3), np.zeros(4)])
+    ins, _keep = as_ptarrays([np.zeros(3), np.zeros(4)])
     out_np = np.empty(3)
-    outs, keep2 = as_ptarrays([out_np])
+    outs, _keep = as_ptarrays([out_np])
     err = ctypes.create_string_buffer(512)
     assert harness.pt_run_once(ctypes.addressof(a), fn, ins, outs, err, 512) != 0
     assert b"mismatch" in err.value
@@ -280,8 +280,8 @@ def test_c_boundary_checks(harness):
 
     xv = np.arange(6.0)
     # provided output overlapping the input (in-place calls aren't supported)
-    ins, k1 = as_ptarrays([xv])
-    outs, k2 = as_ptarrays([xv])
+    ins, _k1 = as_ptarrays([xv])
+    outs, _k2 = as_ptarrays([xv])
     rc, msg = run(ins, outs)
     assert rc != 0 and b"overlaps the memory of input 0" in msg
     # misaligned data, negative length, NULL data, wrong ndim, wrong dtype
@@ -298,15 +298,15 @@ def test_c_boundary_checks(harness):
         (lambda p: setattr(p, "ndim", 2), b"expected 1 dims"),
     ]
     for corrupt, expected in bad:
-        ins, k1 = as_ptarrays([xv.copy()])
-        outs, k2 = as_ptarrays([np.empty(6)])
+        ins, _k = as_ptarrays([xv.copy()])
+        outs, _k = as_ptarrays([np.empty(6)])
         corrupt(ins[0])
         rc, msg = run(ins, outs)
         assert rc != 0 and expected in msg, (expected, msg)
     # the same for outputs, provided or not
     for provided in (True, False):
-        ins, k1 = as_ptarrays([xv])
-        outs, k2 = as_ptarrays([np.empty(6)])
+        ins, _k = as_ptarrays([xv])
+        outs, _k = as_ptarrays([np.empty(6)])
         if not provided:
             outs[0].data = None
         outs[0].dtype = DTYPE_CODES["int64"]

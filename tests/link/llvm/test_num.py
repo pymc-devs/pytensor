@@ -197,7 +197,7 @@ def test_mistakes_raise():
     )
     with pytest.raises(TypeError, match="convert one with astype"):
         i + j
-    with pytest.raises(TypeError, match="the float 1.5"):
+    with pytest.raises(TypeError, match="the float 1\\.5"):
         i + 1.5
     with pytest.raises(TypeError, match="not a Python condition"):
         if i < 3:
