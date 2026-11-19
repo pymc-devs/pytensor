@@ -113,7 +113,7 @@ def call_kernel(
     pa = ptarray_type()
     i64 = ir.i64
     # per argument: (data, shape ptr, strides ptr, ndim, dtype, SlotOutput or None)
-    args_of = []
+    args_of: list[tuple[object, object, object, int, str, SlotOutput | None]] = []
     n_inputs = 0
 
     def storage(values):

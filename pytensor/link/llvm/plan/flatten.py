@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 from pytensor.compile.builders import Execution, OpFromGraph
-from pytensor.link.llvm.plan.values import NodeItem, SubprogramItem, UnitItem, Values
+from pytensor.link.llvm.plan.values import (
+    Item,
+    NodeItem,
+    SubprogramItem,
+    UnitItem,
+    Values,
+)
 
 
 def flatten(
     values: Values, nodes, scope, inside_unit=False, of_the_graph=False
-) -> list:
+) -> list[Item]:
     """The items running `nodes` (in order). `scope` maps variables to values and is
     filled with the nodes' outputs. OpFromGraphs are inlined, become units
     (`Execution.COMPILED`) or subprograms (`Execution.INTERPRETED`); inside a unit every
     OpFromGraph is inlined. `of_the_graph`: `nodes` are the graph being planned itself
     (marks the items, see `NodeItem`)."""
-    items = []
+    items: list[Item] = []
     for node in nodes:
         op = node.op
         execution = (
@@ -53,13 +59,15 @@ def flatten(
                 _inlined_outputs(values, inner, node, sub, scope)
                 continue
             sub = inner_scope
-            outs = []
+            unit_outs = []
             for io, oo in zip(inner.outputs, node.outputs, strict=True):
                 k = values.new(oo.type)
                 scope[oo] = k
-                outs.append((values.of(io, sub), k))
+                unit_outs.append((values.of(io, sub), k))
             items.append(
-                UnitItem(inner_items, values.unit_inputs(inner_items), outs, str(op))
+                UnitItem(
+                    inner_items, values.unit_inputs(inner_items), unit_outs, str(op)
+                )
             )
         elif isinstance(op, OpFromGraph) and execution is Execution.INTERPRETED:
             ins = [values.of(i, scope) for i in node.inputs]

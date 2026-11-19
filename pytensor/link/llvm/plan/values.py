@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Apply, Constant
 from pytensor.link.llvm.codegen.types import is_absent
 
 
@@ -16,9 +16,9 @@ class NodeItem:
     it reads and writes. The same PyTensor node can appear with different vids (inlined
     OpFromGraphs)."""
 
-    node: object
-    inputs: list
-    outputs: list
+    node: Apply
+    inputs: list[int]
+    outputs: list[int]
     #: a node of the graph being planned itself (not of an inlined inner graph): what
     #: its op may destroy was validated there (the graph's DestroyHandler)
     of_the_graph: bool = False
@@ -28,9 +28,9 @@ class NodeItem:
 class UnitItem:
     """Several items compiled as one function."""
 
-    items: list
-    inputs: list  # vids read from outside
-    outputs: list  # (inner vid, outer vid)
+    items: list[Item]
+    inputs: list[int]  # vids read from outside
+    outputs: list[tuple[int, int]]  # (inner vid, outer vid)
     description: str
 
 
@@ -38,9 +38,12 @@ class UnitItem:
 class SubprogramItem:
     """An interpreted OpFromGraph: a subprogram."""
 
-    node: object
-    inputs: list
-    outputs: list
+    node: Apply
+    inputs: list[int]
+    outputs: list[int]
+
+
+Item = NodeItem | UnitItem | SubprogramItem
 
 
 class Values:
