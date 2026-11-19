@@ -136,12 +136,17 @@ def test_schur_t_is_upper_triangular_only_for_complex(output, expected):
     assert af.get(Z, UPPER_TRIANGULAR) == FactState.UNKNOWN
 
 
-def test_qz_aa_and_bb_are_upper_triangular():
+@pytest.mark.parametrize(
+    "output, aa_expected",
+    [("complex", True), ("real", False)],
+)
+def test_qz_bb_is_upper_triangular_and_aa_only_for_complex(output, aa_expected):
+    # Real QZ gives a quasi-upper-triangular AA (2x2 blocks), so it is not claimed.
     a = pt.matrix("a", shape=(3, 3))
     b = pt.matrix("b", shape=(3, 3))
-    AA, BB, Q, Z = pt.linalg.qz(a, b)
+    AA, BB, Q, Z = pt.linalg.qz(a, b, output=output)
     _, af = make_fgraph(AA, BB, Q, Z)
-    assert af.check(AA, UPPER_TRIANGULAR)
+    assert af.check(AA, UPPER_TRIANGULAR) is aa_expected
     assert af.check(BB, UPPER_TRIANGULAR)
     assert af.get(Q, UPPER_TRIANGULAR) == FactState.UNKNOWN
     assert af.get(Z, UPPER_TRIANGULAR) == FactState.UNKNOWN
