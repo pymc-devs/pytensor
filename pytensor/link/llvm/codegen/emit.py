@@ -436,9 +436,9 @@ class SlotOutput:
     #: frees (`emit_items`; null for a view)
     temporary: bool = False
     #: the (packed) layout `allocate` produces; default C-contiguous
-    layout: Layout = None
+    layout: Layout | None = None
     #: for a view: the layout `llvm_layout` declared (`set_view` checks it)
-    declared: Layout = None
+    declared: Layout | None = None
     #: (scope, noalias scopes) for the memory `allocate` returns (`Builder.mark_array`)
     alias: tuple | None = None
     done: bool = False

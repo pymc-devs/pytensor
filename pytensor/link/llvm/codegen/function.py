@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 from functools import singledispatch
+from typing import TYPE_CHECKING
 
 from pytensor.link.llvm.codegen.emit import (
     Codegen,
@@ -29,6 +30,10 @@ from pytensor.link.llvm.codegen.types import (
     repr_of,
 )
 from pytensor.link.llvm.layout import Layout
+
+
+if TYPE_CHECKING:
+    from pytensor.link.llvm.codegen.call import LinkTable
 
 
 class OutputMode(enum.Enum):
@@ -292,7 +297,7 @@ class NodeFunction:
     function: object
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
-    links: object = None
+    links: LinkTable | None = None
 
 
 def debug_name(node) -> str:

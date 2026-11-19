@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Constant, Variable
 from pytensor.link.llvm.codegen.emit import copy, size
 from pytensor.link.llvm.codegen.function import known_layouts, llvm_emit
 from pytensor.link.llvm.codegen.types import repr_of
@@ -41,7 +41,7 @@ def blockwise_core(node) -> tuple[list, list]:
     batched stay constants (their core)."""
     op = node.op
     batch_ndim = op.batch_ndim(node)
-    core_inputs = []
+    core_inputs: list[Variable] = []
     for inp in node.inputs:
         if isinstance(inp, Constant) and all(inp.type.broadcastable[:batch_ndim]):
             data = inp.data.reshape(inp.data.shape[batch_ndim:])
