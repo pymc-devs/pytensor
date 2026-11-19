@@ -64,7 +64,7 @@ class Output:
         RETURNED it is what the result has, a view or new memory."""
         return getattr(self.repr, "layout", None)
 
-    def with_layout(self, layout):
+    def with_layout(self, layout: Layout):
         """The same output with another layout (e.g. the memory actually provided)."""
         from dataclasses import replace
 
@@ -294,7 +294,7 @@ def llvm_emit(op, node, cg: Codegen, inputs: list, outputs: list) -> None:
 
 @dataclass
 class NodeFunction:
-    function: object
+    function: ir.Function
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
     links: LinkTable | None = None
@@ -660,7 +660,7 @@ def _check_layout(cg, p, r: TensorRepr, k):
 
 @dataclass
 class CompiledNode:
-    compiled: object
+    compiled: ir.CompiledModule
     signature: Signature
 
     @property

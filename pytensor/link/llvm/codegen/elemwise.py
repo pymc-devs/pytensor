@@ -20,6 +20,7 @@ from pytensor.link.llvm.codegen.emit import (
     memory_type,
     size,
     store,
+    unknown_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
@@ -192,7 +193,7 @@ def _(op, node, cg, inputs, outputs):
     # accumulated in a register (for a transposed x and axis=0 that's the unit-stride one)
     order = loop_order(x.shape, [x])
     inner = order[-1]
-    accs = Array(acc, acc_arr.data, x.shape, acc_strides)
+    accs = Array(acc, acc_arr.data, x.shape, acc_strides, unknown_layout(x.shape))
 
     def body(p):
         cur = load(b, acc, p[1])

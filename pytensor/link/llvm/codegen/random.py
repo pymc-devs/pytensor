@@ -21,6 +21,7 @@ from pytensor.link.llvm.codegen.emit import (
     load,
     size,
     store,
+    unknown_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize
@@ -228,7 +229,11 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
         same_ndim = var.type.ndim == nd and all(s != 1 for s in var.type.shape)
         views.append(
             Array(
-                x.dtype, x.data, list(shape), strides, x.layout if same_ndim else None
+                x.dtype,
+                x.data,
+                list(shape),
+                strides,
+                x.layout if same_ndim else unknown_layout(shape),
             )
         )
 

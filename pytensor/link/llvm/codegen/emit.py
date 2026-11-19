@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from pytensor.graph.basic import Constant
 from pytensor.link.llvm.codegen.types import (
@@ -18,7 +19,12 @@ from pytensor.link.llvm.codegen.types import (
     memory_type,
     value_type,
 )
-from pytensor.link.llvm.layout import DYNAMIC, Layout
+from pytensor.link.llvm.layout import Layout
+
+
+if TYPE_CHECKING:
+    from pytensor.link.llvm.codegen.call import LinkTable
+    from pytensor.link.llvm.plan.resolve import Body
 
 
 #: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
@@ -39,19 +45,14 @@ class Array:
     """
 
     dtype: str
-    data: object
+    data: ir.Value
     shape: list
     strides: list
-    layout: Layout = None
+    layout: Layout
     #: the node input this memory belongs to (inputs and their views), if known
     base: int | None = None
     #: may code write it? Inputs may not (`store` refuses)
     writable: bool = True
-
-    def __post_init__(self):
-        if self.layout is None:
-            nd = len(self.shape)
-            self.layout = Layout.make(self.static_shape(), range(nd), (DYNAMIC,) * nd)
 
     @property
     def ndim(self):
@@ -67,13 +68,13 @@ class Array:
 
     def view(self, data, shape, strides, layout=None) -> Array:
         """An array in the same memory: `data` points into it. It belongs to the same
-        input and is as writable as this one."""
+        input and is as writable as this one. `layout`: default nothing known."""
         return Array(
             self.dtype,
             data,
             list(shape),
             list(strides),
-            layout,
+            unknown_layout(shape) if layout is None else layout,
             self.base,
             self.writable,
         )
@@ -151,6 +152,11 @@ def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
         layout.stride_values(b, itemsize(dtype), shape, {}),
         layout,
     )
+
+
+def unknown_layout(shape) -> Layout:
+    """`Layout.unknown` for the lengths `shape` (i64 values)."""
+    return Layout.unknown([n.const_int for n in shape])
 
 
 def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
@@ -252,7 +258,7 @@ def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Arr
         for a, s in enumerate(static_shape)
     ]
     if layout is None:
-        layout = Layout.make(static_shape, range(nd), (DYNAMIC,) * nd)
+        layout = Layout.unknown(static_shape)
     else:
         layout = Layout.make(static_shape, layout.order, layout.strides)
     passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
@@ -426,7 +432,7 @@ class SlotOutput:
     or a view of one of the inputs the op says it may alias (`set_view`)."""
 
     cg: Codegen
-    slot: object
+    slot: ir.Value
     dtype: str
     ndim: int
     #: the node inputs it may be a view of (the op's view_map)
@@ -547,7 +553,7 @@ def set_output(cg, out, a: Array) -> None:
 
 @dataclass
 class ScalarOutput:
-    ptr: object
+    ptr: ir.Value
     dtype: str
     done: bool = False
 
@@ -579,22 +585,22 @@ class Codegen:
     parameters (`ctx`, its `config` = link table), and what nested code
     needs (link table, module, a Scan's or Blockwise's resolved body)."""
 
-    b: object
-    ctx: object
+    b: ir.Builder
+    ctx: ir.Value
     #: the kernel's config: its link table (call.py)
-    config: object
+    config: ir.Value
     #: bytes of stack temporaries so far (`temp_memory`)
     stack_bytes: int = 0
     #: may loops run in parallel (`Options.parallel`)?
     parallel: bool = True
     #: the link table of the kernel being generated (call.py); None: it calls nothing
-    links: object = None
+    links: LinkTable | None = None
     #: for a Scan or a Blockwise: its resolved inner graph (`plan.resolve.Body`), what
     #: one iteration runs; None: the node can't be generated here
-    body: object = None
+    body: Body | None = None
     #: the module being built, and the name of the function being built in it (nested
     #: functions are named after it)
-    module: object = None
+    module: ir.Module | None = None
     name: str = ""
     #: the scratch memory taken in the scopes being emitted, innermost last: what to
     #: free at the end of each (`scratch_scope`)

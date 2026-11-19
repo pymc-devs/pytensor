@@ -55,7 +55,7 @@ class LinkTable:
 
     entries: list = field(default_factory=list)
     _keep: list = field(default_factory=list)
-    _table: object = None
+    _table: np.ndarray | None = None
 
     def link_kernel(self, kernel: CalledKernel) -> int:
         """The entry of `kernel`'s address (its config is in the next entry)."""

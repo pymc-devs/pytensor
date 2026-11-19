@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cache
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytensor.link.llvm.layout import DYNAMIC, Layout
+from pytensor.link.llvm.layout import Layout
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.type import TensorType
 
@@ -24,8 +25,11 @@ class _IR:
         return value
 
 
-#: the IR builder's module: `ir.i64`, `ir.Module(...)`, `ir.Libm.Erf`
-ir = _IR()
+if TYPE_CHECKING:
+    from pytensor_llvm import ir
+else:
+    #: the IR builder's module: `ir.i64`, `ir.Module(...)`, `ir.Libm.Erf`
+    ir = _IR()
 
 
 SUPPORTED_DTYPES = (
@@ -108,17 +112,7 @@ class TensorRepr:
     dtype: str
     shape: tuple[int | None, ...]
     #: what is known about the strides (canonical for `shape`, see `repr_of`)
-    layout: Layout = None
-
-    def __post_init__(self):
-        if self.layout is None:
-            object.__setattr__(
-                self,
-                "layout",
-                Layout.make(
-                    self.shape, range(len(self.shape)), (DYNAMIC,) * len(self.shape)
-                ),
-            )
+    layout: Layout
 
     @property
     def ndim(self) -> int:
@@ -202,7 +196,9 @@ def repr_of(t, layout: Layout | None = None):
         return ScalarRepr(check_dtype(t.dtype))
     if isinstance(t, TensorType):
         shape = tuple(None if s is None else int(s) for s in t.shape)
-        if layout is not None:
+        if layout is None:
+            layout = Layout.unknown(shape)
+        else:
             layout = Layout.make(shape, layout.order, layout.strides)
         return TensorRepr(check_dtype(t.dtype), shape, layout)
     raise NotImplementedError(f"LLVM backend: no representation for {t}")

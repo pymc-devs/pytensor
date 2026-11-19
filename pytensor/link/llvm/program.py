@@ -24,6 +24,7 @@ import contextvars
 import re
 import time
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -48,6 +49,10 @@ from pytensor.link.llvm.rust_kernels import rust_kernel, rust_kernel_outputs
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import TensorFromScalar
 from pytensor.tensor.type import TensorType
+
+
+if TYPE_CHECKING:
+    from pytensor_llvm.ir import CompiledModule
 
 
 def _interp():
@@ -194,7 +199,7 @@ class GeneratedModule:
     """A module the planner generated for a task, compiled."""
 
     description: str
-    compiled: object  # ir.CompiledModule
+    compiled: CompiledModule
 
     @property
     def ir(self) -> str:
