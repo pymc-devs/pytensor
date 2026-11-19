@@ -1101,7 +1101,10 @@ class TestSubtensor(utt.OptimizationTestMixin):
         idx = lvector()
         t = n[idx]
 
-        f = self.function([idx], t, op=AdvancedSubtensor)
+        mode = self.mode.excluding(
+            "local_advanced_subtensor_remove_broadcastable_index"
+        )
+        f = self.function([idx], t, op=AdvancedSubtensor, mode=mode)
         topo = f.maker.fgraph.toposort()
         topo_ = [node for node in topo if not isinstance(node.op, DeepCopyOp)]
         assert len(topo_) == 1
