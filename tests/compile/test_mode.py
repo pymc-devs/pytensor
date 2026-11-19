@@ -170,6 +170,7 @@ def test_optimizer_sets_active_compile_mode():
     assert seen == [mode]
     assert getattr(fg, "_compile_mode", None) is None
 
+
 def test_python_mode():
     x = matrix()
     y = matrix()
