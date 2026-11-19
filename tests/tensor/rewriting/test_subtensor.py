@@ -1692,6 +1692,31 @@ class TestReadOfWriteSameIndices:
         with pytest.raises((IndexError, ValueError)):
             f(dx, dy, [1])
 
+    def test_empty_slice_shape_unsafe(self):
+        """Check the rewrite for unknown and broadcastable update lengths."""
+        x = vector("x", dtype="float64")
+        stop = iscalar("stop")
+        selected = x[:stop]
+
+        # With unknown static length, the rewrite returns v directly. For
+        # stop=0 and v=[7.0], the original returns [] on backends that allow
+        # the update to broadcast from length one to zero at runtime.
+        v = vector("v", dtype="float64")
+        inputs = [x, v, stop]
+        out = selected.set(v)[:stop]
+
+        default = utt.RewriteTester(inputs, [out])
+        default.assert_graph(v)
+        safe = utt.RewriteTester(inputs, [out], exclude=("shape_unsafe",))
+        safe.assert_graph(out)
+
+        # Static length one makes v broadcastable. Alloc uses the slice length
+        # and produces [] when stop=0.
+        broadcastable_v = vector("broadcastable_v", dtype="float64", shape=(1,))
+        out = selected.set(broadcastable_v)[:stop]
+        result = utt.RewriteTester([x, broadcastable_v, stop], [out])
+        result.assert_graph(pt.alloc(broadcastable_v, selected.shape.squeeze()))
+
     def test_set_multi_axis_symbolic(self):
         """Multi-axis ``x[idx_a, idx_b].set(v)[idx_a, idx_b]`` with symbolic
         indices collapses to ``v``."""
