@@ -65,21 +65,21 @@ class PtTypeInfo(ctypes.Structure):
 
 @pytest.fixture(scope="module")
 def harness(tmp_path_factory):
-    d = tmp_path_factory.mktemp("capi")
-    (d / "pytensor_llvm.h").write_text(pytensor_llvm.c_header())
-    src = Path(__file__).with_name("c_harness.c")
     if sys.platform == "win32":
-        cc = shutil.which("cl")
-        lib = d / "harness.dll"
-        cmd = [cc, "/nologo", "/O2", "/LD", f"/I{d}", str(src), f"/Fe{lib}"]
-    else:
-        cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
-        lib = d / "libharness.so"
-        cmd = [cc, "-O2", "-shared", "-fPIC", f"-I{d}", str(src), "-o", str(lib)]
+        pytest.skip(
+            "building the C harness on Windows needs MSVC's developer environment, "
+            "which isn't set up (CI doesn't, it breaks Rust builds in Git Bash)"
+        )
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
     if cc is None:
         pytest.skip("no C compiler")
-    # cwd: cl writes its intermediate files there
-    subprocess.run(cmd, check=True, cwd=d)
+    d = tmp_path_factory.mktemp("capi")
+    (d / "pytensor_llvm.h").write_text(pytensor_llvm.c_header())
+    lib = d / "libharness.so"
+    src = Path(__file__).with_name("c_harness.c")
+    subprocess.run(
+        [cc, "-O2", "-shared", "-fPIC", f"-I{d}", str(src), "-o", str(lib)], check=True
+    )
     h = ctypes.CDLL(str(lib))
     h.pt_run_once.restype = ctypes.c_int
     h.pt_run_once.argtypes = [

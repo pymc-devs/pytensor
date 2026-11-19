@@ -83,12 +83,9 @@ jobs:
           - name: windows-x86_64
             os: windows-latest
             container: ""
-            # static CRT, as LLVM (ci/build-llvm.sh): Python doesn't ship msvcp140.dll
-            rustflags: -C target-feature=+crt-static
     env:
       # same for LLVM and the wheel; part of the LLVM cache key
       MACOSX_DEPLOYMENT_TARGET: "11.0"
-      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,9 +112,6 @@ jobs:
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
 
-      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-        if: runner.os == 'Windows'
-
       - name: Restore LLVM
         id: llvm-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -126,8 +120,20 @@ jobs:
           key: llvm-${{ matrix.name }}-${{ matrix.container }}-${{ env.MACOSX_DEPLOYMENT_TARGET }}-${{ hashFiles('rust/pytensor-llvm/llvm-version.txt', 'rust/pytensor-llvm/llvm-minimal.cmake', 'rust/pytensor-llvm/ci/build-llvm.sh') }}
 
       - name: Build LLVM
-        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         run: bash rust/pytensor-llvm/ci/build-llvm.sh "$GITHUB_WORKSPACE/.llvm"
+
+      # LLVM's install-distribution needs a single-config generator (Ninja), and Ninja
+      # needs MSVC's developer environment: set up here, for this step only (in later
+      # steps it would make rustc pick up Git Bash's `link` instead of MSVC's).
+      - name: Build LLVM (Windows)
+        if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64"
+          & "$env:ProgramFiles\Git\bin\bash.exe" rust/pytensor-llvm/ci/build-llvm.sh "$env:GITHUB_WORKSPACE/.llvm"
 
       - name: Save LLVM
         if: steps.llvm-cache.outputs.cache-hit != 'true'
@@ -153,6 +159,17 @@ jobs:
           export LLVM_SYS_231_PREFIX="$GITHUB_WORKSPACE/.llvm"
           # shellcheck disable=SC2086 # MATURIN_ARGS is a list of arguments
           maturin build --release --out dist $MATURIN_ARGS
+
+      # LLVM's C++ code needs MSVC's msvcp140.dll, which Python doesn't ship (it has
+      # vcruntime140.dll): copied into the wheel, under a name of its own
+      - name: Repair wheel (Windows)
+        if: runner.os == 'Windows'
+        working-directory: rust/pytensor-llvm
+        run: |
+          python -m pip install delvewheel
+          delvewheel repair -w repaired dist/*.whl
+          rm dist/*.whl
+          mv repaired/*.whl dist/
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -202,10 +219,6 @@ jobs:
         with:
           name: llvm-wheel-${{ matrix.name }}
           path: wheel
-
-      # cl, for pytensor's Cython extension and the C API test harness
-      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-        if: runner.os == 'Windows'
 
       - name: Install
         run: |
