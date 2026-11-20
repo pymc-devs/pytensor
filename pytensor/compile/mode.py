@@ -541,11 +541,12 @@ FAST_COMPILE = Mode(
     RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
 )
 
-fast_run_linkers_to_mode = {
-    "cvm": CVM,
-    "vm": VM,
-    "numba": NUMBA,
-}
+PYTHON = Mode(
+    PerformLinker(),
+    RewriteDatabaseQuery(include=["fast_run"], exclude=["blas_opt"]),
+)
+
+fast_run_linkers_to_mode = {"cvm": CVM, "vm": VM, "numba": NUMBA, "python": PYTHON}
 
 predefined_modes = {
     "FAST_COMPILE": FAST_COMPILE,
@@ -555,6 +556,7 @@ predefined_modes = {
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
     "MLX": MLX,
+    "PYTHON": PYTHON,
 }
 
 _CACHED_RUNTIME_MODES: dict[Any, Mode] = {}
