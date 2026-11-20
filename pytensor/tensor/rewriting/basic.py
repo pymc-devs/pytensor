@@ -89,7 +89,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq, variadic_add
-from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.shape import Shape_i, shape_padleft, shape_tuple
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
@@ -135,18 +135,20 @@ def get_simplified_shape(x: TensorVariable, *, fgraph) -> tuple:
     if not any(d is None for d in static_shape):
         return static_shape
 
-    return tuple(x.shape)
+    return shape_tuple(x)
 
 
 def get_simplified_broadcast_shape(first, *others, fgraph, batch_ndim=None) -> list:
-    """Per-axis fold of ``first`` with ``others``, prioritizing non-broadcastable lengths.
+    """Fold the shapes of ``first`` and ``others`` one axis at a time.
 
-    The shape entry from ``first`` wins on every axis where ``first`` is not
-    broadcastable; only axes where ``first`` is broadcastable look to ``others``
-    for a non-broadcastable length to substitute. Callers therefore pass the
-    "preferred shape source" first (Elemwise's standard broadcast joining is
-    commutative, but the resulting symbolic shape is not — we want the
-    simplest/most-static expression).
+    On each axis, use the first constant nonbroadcastable length, if available.
+    Otherwise use the first symbolic nonbroadcastable length, or one if all
+    inputs broadcast on that axis. The fold assumes that nonbroadcastable lengths
+    agree on each axis.
+
+    Input order determines which expression supplies an extent when several
+    inputs have the same priority. Pass the preferred shape source first to
+    favor its symbolic nonbroadcastable lengths when no constant is available.
 
     With ``batch_ndim`` only the leading ``batch_ndim`` dimensions are folded and
     returned, so inputs may differ on their trailing (core) dimensions, as with
@@ -155,21 +157,126 @@ def get_simplified_broadcast_shape(first, *others, fgraph, batch_ndim=None) -> l
     if batch_ndim is None:
         batch_ndim = first.type.ndim
 
-    first_broadcastable = first.type.broadcastable[:batch_ndim]
-    if not (any(first_broadcastable) and others):
-        return list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
-
-    broadcastable_dims = list(first_broadcastable)
-    broadcast_shape = list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
-    for other in others:
-        other_shape = get_simplified_shape(other, fgraph=fgraph)
-        for i in range(batch_ndim):
-            if other.type.broadcastable[i] or not broadcastable_dims[i]:
-                # Doesn't provide any new info
+    inputs = (first, *others)
+    shapes = {}
+    broadcast_shape = []
+    constant_types = Constant | int | np.integer
+    for axis in range(batch_ndim):
+        length = None
+        for inp in inputs:
+            if inp.type.broadcastable[axis]:
                 continue
-            broadcast_shape[i] = other_shape[i]
-            broadcastable_dims[i] = False  # Don't override again
+            if inp not in shapes:
+                shapes[inp] = get_simplified_shape(inp, fgraph=fgraph)
+            extent = shapes[inp][axis]
+            if isinstance(extent, constant_types):
+                length = extent
+                break
+            if length is None:
+                length = extent
+        broadcast_shape.append(1 if length is None else length)
     return broadcast_shape
+
+
+def broadcast_like(
+    value: TensorVariable | TensorLike | Sequence[TensorVariable | TensorLike],
+    node: Apply,
+    *,
+    fgraph: FunctionGraph,
+    batch_ndim: int,
+    ref_input_idx: int | None = None,
+    stack_trace: bool = False,
+) -> TensorVariable | list[TensorVariable]:
+    """Match replacement values to a node's output dtypes and batch shape.
+
+    Each value is cast to match its corresponding output dtype. Missing leading
+    batch axes are inserted as singleton axes. An ``Alloc`` expands batch axes
+    where needed. The output type identifies possible expansions. The current
+    inputs determine which expansions are needed and supply their lengths.
+    This assumes compatible input shapes ("shape_unsafe").
+
+    Parameters
+    ----------
+    value
+        A single replacement for a single-output node, or one replacement per
+        output in order. Replacements may be variables or constants.
+    node
+        The Elemwise or Blockwise node whose outputs the values replace.
+    fgraph
+        The function graph containing the node (used to simplify shapes).
+    batch_ndim
+        The number of leading axes to broadcast. Elemwise broadcasts all axes.
+        Each Blockwise replacement supplies its own trailing core shape.
+    ref_input_idx
+        If given, ``node.inputs[ref_input_idx]`` is moved to the front when
+        computing the broadcast shape. Its nonbroadcastable axes supply the
+        symbolic lengths when no input supplies a constant length on those
+        axes. Use this when the rewrite keeps a specific input, as in
+        ``second(a, b) -> b`` with ``ref_input_idx=1``.
+    stack_trace
+        If ``True``, copy the stack trace from each corresponding output.
+    """
+    is_seq = isinstance(value, list | tuple)
+    values = value if is_seq else (value,)
+
+    batch_shape = None
+    results = []
+
+    for new, old in zip(values, node.outputs, strict=True):
+        if not isinstance(new, TensorVariable):
+            new = as_tensor_variable(new)
+        old_type = old.type
+        new_type = new.type
+        if new_type.dtype != old_type.dtype:
+            new = cast(new, old_type.dtype)
+            new_type = new.type
+
+        old_ndim = old_type.ndim
+        core_ndim = old_ndim - batch_ndim
+        missing_ndim = old_ndim - new_type.ndim
+        new_batch_bcast = new_type.broadcastable
+        old_batch_bcast = old_type.broadcastable
+        if core_ndim:
+            new_batch_bcast = new_batch_bcast[:-core_ndim]
+            old_batch_bcast = old_batch_bcast[:batch_ndim]
+        if missing_ndim:
+            new_batch_bcast = (True,) * missing_ndim + new_batch_bcast
+
+        # A length-one replacement axis needs an Alloc if a current input is
+        # nonbroadcastable there. If the original output type guarantees
+        # length one, we can skip that check.
+        if new_batch_bcast != old_batch_bcast and any(
+            new_bcast
+            and not old_bcast
+            # Check whether the difference comes from stale output shape info.
+            and any(not inp.type.broadcastable[axis] for inp in node.inputs)
+            for axis, (new_bcast, old_bcast) in enumerate(
+                zip(new_batch_bcast, old_batch_bcast, strict=True)
+            )
+        ):
+            if batch_shape is None:
+                inputs = node.inputs
+                if ref_input_idx is not None:
+                    inputs = list(inputs)
+                    inputs.insert(0, inputs.pop(ref_input_idx))
+                batch_shape = get_simplified_broadcast_shape(
+                    *inputs, fgraph=fgraph, batch_ndim=batch_ndim
+                )
+            if core_ndim:
+                core_shape = get_simplified_shape(new, fgraph=fgraph)[-core_ndim:]
+            else:
+                core_shape = ()
+            # Alloc also inserts any missing leading batch axes.
+            new = alloc(new, *batch_shape, *core_shape)
+        elif missing_ndim:
+            # Missing batch axes are singleton, so a view is enough.
+            new = shape_padleft(new, missing_ndim)
+
+        if stack_trace:
+            copy_stack_trace(old, new)
+        results.append(new)
+
+    return results if is_seq else results[0]
 
 
 def broadcast_like_elemwise(
@@ -180,68 +287,15 @@ def broadcast_like_elemwise(
     ref_input_idx: int | None = None,
     stack_trace: bool = False,
 ) -> TensorVariable | list[TensorVariable]:
-    """Broadcast value(s) to match the output shape and dtype(s) of an elemwise node.
-
-    Each value is cast to match its corresponding ``node.outputs[i]`` dtype,
-    then broadcast via ``Alloc`` to the full output shape if needed.
-
-    The broadcast shape is derived from ``node.inputs`` rather than
-    ``node.outputs``, so the result does not depend on the node's outputs.
-    This eagerness may mask shape errors present in the original graph
-    ("shape_unsafe").
-
-    Parameters
-    ----------
-    value
-        A single variable (or constant), or a list of variables.
-        When a list is given each entry corresponds to an output of ``node``.
-    node
-        The elemwise node whose output shape the values should match.
-    fgraph
-        The function graph containing the node (used to simplify shapes).
-    ref_input_idx
-        If given, ``node.inputs[ref_input_idx]`` is moved to the front when
-        computing the broadcast shape, so its shape entries dominate on axes
-        where it is not broadcastable (see ``get_simplified_broadcast_shape``).
-        Use this when the rewrite "keeps" one specific input and that input's
-        shape should dominate (e.g. ``second(a, b) -> b`` with
-        ``ref_input_idx=1`` drops the dependency on ``a`` — shape_unsafe).
-    stack_trace
-        If ``True``, copy the stack trace from ``node.outputs[0]`` onto every
-        returned variable.
-    """
-    is_seq = isinstance(value, list | tuple)
-    values = value if is_seq else (value,)
-
-    ref_out = node.outputs[0]
-
-    # Convert and cast to match each output's dtype
-    casted = []
-    for v, out in zip(values, node.outputs, strict=True):
-        if not isinstance(v, TensorVariable):
-            v = as_tensor_variable(v)
-        if v.type.dtype != out.type.dtype:
-            v = cast(v, out.type.dtype)
-        casted.append(v)
-
-    if broadcasted_by(casted[0], ref_out):
-        # Alloc handles dim expansion (leading 1s) and size-1 broadcasting
-        if ref_input_idx is not None:
-            inputs = list(node.inputs)
-            ref = inputs.pop(ref_input_idx)
-            inputs.insert(0, ref)
-        else:
-            inputs = node.inputs
-        bcast_shape = get_simplified_broadcast_shape(*inputs, fgraph=fgraph)
-        results = [alloc(v, *bcast_shape) for v in casted]
-    else:
-        results = casted
-
-    if stack_trace:
-        for r in results:
-            copy_stack_trace(ref_out, r)
-
-    return results if is_seq else results[0]
+    """Match Elemwise outputs by broadcasting all axes of each replacement."""
+    return broadcast_like(
+        value,
+        node,
+        fgraph=fgraph,
+        batch_ndim=node.outputs[0].type.ndim,
+        ref_input_idx=ref_input_idx,
+        stack_trace=stack_trace,
+    )
 
 
 def register_useless(

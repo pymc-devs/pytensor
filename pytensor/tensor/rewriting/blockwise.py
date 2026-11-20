@@ -16,6 +16,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
+    broadcast_like,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -34,6 +35,17 @@ def blockwise_of(core_op: OpPatternOpTypeType | OpPattern) -> OpPattern:
     if not isinstance(core_op, Op | OpPattern):
         core_op = OpPattern(core_op)
     return OpPattern(Blockwise, core_op=core_op)
+
+
+def broadcast_like_blockwise(values, node, *, fgraph):
+    """Match Blockwise outputs by broadcasting their leading batch axes."""
+    return broadcast_like(
+        values,
+        node,
+        fgraph=fgraph,
+        batch_ndim=node.op.batch_ndim(node),
+        stack_trace=True,
+    )
 
 
 @node_rewriter([Blockwise])
