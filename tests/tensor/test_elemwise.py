@@ -682,6 +682,20 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             self.with_mode(Mode(linker="c"), ps.minimum, dtype=dtype, test_nan=True)
             self.with_mode(Mode(linker="c"), ps.maximum, dtype=dtype, test_nan=True)
 
+    @pytest.mark.skipif(
+        not pytensor.config.cxx,
+        reason="G++ not available, so we need to skip this test.",
+    )
+    @pytest.mark.parametrize("dtype", ["uint8", "uint16", "uint32", "uint64"])
+    def test_c_minimum_unsigned(self, dtype):
+        # The accumulator must start at the largest value of the dtype, not at 1
+        x = matrix("x", dtype=dtype)
+        f = pytensor.function(
+            [x], self.op(ps.minimum, axis=1)(x), mode=Mode(linker="c")
+        )
+        xv = np.array([[5, 6, 9], [7, 8, 8]], dtype=dtype)
+        np.testing.assert_array_equal(f(xv), xv.min(axis=1))
+
     def test_infer_shape(self, dtype=None, pre_scalar_op=None):
         if dtype is None:
             dtype = pytensor.config.floatX
