@@ -7,6 +7,7 @@
 
 use crate::abi::OutputMode;
 use crate::kernel::{Args, Array, ArrayMut, Element, Kernel, scratch};
+use crate::layout::Layout;
 use crate::runtime::{PtCtx, runtime};
 use faer::Par;
 use faer::dyn_stack::MemStack;
@@ -104,11 +105,23 @@ macro_rules! faer_kernels {
                 FaerKernel::arity(self)
             }
 
+            fn output_layouts(&self) -> &[Layout] {
+                &self.layouts
+            }
+
             fn run(&self, ctx: &mut PtCtx, args: Args) -> Result<(), String> {
                 run_faer(self, self.parallel, ctx, args)
             }
         }
     )*};
+}
+
+/// The layouts of the outputs of the faer kernels (of `out_ndims` axes each), for
+/// inputs with `in_layouts`: column-major, faer's own order. (They are written through
+/// faer matrices, which take any strides, but faer computes in column-major order.)
+pub fn faer_layouts(out_ndims: &[usize], in_layouts: &[Option<Layout>]) -> Vec<Layout> {
+    let _ = in_layouts;
+    out_ndims.iter().map(|&ndim| Layout::column_major(ndim)).collect()
 }
 
 faer_kernels!(
@@ -170,6 +183,7 @@ impl<T> CallerWaits<T> {
 pub struct Dot<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub element: PhantomData<T>,
 }
 
@@ -371,6 +385,7 @@ mod simd {
 pub struct Cholesky<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub lower: bool,
     pub element: PhantomData<T>,
 }
@@ -435,6 +450,7 @@ impl<T: Float> FaerKernel for Cholesky<T> {
 pub struct SolveTriangular<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub lower: bool,
     pub unit_diagonal: bool,
     pub element: PhantomData<T>,
@@ -570,6 +586,7 @@ pub enum Assume {
 pub struct Solve<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub assume: Assume,
     pub element: PhantomData<T>,
 }
@@ -659,6 +676,7 @@ impl<T: Float> FaerKernel for Solve<T> {
 pub struct CholeskySolve<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub lower: bool,
     pub element: PhantomData<T>,
 }
@@ -690,6 +708,7 @@ impl<T: Float> FaerKernel for CholeskySolve<T> {
 pub struct MatrixInverse<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub element: PhantomData<T>,
 }
 
@@ -757,6 +776,7 @@ fn determinant<T: Float>(ctx: &mut PtCtx, a: &Array<T>, par: Par) -> Result<(T, 
 pub struct Det<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub element: PhantomData<T>,
 }
 
@@ -779,6 +799,7 @@ impl<T: Float> FaerKernel for Det<T> {
 pub struct SLogDet<T> {
     pub parallel: bool,
     pub modes: [OutputMode; 2],
+    pub layouts: Vec<Layout>,
     pub element: PhantomData<T>,
 }
 
@@ -805,6 +826,7 @@ impl<T: Float> FaerKernel for SLogDet<T> {
 pub struct LUFactor<T> {
     pub parallel: bool,
     pub modes: [OutputMode; 2],
+    pub layouts: Vec<Layout>,
     pub element: PhantomData<T>,
 }
 
@@ -858,6 +880,7 @@ pub enum LuForm {
 pub struct LU<T> {
     pub parallel: bool,
     pub modes: Vec<OutputMode>,
+    pub layouts: Vec<Layout>,
     pub form: LuForm,
     pub element: PhantomData<T>,
 }
@@ -936,6 +959,7 @@ impl<T: Float> FaerKernel for LU<T> {
 /// inverse (the rows of A in the order of P A), or the permutation itself.
 pub struct PivotToPermutations<I> {
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub inverse: bool,
     pub element: PhantomData<I>,
 }
@@ -943,6 +967,10 @@ pub struct PivotToPermutations<I> {
 impl<I: Element + TryInto<usize>> Kernel for PivotToPermutations<I> {
     fn arity(&self) -> (usize, usize) {
         (1, 1)
+    }
+
+    fn output_layouts(&self) -> &[Layout] {
+        &self.layouts
     }
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
@@ -986,6 +1014,7 @@ impl<I: Element + TryInto<usize>> Kernel for PivotToPermutations<I> {
 pub struct Eigh<T> {
     pub parallel: bool,
     pub modes: Vec<OutputMode>,
+    pub layouts: Vec<Layout>,
     pub lower: bool,
     pub vectors: bool,
     pub element: PhantomData<T>,
@@ -1051,6 +1080,7 @@ impl<T: Float> FaerKernel for Eigh<T> {
 pub struct Svd<T> {
     pub parallel: bool,
     pub modes: Vec<OutputMode>,
+    pub layouts: Vec<Layout>,
     pub full_matrices: bool,
     pub compute_uv: bool,
     pub element: PhantomData<T>,
@@ -1134,6 +1164,7 @@ pub enum QrMode {
 pub struct Qr<T> {
     pub parallel: bool,
     pub modes: Vec<OutputMode>,
+    pub layouts: Vec<Layout>,
     pub mode: QrMode,
     pub element: PhantomData<T>,
 }
@@ -1230,6 +1261,7 @@ const PINV_RCOND: f64 = 1e-15;
 pub struct MatrixPinv<T> {
     pub parallel: bool,
     pub mode: OutputMode,
+    pub layouts: Vec<Layout>,
     pub hermitian: bool,
     pub element: PhantomData<T>,
 }

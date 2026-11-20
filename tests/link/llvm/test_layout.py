@@ -402,22 +402,27 @@ def test_view_layout_is_checked_when_generating():
         build_node_function(ir.Module("bad"), node, "node", in_layouts=[C(2)])
 
 
-def test_kernels_declare_their_outputs():
+def test_kernels_choose_their_output_layouts():
+    """Rust kernels are made for their inputs' layouts and choose their outputs':
+    a sort follows its input's memory order, faer works column-major."""
     from pytensor.link.llvm.codegen.signature import OutputMode
     from pytensor.link.llvm.kernels.rust import rust_kernel, rust_kernel_outputs
 
-    x = pt.dmatrix("x")
-    node = x.T.owner
-    k = rust_kernel(node.op, node, [C(2)])
-    (o,) = rust_kernel_outputs(k, node, [C(2)])
-    assert o.mode is OutputMode.RETURNED and o.aliases == (0,) and o.layout == T2
-    # the Rust declaration agrees with the one for generated code
-    assert o.layout == node_outputs(node, [C(2)])[0].layout
-    a = pt.tensor("a", shape=(3, 4))
-    for out, mode in [
-        (pt.dot(x, x), OutputMode.RETURNED),
-        (pt.dot(a, a.T), OutputMode.PROVIDED),
-    ]:
+    def declared(out, in_layouts):
         node = out.owner
-        (o,) = rust_kernel_outputs(rust_kernel(node.op, node, None), node, None)
-        assert o.mode is mode and o.layout == C(2)
+        (o,) = rust_kernel_outputs(rust_kernel(node.op, node, in_layouts), node)
+        return o
+
+    x = pt.dmatrix("x")
+    for lay in [C(2), T2]:
+        assert declared(pt.sort(x), [lay]).layout == lay
+    o = declared(pt.sort(x), [None])
+    assert o.mode is OutputMode.RETURNED and o.layout == C(2)
+    a = pt.tensor("a", shape=(3, 4))
+    o = declared(pt.dot(a, a.T), None)
+    assert o.mode is OutputMode.PROVIDED and o.layout == T2
+    # and the outputs are made so
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c"})
+    f = pytensor.function([x], [pt.linalg.inv(x), pt.sort(x.T)], mode=mode)
+    inv, srt = f(np.eye(3) + rng.normal(size=(3, 3)) * 0.1)
+    assert inv.flags.f_contiguous and srt.flags.f_contiguous

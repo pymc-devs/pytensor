@@ -566,13 +566,13 @@ class Planner:
         )
 
     def _copy_step(self, src, dst, layouts) -> Step:
-        """A step of the program copying value `src` into value `dst`."""
+        """A step of the program copying value `src` into value `dst`: a `DeepCopyOp`,
+        generated."""
         node = _copy_node(self.values.types[dst])
         in_layouts = [self.layout(src, layouts)]
-        binding = self._binding(node, [dst], in_layouts, layouts)
-        kernel = self._kernel(node, in_layouts, binding)
-        kernel.description = "copy"
-        return self._kernel_step(FlatNode(node, [src], [dst]), kernel, layouts)
+        self._binding(node, [dst], in_layouts, layouts)
+        flat = FlatNode(node, [src], [dst])
+        return self._generated_step(flat, {}, in_layouts, layouts)
 
     def _compiled(self, module, nf, description) -> Kernel:
         """The kernel of the module `module` (its function `kernel`, around `nf`), to
@@ -632,7 +632,7 @@ class Planner:
         k = rust_kernel(node.op, node, in_layouts, self.opts.linalg_parallel)
         if k is None:
             return None
-        outputs = rust_kernel_outputs(k, node, in_layouts)
+        outputs = rust_kernel_outputs(k, node)
         if not conforms(node, outputs, binding):
             return None
         self.stats.n_rust_kernels += 1

@@ -23,6 +23,7 @@ use crate::abi::{
     validate_array,
 };
 use crate::dtype::DType;
+use crate::layout::Layout;
 use crate::runtime::PtCtx;
 use std::marker::PhantomData;
 
@@ -609,11 +610,29 @@ impl<'a> OutSlot<'a> {
         Ok(unsafe { PtArrayMut::new(data, shape, strides, dtype) })
     }
 
-    /// Produce the output in a new C-contiguous buffer of `shape` (not initialized),
-    /// which is returned to write it.
-    pub fn alloc(mut self, ctx: &mut PtCtx, shape: &[i64]) -> Result<PtArrayMut<'a>, String> {
+    /// Produce the output in a new buffer of `shape` (not initialized) in `layout`,
+    /// which must be packed, and is returned to write it.
+    pub fn alloc(
+        mut self,
+        ctx: &mut PtCtx,
+        shape: &[i64],
+        layout: &Layout,
+    ) -> Result<PtArrayMut<'a>, String> {
         self.not_provided()?;
         self.check("the kernel makes", self.dtype, shape.len())?;
+        let order = &layout.order;
+        let mut seen = [false; MAX_NDIM];
+        if !layout.is_packed()
+            || order.len() != shape.len()
+            || order
+                .iter()
+                .any(|&a| a >= shape.len() || std::mem::replace(&mut seen[a], true))
+        {
+            return Err(format!(
+                "new memory can't have the layout {layout:?} (of an array with {} axes)",
+                shape.len()
+            ));
+        }
         let itemsize = self.dtype.itemsize();
         let n = checked_nbytes(shape, itemsize).ok_or_else(|| bad_size("output", shape))?;
         let buf = ctx
@@ -622,17 +641,18 @@ impl<'a> OutSlot<'a> {
         let (out_shape, out_strides) = self.storage();
         out_shape.copy_from_slice(shape);
         let mut stride = itemsize as i64;
-        for (out_stride, &n) in out_strides.iter_mut().zip(shape).rev() {
-            *out_stride = stride;
-            stride = stride.saturating_mul(n.max(1));
+        for &a in order.iter().rev() {
+            out_strides[a] = stride;
+            stride = stride.saturating_mul(shape[a].max(1));
         }
         let (data, dtype) = (buf.data(), self.dtype);
         self.raw.data = data;
         self.raw.owner = buf.into_raw();
         let (shape, strides) = self.into_storage();
-        // SAFETY: a new buffer of this C-contiguous shape, 64-byte aligned. Its one
-        // reference is in the output's header, which nobody touches during `'a` (the
-        // slot is gone), so the memory stays, and it is ours alone.
+        // SAFETY: a new buffer of this shape, packed in `order` (each axis's stride is
+        // the size of the axes inside it), 64-byte aligned. Its one reference is in the
+        // output's header, which nobody touches during `'a` (the slot is gone), so the
+        // memory stays, and it is ours alone.
         Ok(unsafe { PtArrayMut::new(data, shape, strides, dtype) })
     }
 
@@ -645,44 +665,6 @@ impl<'a> OutSlot<'a> {
         strides.copy_from_slice(&array.strides);
         self.raw.data = array.data;
         self.raw.owner = array.buf.into_raw();
-        Ok(())
-    }
-
-    /// The output is a view of `source`: its memory, seen with other axes (per output
-    /// axis, the axis of `source` it is, or None for a new axis of length 1).
-    ///
-    /// # Safety
-    /// The caller of the kernel keeps the memory of `source` alive for as long as it
-    /// uses this output: `source` is an input of the same call.
-    pub unsafe fn set_view(
-        mut self,
-        source: &PtArrayRef,
-        axes: &[Option<usize>],
-    ) -> Result<(), String> {
-        self.not_provided()?;
-        self.check("the kernel returns a view of", source.dtype, axes.len())?;
-        if let Some(axis) = axes.iter().flatten().find(|&&axis| axis >= source.ndim()) {
-            return Err(format!(
-                "axis {axis} of an array with {} axes",
-                source.ndim()
-            ));
-        }
-        // an axis the view drops must have length 1 (the type may not say so)
-        if let Some(a) =
-            (0..source.ndim()).find(|&a| source.shape[a] != 1 && !axes.contains(&Some(a)))
-        {
-            return Err(format!(
-                "cannot drop axis {a} of length {} (not 1)",
-                source.shape[a]
-            ));
-        }
-        let (shape, strides) = self.storage();
-        for (k, axis) in axes.iter().enumerate() {
-            shape[k] = axis.map_or(1, |axis| source.shape[axis]);
-            strides[k] = axis.map_or(0, |axis| source.strides[axis]);
-        }
-        self.raw.data = source.data as *mut u8;
-        self.raw.owner = source.owner;
         Ok(())
     }
 }
@@ -960,13 +942,13 @@ mod tests {
             unsafe { OutSlot::from_raw(header) }.unwrap()
         }
         assert!(slot(&mut header).provided().is_err());
-        assert!(slot(&mut header).alloc(&mut ctx, &[2, 3, 4]).is_err());
+        assert!(slot(&mut header).alloc(&mut ctx, &[2, 3, 4], &Layout::c(3)).is_err());
         let wrong = OwnedArray::zeros(DType::Float64, vec![2, 3]).unwrap();
         let error = slot(&mut header).set(wrong).unwrap_err();
         assert!(error.contains("float32"), "{error}");
         assert!(header.data.is_null() && header.owner.is_null());
 
-        let mut array = slot(&mut header).alloc(&mut ctx, &[2, 3]).unwrap();
+        let mut array = slot(&mut header).alloc(&mut ctx, &[2, 3], &Layout::c(2)).unwrap();
         array.zero();
         assert_eq!(
             (array.shape(), array.strides()),
@@ -974,7 +956,7 @@ mod tests {
         );
         assert!(!header.owner.is_null());
         // now the memory is there: the slot can't be produced again
-        assert!(slot(&mut header).alloc(&mut ctx, &[2, 3]).is_err());
+        assert!(slot(&mut header).alloc(&mut ctx, &[2, 3], &Layout::c(2)).is_err());
         // SAFETY: the reference `alloc` put in the header.
         drop(unsafe { OwnedBuf::from_raw(header.owner) });
     }

@@ -2,6 +2,7 @@
 
 use crate::abi::OutputMode;
 use crate::kernel::{Args, Element, Kernel, zip_lanes};
+use crate::layout::Layout;
 use crate::runtime::PtCtx;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
@@ -33,12 +34,38 @@ pub struct Sort<T> {
     pub mode: OutputMode,
     pub axis: usize,
     pub stable: bool,
+    pub layouts: Vec<Layout>,
     pub element: PhantomData<T>,
+}
+
+impl<T> Sort<T> {
+    /// Sort along `axis` an input with `layout`, of `ndim` axes. The output is in the
+    /// input's memory order where that is known (so that what reads both reads them
+    /// alike), else C-contiguous.
+    pub fn new(
+        mode: OutputMode,
+        axis: usize,
+        stable: bool,
+        layout: Option<&Layout>,
+        ndim: usize,
+    ) -> Sort<T> {
+        Sort {
+            mode,
+            axis,
+            stable,
+            layouts: vec![Layout::packed_like(layout, ndim)],
+            element: PhantomData,
+        }
+    }
 }
 
 impl<T: Sortable> Kernel for Sort<T> {
     fn arity(&self) -> (usize, usize) {
         (1, 1)
+    }
+
+    fn output_layouts(&self) -> &[Layout] {
+        &self.layouts
     }
 
     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
@@ -85,12 +112,7 @@ mod tests {
             array(&mut source, &mut shape, &mut strides),
             array(&mut sorted, &mut out_shape, &mut out_strides),
         ];
-        let kernel = Sort::<f64> {
-            mode: OutputMode::Provided,
-            axis: 1,
-            stable: true,
-            element: PhantomData,
-        };
+        let kernel = Sort::<f64>::new(OutputMode::Provided, 1, true, None, 2);
         let mut ctx = PtCtx::new();
         // SAFETY: a live context, the kernel as its config, and one valid input and
         // one provided output of f64 that don't overlap.

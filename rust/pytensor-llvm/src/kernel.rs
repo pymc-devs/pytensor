@@ -5,10 +5,11 @@
 //! kernel ABI (`abi::KernelFn`), and a `K` is its config:
 //!
 //! ```ignore
-//! pub struct Negate<T> { mode: OutputMode, _t: PhantomData<T> }
+//! pub struct Negate<T> { mode: OutputMode, layouts: Vec<Layout>, _t: PhantomData<T> }
 //!
 //! impl<T: Element + Neg<Output = T>> Kernel for Negate<T> {
 //!     fn arity(&self) -> (usize, usize) { (1, 1) }
+//!     fn output_layouts(&self) -> &[Layout] { &self.layouts }
 //!     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
 //!         let x = args.inputs.array::<T>(0)?;
 //!         let mut out = args.outputs.array::<T>(ctx, 0, self.mode, x.shape())?;
@@ -16,6 +17,13 @@
 //!     }
 //! }
 //! ```
+//!
+//! A kernel is made for the layouts of its inputs (what is known when the program is
+//! planned), and chooses the layouts of its outputs then (`Kernel::output_layouts`,
+//! packed). The outputs it gets from `Args` have them: what it allocates is allocated
+//! in them, and memory provided for an output is provided in them. Whether an output
+//! is provided or allocated (its `OutputMode`) is the planner's choice, made with the
+//! kernel.
 //!
 //! Writing a kernel needs no `unsafe`. `Args` hands out the arguments of the call as
 //! the views of `crate::array`, and as typed arrays (`Array<T>`, `ArrayMut<T>`) on top
@@ -31,6 +39,7 @@
 use crate::abi::{OutputMode, PtArray};
 use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
+use crate::layout::Layout;
 use crate::runtime::PtCtx;
 use faer::{MatMut, MatRef};
 use std::marker::PhantomData;
@@ -60,6 +69,10 @@ pub trait Kernel: Send + Sync + 'static {
     /// (number of inputs, number of outputs)
     fn arity(&self) -> (usize, usize);
 
+    /// The layouts of its outputs (packed), chosen when it was made, from the layouts
+    /// of its inputs. `Outputs` allocates the outputs in them.
+    fn output_layouts(&self) -> &[Layout];
+
     fn run(&self, ctx: &mut PtCtx, args: Args) -> Result<(), String>;
 }
 
@@ -83,7 +96,7 @@ pub unsafe extern "C" fn entry<K: Kernel>(
     let (kernel, ctx) = unsafe { (&*(config as *const K), &mut *ctx) };
     let run = |ctx: &mut PtCtx| {
         // SAFETY: the function's contract.
-        unsafe { Args::from_raw(args, n_inputs, n_outputs) }.and_then(|args| {
+        unsafe { Args::from_raw(args, n_inputs, n_outputs, kernel.output_layouts()) }.and_then(|args| {
             let arity = (args.inputs.len(), args.outputs.len());
             if arity != kernel.arity() {
                 return Err(format!(
@@ -156,7 +169,8 @@ pub struct Args<'a> {
 }
 
 impl<'a> Args<'a> {
-    /// The arguments of a call with the kernel ABI.
+    /// The arguments of a call with the kernel ABI, to a kernel whose outputs have
+    /// `layouts`.
     ///
     /// # Safety
     /// `args` points to `n_inputs + n_outputs` `PtArray`s (if that is more than
@@ -168,6 +182,7 @@ impl<'a> Args<'a> {
         args: *mut PtArray,
         n_inputs: i32,
         n_outputs: i32,
+        layouts: &'a [Layout],
     ) -> Result<Args<'a>, String> {
         if n_inputs < 0 || n_outputs < 0 {
             return Err(format!(
@@ -186,7 +201,10 @@ impl<'a> Args<'a> {
         let (inputs, outputs) = arrays.split_at_mut(n_inputs);
         Ok(Args {
             inputs: Inputs { arrays: inputs },
-            outputs: Outputs { arrays: outputs },
+            outputs: Outputs {
+                arrays: outputs,
+                layouts,
+            },
         })
     }
 }
@@ -251,6 +269,8 @@ fn output_error(o: usize, e: String) -> String {
 /// asks, until it is produced.)
 pub struct Outputs<'a> {
     arrays: &'a mut [PtArray],
+    /// the layout of each output
+    layouts: &'a [Layout],
 }
 
 impl<'a> Outputs<'a> {
@@ -285,7 +305,7 @@ impl<'a> Outputs<'a> {
     }
 
     /// Memory for output `o`, an array of `dtype` and `shape`: the provided memory
-    /// (whose shape must match), or a new C-contiguous buffer.
+    /// (whose shape must match), or a new buffer in the output's layout.
     #[inline]
     pub fn untyped(
         &mut self,
@@ -295,8 +315,9 @@ impl<'a> Outputs<'a> {
         dtype: DType,
         shape: &[i64],
     ) -> Result<PtArrayMut<'_>, String> {
+        let layout = self.layout(o)?;
         let slot = self.slot(o)?;
-        produce(slot, o, ctx, mode, dtype, shape)
+        produce(slot, o, ctx, mode, layout, dtype, shape)
     }
 
     /// Memory for output `o`, an array of `T` and `shape`.
@@ -313,6 +334,13 @@ impl<'a> Outputs<'a> {
         })
     }
 
+    /// The layout of output `o` (`Kernel::output_layouts`).
+    fn layout(&self, o: usize) -> Result<&'a Layout, String> {
+        self.layouts
+            .get(o)
+            .ok_or_else(|| no_argument("output layout", o, self.layouts.len()))
+    }
+
     /// Outputs `indices` (distinct), to produce and hold together (`array` lends one
     /// at a time).
     pub fn slots<const N: usize>(
@@ -320,6 +348,7 @@ impl<'a> Outputs<'a> {
         indices: [usize; N],
     ) -> Result<[Output<'_>; N], String> {
         let n = self.arrays.len();
+        let layouts = self.layouts;
         let raws = self.arrays.get_disjoint_mut(indices).map_err(|_| {
             format!("outputs {indices:?} of a call with {n}: not distinct, or out of range")
         })?;
@@ -329,7 +358,14 @@ impl<'a> Outputs<'a> {
             k += 1;
             // SAFETY: the type's invariant.
             match unsafe { OutSlot::from_raw(raw) } {
-                Ok(slot) => Ok(Output { slot, index }),
+                Ok(slot) => match layouts.get(index) {
+                    Some(layout) => Ok(Output {
+                        slot,
+                        index,
+                        layout,
+                    }),
+                    None => Err(no_argument("output layout", index, layouts.len())),
+                },
                 Err(e) => Err(output_error(index, e)),
             }
         });
@@ -338,27 +374,13 @@ impl<'a> Outputs<'a> {
         }
         Ok(slots.map(|slot| slot.unwrap_or_else(|_| unreachable!())))
     }
-
-    /// Output `o` is a view of input `i`: its memory, seen with other axes (per output
-    /// axis, the input axis it is, or None for a new axis of length 1).
-    pub fn view(
-        &mut self,
-        o: usize,
-        inputs: &Inputs<'a>,
-        i: usize,
-        axes: &[Option<usize>],
-    ) -> Result<(), String> {
-        let source = inputs.get(i)?;
-        // SAFETY: `source` is an input of the call this is an output of (`Args` makes
-        // both, with the same `'a`): the caller keeps it alive with the view.
-        unsafe { self.slot(o)?.set_view(&source, axes) }.map_err(|e| output_error(o, e))
-    }
 }
 
 /// One output of a call, to produce (from `Outputs::slots`).
 pub struct Output<'s> {
     slot: OutSlot<'s>,
     index: usize,
+    layout: &'s Layout,
 }
 
 impl<'s> Output<'s> {
@@ -370,19 +392,20 @@ impl<'s> Output<'s> {
         shape: &[i64],
     ) -> Result<ArrayMut<'s, T>, String> {
         Ok(ArrayMut {
-            raw: produce(self.slot, self.index, ctx, mode, T::DTYPE, shape)?,
+            raw: produce(self.slot, self.index, ctx, mode, self.layout, T::DTYPE, shape)?,
             _t: PhantomData,
         })
     }
 }
 
 /// Memory for output `o` from its slot: the provided memory (whose shape must match),
-/// or a new C-contiguous buffer.
+/// or a new buffer in `layout`.
 fn produce<'s>(
     slot: OutSlot<'s>,
     o: usize,
     ctx: &mut PtCtx,
     mode: OutputMode,
+    layout: &Layout,
     dtype: DType,
     shape: &[i64],
 ) -> Result<PtArrayMut<'s>, String> {
@@ -405,7 +428,9 @@ fn produce<'s>(
             )),
             Err(e) => Err(output_error(o, e)),
         },
-        OutputMode::Allocated => slot.alloc(ctx, shape).map_err(|e| output_error(o, e)),
+        OutputMode::Allocated => slot
+            .alloc(ctx, shape, layout)
+            .map_err(|e| output_error(o, e)),
         OutputMode::View => Err(output_error(
             o,
             "this kernel writes its outputs, it can't return a view".into(),
@@ -705,11 +730,15 @@ mod tests {
     use crate::abi::OwnedBuf;
 
     /// Doubles a vector of f64.
-    struct Double(OutputMode);
+    struct Double(OutputMode, Vec<Layout>);
 
     impl Kernel for Double {
         fn arity(&self) -> (usize, usize) {
             (1, 1)
+        }
+
+        fn output_layouts(&self) -> &[Layout] {
+            &self.1
         }
 
         fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
@@ -770,7 +799,7 @@ mod tests {
                 array(provided, out_shape, out_strides),
             ];
             change(&mut args);
-            let kernel = Double(mode);
+            let kernel = Double(mode, vec![Layout::c(1)]);
             // SAFETY: a live context, the kernel as its config, and a valid input and
             // output of f64 that don't overlap (`change` only makes changes that the
             // kernel's checks reject before it uses any memory).
@@ -859,11 +888,21 @@ mod tests {
     }
 
     /// Writes 1.0 and 2.0 into the outputs at its two indices, holding both.
-    struct Pair([usize; 2]);
+    /// Produces outputs `self.0` together: the first one an allocated vector of f64,
+    /// the second a provided vector of int32.
+    struct Pair([usize; 2], Vec<Layout>);
+
+    fn pair(indices: [usize; 2]) -> Pair {
+        Pair(indices, vec![Layout::c(1); 2])
+    }
 
     impl Kernel for Pair {
         fn arity(&self) -> (usize, usize) {
             (0, 2)
+        }
+
+        fn output_layouts(&self) -> &[Layout] {
+            &self.1
         }
 
         fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
@@ -882,17 +921,17 @@ mod tests {
         use crate::testing::{Out, call};
 
         let outputs = vec![Out::provided::<i32>(&[2]), Out::allocated::<f64>(1)];
-        let r = call(&Pair([1, 0]), &[], outputs.clone()).unwrap();
+        let r = call(&pair([1, 0]), &[], outputs.clone()).unwrap();
         assert_eq!(
             (r[0].values::<i32>(), r[1].values::<f64>()),
             (vec![2, 2], vec![1.0])
         );
         for indices in [[0, 0], [1, 2]] {
-            let error = call(&Pair(indices), &[], outputs.clone()).unwrap_err();
+            let error = call(&pair(indices), &[], outputs.clone()).unwrap_err();
             assert!(error.contains("not distinct, or out of range"), "{error}");
         }
         // a slot asked for with another dtype than it has
-        let error = call(&Pair([0, 1]), &[], outputs).unwrap_err();
+        let error = call(&pair([0, 1]), &[], outputs).unwrap_err();
         assert!(
             error.contains("output 0: it is an array of int32"),
             "{error}"

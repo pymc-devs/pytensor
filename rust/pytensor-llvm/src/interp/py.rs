@@ -1,7 +1,6 @@
 //! `pytensor_llvm.interp`: compiled functions and Rust kernels for Python.
 
 use super::function::{ArgType, Destination, Function as RFunction};
-use super::kernels;
 use super::layout::Layout;
 use crate::abi::OutputMode;
 use crate::runtime::PtCtx;
@@ -46,68 +45,63 @@ fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr> {
 // ------------------------------------------------------------------ kernels
 
 /// A Rust kernel: its address and its config (owned by this object).
+///
+/// Every kernel is made for the layouts of its inputs (`in_layouts`, None where
+/// unknown) and the number of axes of its outputs (`out_ndims`), the last two arguments
+/// of each constructor: it chooses the layouts of its outputs then. The planner chooses
+/// whether each output is provided or allocated (the output modes, the first argument).
+/// `outputs` says both.
 #[pyclass(module = "pytensor_llvm.interp", subclass, frozen)]
 pub struct RustKernel {
     address: usize,
     config: Box<dyn std::any::Any + Send + Sync>,
     config_ptr: usize,
     desc: String,
-    /// what the kernel produces (see `outputs`)
-    produces: Produces,
-}
-
-/// How a kernel produces its outputs, declared next to the kernel (the Python planner
-/// asks `RustKernel.outputs`).
-pub enum Produces {
-    /// new memory per output: provided (written as it is given, in the layout the
-    /// planner provides: C) or allocated C-contiguous by the kernel
-    Fresh(Vec<OutputMode>),
-    /// one view of input 0, its axes rearranged (DimShuffle, also identity views)
-    DimShuffle(Vec<Option<usize>>),
+    /// the mode of each output
+    modes: Vec<OutputMode>,
+    /// the layout of each output (`Kernel::output_layouts`)
+    layouts: Vec<Layout>,
 }
 
 impl RustKernel {
     /// A kernel written with `crate::kernel`: its own function, and itself as config.
-    fn of<K: Kernel>(kernel: K, desc: String, produces: Produces) -> Self {
-        RustKernel::new(crate::kernel::address::<K>(), kernel, desc, produces)
-    }
-
-    /// One that writes a single output, in new memory.
-    fn writing<K: Kernel>(kernel: K, mode: OutputMode, desc: String) -> PyResult<Self> {
-        RustKernel::writing_all(kernel, vec![mode], desc)
-    }
-
-    /// One that writes all its outputs, in new memory.
-    fn writing_all<K: Kernel>(kernel: K, modes: Vec<OutputMode>, desc: String) -> PyResult<Self> {
+    /// `modes`: what the kernel was made with.
+    fn of<K: Kernel>(kernel: K, modes: Vec<OutputMode>, desc: String) -> PyResult<Self> {
+        let layouts = kernel.output_layouts().to_vec();
+        let n = kernel.arity().1;
+        if modes.len() != n || layouts.len() != n {
+            return err(format!(
+                "{desc}: {} output modes and {} layouts for {n} outputs",
+                modes.len(),
+                layouts.len()
+            ));
+        }
         if modes.contains(&OutputMode::View) {
             return err(format!("{desc} can't produce a view"));
         }
-        if modes.len() != kernel.arity().1 {
-            return err(format!(
-                "{desc}: {} output modes for {} outputs",
-                modes.len(),
-                kernel.arity().1
-            ));
-        }
-        Ok(RustKernel::of(kernel, desc, Produces::Fresh(modes)))
-    }
-
-    fn new<T: Send + Sync + 'static>(
-        f: usize,
-        config: T,
-        desc: String,
-        produces: Produces,
-    ) -> Self {
-        let config: Box<T> = Box::new(config);
-        let config_ptr = &*config as *const T as usize;
-        RustKernel {
-            address: f,
+        let config: Box<K> = Box::new(kernel);
+        let config_ptr = &*config as *const K as usize;
+        Ok(RustKernel {
+            address: crate::kernel::address::<K>(),
             config,
             config_ptr,
             desc,
-            produces,
-        }
+            modes,
+            layouts,
+        })
     }
+}
+
+/// The layouts of the outputs of a faer kernel (`linalg::faer_layouts`).
+fn faer(in_layouts: &[Option<Layout>], out_ndims: &[usize]) -> Vec<Layout> {
+    linalg::faer_layouts(out_ndims, in_layouts)
+}
+
+/// Exactly `N` output modes.
+fn modes<const N: usize>(what: &str, modes: &[OutputMode]) -> PyResult<[OutputMode; N]> {
+    modes
+        .try_into()
+        .or_else(|_| err(format!("{what}: {N} outputs, got {} modes", modes.len())))
 }
 
 #[pymethods]
@@ -128,249 +122,22 @@ impl RustKernel {
         self.desc.clone()
     }
 
-    /// How each output comes to be, given the inputs' layouts (`(order, strides)`, None
-    /// where unknown): `[(mode, view_of, layout)]` with mode "provided", "allocated" or
-    /// "view" (the Python side's `llvm_outputs`, for this kernel).
-    /// `out_ndims`: the number of axes of each output.
-    fn outputs(
-        &self,
-        in_layouts: Vec<Option<Layout>>,
-        out_ndims: Vec<usize>,
-    ) -> PyResult<Vec<(&'static str, Option<usize>, Layout)>> {
-        match &self.produces {
-            Produces::Fresh(modes) => {
-                if modes.len() != out_ndims.len() {
-                    return err(format!(
-                        "{}: {} outputs, got {} ndims",
-                        self.desc,
-                        modes.len(),
-                        out_ndims.len()
-                    ));
-                }
-                Ok(modes
-                    .iter()
-                    .zip(&out_ndims)
-                    .map(|(m, &nd)| {
-                        (
-                            if *m == OutputMode::Provided {
-                                "provided"
-                            } else {
-                                "allocated"
-                            },
-                            None,
-                            Layout::c(nd),
-                        )
-                    })
-                    .collect())
-            }
-            Produces::DimShuffle(order) => {
-                let x = match in_layouts.first() {
-                    Some(Some(l)) => l.clone(),
-                    _ => {
-                        let nd = order.iter().flatten().map(|a| a + 1).max().unwrap_or(0);
-                        Layout::dynamic(nd)
-                    }
+    /// How the kernel produces each output: `[(mode, layout)]`, mode "provided"
+    /// (written into memory provided in that layout) or "allocated" (the kernel
+    /// allocates it in that layout).
+    fn outputs(&self) -> Vec<(&'static str, Layout)> {
+        self.modes
+            .iter()
+            .zip(&self.layouts)
+            .map(|(&mode, layout)| {
+                let mode = if mode == OutputMode::Provided {
+                    "provided"
+                } else {
+                    "allocated"
                 };
-                Ok(vec![("view", Some(0), x.dimshuffle(order))])
-            }
-        }
-    }
-}
-
-#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
-pub struct DimShuffle;
-
-#[pymethods]
-impl DimShuffle {
-    /// `order[k]`: input axis of output axis k, or None for a new axis. Its output is a
-    /// view of the input.
-    #[new]
-    fn new(order: Vec<Option<usize>>) -> PyClassInitializer<Self> {
-        let desc = format!("DimShuffle{order:?}");
-        let produces = Produces::DimShuffle(order.clone());
-        let k = RustKernel::of(kernels::DimShuffle { order }, desc, produces);
-        PyClassInitializer::from(k).add_subclass(DimShuffle)
-    }
-}
-
-#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
-pub struct Copy;
-
-#[pymethods]
-impl Copy {
-    #[new]
-    fn new(mode: OutputMode, dtype: Bound<'_, PyArrayDescr>) -> PyResult<PyClassInitializer<Self>> {
-        let k = RustKernel::writing(
-            kernels::Copy {
-                mode,
-                dtype: dtype_of(&dtype)?,
-            },
-            mode,
-            "Copy".into(),
-        )?;
-        Ok(PyClassInitializer::from(k).add_subclass(Copy))
-    }
-}
-
-#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
-pub struct Dot;
-
-#[pymethods]
-impl Dot {
-    #[new]
-    fn new(
-        mode: OutputMode,
-        dtype: Bound<'_, PyArrayDescr>,
-        parallel: bool,
-    ) -> PyResult<PyClassInitializer<Self>> {
-        let desc = "Dot".to_string();
-        let k = match dtype_of(&dtype)? {
-            DType::Float64 => RustKernel::writing(
-                linalg::Dot::<f64> {
-                    parallel,
-                    mode,
-                    element: PhantomData,
-                },
-                mode,
-                desc,
-            )?,
-            DType::Float32 => RustKernel::writing(
-                linalg::Dot::<f32> {
-                    parallel,
-                    mode,
-                    element: PhantomData,
-                },
-                mode,
-                desc,
-            )?,
-            dt => return err(format!("Dot of {dt:?}")),
-        };
-        Ok(PyClassInitializer::from(k).add_subclass(Dot))
-    }
-}
-
-/// Sort along `axis` (float64, float32, int64), NaNs last.
-#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
-pub struct Sort;
-
-#[pymethods]
-impl Sort {
-    #[new]
-    fn new(
-        mode: OutputMode,
-        dtype: Bound<'_, PyArrayDescr>,
-        axis: usize,
-        stable: bool,
-    ) -> PyResult<PyClassInitializer<Self>> {
-        let desc = format!("Sort(axis={axis})");
-        fn sort<T: crate::sort::Sortable>(
-            mode: OutputMode,
-            axis: usize,
-            stable: bool,
-            desc: String,
-        ) -> PyResult<RustKernel> {
-            RustKernel::writing(
-                crate::sort::Sort::<T> {
-                    mode,
-                    axis,
-                    stable,
-                    element: PhantomData,
-                },
-                mode,
-                desc,
-            )
-        }
-        let k = match dtype_of(&dtype)? {
-            DType::Float64 => sort::<f64>(mode, axis, stable, desc)?,
-            DType::Float32 => sort::<f32>(mode, axis, stable, desc)?,
-            DType::Int64 => sort::<i64>(mode, axis, stable, desc)?,
-            dt => return err(format!("Sort of {dt:?}")),
-        };
-        Ok(PyClassInitializer::from(k).add_subclass(Sort))
-    }
-}
-
-/// Cholesky factor (faer), LAPACK potrf semantics: NaN if not positive definite.
-#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
-pub struct Cholesky;
-
-#[pymethods]
-impl Cholesky {
-    #[new]
-    fn new(
-        mode: OutputMode,
-        dtype: Bound<'_, PyArrayDescr>,
-        lower: bool,
-        parallel: bool,
-    ) -> PyResult<PyClassInitializer<Self>> {
-        let desc = format!("Cholesky(lower={lower})");
-        let k = match dtype_of(&dtype)? {
-            DType::Float64 => RustKernel::writing(
-                linalg::Cholesky::<f64> {
-                    parallel,
-                    mode,
-                    lower,
-                    element: PhantomData,
-                },
-                mode,
-                desc,
-            )?,
-            DType::Float32 => RustKernel::writing(
-                linalg::Cholesky::<f32> {
-                    parallel,
-                    mode,
-                    lower,
-                    element: PhantomData,
-                },
-                mode,
-                desc,
-            )?,
-            dt => return err(format!("Cholesky of {dt:?}")),
-        };
-        Ok(PyClassInitializer::from(k).add_subclass(Cholesky))
-    }
-}
-
-/// Triangular solve (faer), LAPACK trtrs semantics: NaN if the diagonal has a zero.
-#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
-pub struct SolveTriangular;
-
-#[pymethods]
-impl SolveTriangular {
-    #[new]
-    fn new(
-        mode: OutputMode,
-        dtype: Bound<'_, PyArrayDescr>,
-        lower: bool,
-        unit_diagonal: bool,
-        parallel: bool,
-    ) -> PyResult<PyClassInitializer<Self>> {
-        let desc = format!("SolveTriangular(lower={lower}, unit_diagonal={unit_diagonal})");
-        fn solve<T: linalg::Float>(
-            mode: OutputMode,
-            lower: bool,
-            unit_diagonal: bool,
-            parallel: bool,
-            desc: String,
-        ) -> PyResult<RustKernel> {
-            RustKernel::writing(
-                linalg::SolveTriangular::<T> {
-                    parallel,
-                    mode,
-                    lower,
-                    unit_diagonal,
-                    element: PhantomData,
-                },
-                mode,
-                desc,
-            )
-        }
-        let k = match dtype_of(&dtype)? {
-            DType::Float64 => solve::<f64>(mode, lower, unit_diagonal, parallel, desc)?,
-            DType::Float32 => solve::<f32>(mode, lower, unit_diagonal, parallel, desc)?,
-            dt => return err(format!("SolveTriangular of {dt:?}")),
-        };
-        Ok(PyClassInitializer::from(k).add_subclass(SolveTriangular))
+                (mode, layout.clone())
+            })
+            .collect()
     }
 }
 
@@ -391,12 +158,132 @@ macro_rules! for_float {
     };
 }
 
-/// Exactly `N` output modes.
-fn modes<const N: usize>(what: &str, modes: Vec<OutputMode>) -> PyResult<[OutputMode; N]> {
-    let n = modes.len();
-    modes
-        .try_into()
-        .or_else(|_| err(format!("{what}: {N} outputs, got {n} modes")))
+/// numpy's dot of vectors and matrices (faer).
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct Dot;
+
+#[pymethods]
+impl Dot {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "Dot", T => RustKernel::of(
+            linalg::Dot::<T> { parallel, mode, layouts, element: PhantomData },
+            vec![mode],
+            "Dot".into(),
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(Dot))
+    }
+}
+
+/// Sort along `axis` (float64, float32, int64), NaNs last.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct Sort;
+
+#[pymethods]
+impl Sort {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        axis: usize,
+        stable: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("Sort(axis={axis})");
+        let [ndim] = out_ndims[..] else {
+            return err(format!("{desc}: one output, got {out_ndims:?}"));
+        };
+        let layout = in_layouts.first().and_then(|l| l.as_ref());
+        fn sort<T: crate::sort::Sortable>(
+            mode: OutputMode,
+            axis: usize,
+            stable: bool,
+            layout: Option<&Layout>,
+            ndim: usize,
+            desc: String,
+        ) -> PyResult<RustKernel> {
+            RustKernel::of(
+                crate::sort::Sort::<T>::new(mode, axis, stable, layout, ndim),
+                vec![mode],
+                desc,
+            )
+        }
+        let k = match dtype_of(&dtype)? {
+            DType::Float64 => sort::<f64>(mode, axis, stable, layout, ndim, desc)?,
+            DType::Float32 => sort::<f32>(mode, axis, stable, layout, ndim, desc)?,
+            DType::Int64 => sort::<i64>(mode, axis, stable, layout, ndim, desc)?,
+            dt => return err(format!("Sort of {dt:?}")),
+        };
+        Ok(PyClassInitializer::from(k).add_subclass(Sort))
+    }
+}
+
+/// Cholesky factor (faer), LAPACK potrf semantics: NaN if not positive definite.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct Cholesky;
+
+#[pymethods]
+impl Cholesky {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        lower: bool,
+        parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("Cholesky(lower={lower})");
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "Cholesky", T => RustKernel::of(
+            linalg::Cholesky::<T> { parallel, mode, layouts, lower, element: PhantomData },
+            vec![mode],
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(Cholesky))
+    }
+}
+
+/// Triangular solve (faer), LAPACK trtrs semantics: NaN if the diagonal has a zero.
+#[pyclass(module = "pytensor_llvm.interp", extends = RustKernel, frozen)]
+pub struct SolveTriangular;
+
+#[pymethods]
+impl SolveTriangular {
+    #[new]
+    fn new(
+        mode: OutputMode,
+        dtype: Bound<'_, PyArrayDescr>,
+        lower: bool,
+        unit_diagonal: bool,
+        parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
+    ) -> PyResult<PyClassInitializer<Self>> {
+        let desc = format!("SolveTriangular(lower={lower}, unit_diagonal={unit_diagonal})");
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "SolveTriangular", T => RustKernel::of(
+            linalg::SolveTriangular::<T> {
+                parallel,
+                mode,
+                layouts,
+                lower,
+                unit_diagonal,
+                element: PhantomData,
+            },
+            vec![mode],
+            desc,
+        )?);
+        Ok(PyClassInitializer::from(k).add_subclass(SolveTriangular))
+    }
 }
 
 /// Solve (faer), scipy.linalg.solve semantics: NaN if A is singular. `assume_a`:
@@ -413,6 +300,8 @@ impl Solve {
         assume_a: &str,
         lower: bool,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let assume = match assume_a {
             "gen" => linalg::Assume::General,
@@ -421,9 +310,10 @@ impl Solve {
             other => return err(format!("Solve: assume_a={other:?} is not supported")),
         };
         let desc = format!("Solve(assume_a={assume_a}, lower={lower})");
-        let k = for_float!(dtype, "Solve", T => RustKernel::writing(
-            linalg::Solve::<T> { parallel, mode, assume, element: PhantomData },
-            mode,
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "Solve", T => RustKernel::of(
+            linalg::Solve::<T> { parallel, mode, layouts, assume, element: PhantomData },
+            vec![mode],
             desc,
         )?);
         Ok(PyClassInitializer::from(k).add_subclass(Solve))
@@ -442,11 +332,14 @@ impl CholeskySolve {
         dtype: Bound<'_, PyArrayDescr>,
         lower: bool,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("CholeskySolve(lower={lower})");
-        let k = for_float!(dtype, "CholeskySolve", T => RustKernel::writing(
-            linalg::CholeskySolve::<T> { parallel, mode, lower, element: PhantomData },
-            mode,
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "CholeskySolve", T => RustKernel::of(
+            linalg::CholeskySolve::<T> { parallel, mode, layouts, lower, element: PhantomData },
+            vec![mode],
             desc,
         )?);
         Ok(PyClassInitializer::from(k).add_subclass(CholeskySolve))
@@ -464,10 +357,13 @@ impl MatrixInverse {
         mode: OutputMode,
         dtype: Bound<'_, PyArrayDescr>,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
-        let k = for_float!(dtype, "MatrixInverse", T => RustKernel::writing(
-            linalg::MatrixInverse::<T> { parallel, mode, element: PhantomData },
-            mode,
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "MatrixInverse", T => RustKernel::of(
+            linalg::MatrixInverse::<T> { parallel, mode, layouts, element: PhantomData },
+            vec![mode],
             "MatrixInverse".into(),
         )?);
         Ok(PyClassInitializer::from(k).add_subclass(MatrixInverse))
@@ -485,10 +381,13 @@ impl Det {
         mode: OutputMode,
         dtype: Bound<'_, PyArrayDescr>,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
-        let k = for_float!(dtype, "Det", T => RustKernel::writing(
-            linalg::Det::<T> { parallel, mode, element: PhantomData },
-            mode,
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "Det", T => RustKernel::of(
+            linalg::Det::<T> { parallel, mode, layouts, element: PhantomData },
+            vec![mode],
             "Det".into(),
         )?);
         Ok(PyClassInitializer::from(k).add_subclass(Det))
@@ -506,10 +405,13 @@ impl SLogDet {
         modes: Vec<OutputMode>,
         dtype: Bound<'_, PyArrayDescr>,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
-        let fixed = self::modes::<2>("SLogDet", modes.clone())?;
-        let k = for_float!(dtype, "SLogDet", T => RustKernel::writing_all(
-            linalg::SLogDet::<T> { parallel, modes: fixed, element: PhantomData },
+        let layouts = faer(&in_layouts, &out_ndims);
+        let fixed = self::modes::<2>("SLogDet", &modes)?;
+        let k = for_float!(dtype, "SLogDet", T => RustKernel::of(
+            linalg::SLogDet::<T> { parallel, modes: fixed, layouts, element: PhantomData },
             modes,
             "SLogDet".into(),
         )?);
@@ -528,10 +430,13 @@ impl LUFactor {
         modes: Vec<OutputMode>,
         dtype: Bound<'_, PyArrayDescr>,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
-        let fixed = self::modes::<2>("LUFactor", modes.clone())?;
-        let k = for_float!(dtype, "LUFactor", T => RustKernel::writing_all(
-            linalg::LUFactor::<T> { parallel, modes: fixed, element: PhantomData },
+        let layouts = faer(&in_layouts, &out_ndims);
+        let fixed = self::modes::<2>("LUFactor", &modes)?;
+        let k = for_float!(dtype, "LUFactor", T => RustKernel::of(
+            linalg::LUFactor::<T> { parallel, modes: fixed, layouts, element: PhantomData },
             modes,
             "LUFactor".into(),
         )?);
@@ -552,6 +457,8 @@ impl LU {
         dtype: Bound<'_, PyArrayDescr>,
         form: &str,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let form = match form {
             "matrix" => linalg::LuForm::Matrix,
@@ -560,8 +467,9 @@ impl LU {
             other => return err(format!("LU: unknown form {other:?}")),
         };
         let desc = format!("LU({form:?})");
-        let k = for_float!(dtype, "LU", T => RustKernel::writing_all(
-            linalg::LU::<T> { parallel, modes: modes.clone(), form, element: PhantomData },
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "LU", T => RustKernel::of(
+            linalg::LU::<T> { parallel, modes: modes.clone(), layouts, form, element: PhantomData },
             modes,
             desc,
         )?);
@@ -580,26 +488,32 @@ impl PivotToPermutations {
         mode: OutputMode,
         dtype: Bound<'_, PyArrayDescr>,
         inverse: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("PivotToPermutations(inverse={inverse})");
+        // (a vector: there is only one order)
+        let layouts = faer(&in_layouts, &out_ndims);
         fn make<I: crate::kernel::Element + TryInto<usize>>(
             mode: OutputMode,
+            layouts: Vec<Layout>,
             inverse: bool,
             desc: String,
         ) -> PyResult<RustKernel> {
-            RustKernel::writing(
+            RustKernel::of(
                 linalg::PivotToPermutations::<I> {
                     mode,
+                    layouts,
                     inverse,
                     element: PhantomData,
                 },
-                mode,
+                vec![mode],
                 desc,
             )
         }
         let k = match dtype_of(&dtype)? {
-            DType::Int32 => make::<i32>(mode, inverse, desc)?,
-            DType::Int64 => make::<i64>(mode, inverse, desc)?,
+            DType::Int32 => make::<i32>(mode, layouts, inverse, desc)?,
+            DType::Int64 => make::<i64>(mode, layouts, inverse, desc)?,
             dt => return err(format!("PivotToPermutations of {dt:?}")),
         };
         Ok(PyClassInitializer::from(k).add_subclass(PivotToPermutations))
@@ -620,10 +534,20 @@ impl Eigh {
         lower: bool,
         vectors: bool,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("Eigh(lower={lower}, vectors={vectors})");
-        let k = for_float!(dtype, "Eigh", T => RustKernel::writing_all(
-            linalg::Eigh::<T> { parallel, modes: modes.clone(), lower, vectors, element: PhantomData },
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "Eigh", T => RustKernel::of(
+            linalg::Eigh::<T> {
+                parallel,
+                modes: modes.clone(),
+                layouts,
+                lower,
+                vectors,
+                element: PhantomData,
+            },
             modes,
             desc,
         )?);
@@ -644,11 +568,16 @@ impl SVD {
         full_matrices: bool,
         compute_uv: bool,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("SVD(full_matrices={full_matrices}, compute_uv={compute_uv})");
-        let k = for_float!(dtype, "SVD", T => RustKernel::writing_all(
-            linalg::Svd::<T> { parallel,
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "SVD", T => RustKernel::of(
+            linalg::Svd::<T> {
+                parallel,
                 modes: modes.clone(),
+                layouts,
                 full_matrices,
                 compute_uv,
                 element: PhantomData,
@@ -672,6 +601,8 @@ impl QR {
         dtype: Bound<'_, PyArrayDescr>,
         mode: &str,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let qr_mode = match mode {
             "full" => linalg::QrMode::Full,
@@ -680,8 +611,15 @@ impl QR {
             other => return err(format!("QR: mode={other:?} is not supported")),
         };
         let desc = format!("QR(mode={mode})");
-        let k = for_float!(dtype, "QR", T => RustKernel::writing_all(
-            linalg::Qr::<T> { parallel, modes: modes.clone(), mode: qr_mode, element: PhantomData },
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "QR", T => RustKernel::of(
+            linalg::Qr::<T> {
+                parallel,
+                modes: modes.clone(),
+                layouts,
+                mode: qr_mode,
+                element: PhantomData,
+            },
             modes,
             desc,
         )?);
@@ -702,11 +640,14 @@ impl MatrixPinv {
         dtype: Bound<'_, PyArrayDescr>,
         hermitian: bool,
         parallel: bool,
+        in_layouts: Vec<Option<Layout>>,
+        out_ndims: Vec<usize>,
     ) -> PyResult<PyClassInitializer<Self>> {
         let desc = format!("MatrixPinv(hermitian={hermitian})");
-        let k = for_float!(dtype, "MatrixPinv", T => RustKernel::writing(
-            linalg::MatrixPinv::<T> { parallel, mode, hermitian, element: PhantomData },
-            mode,
+        let layouts = faer(&in_layouts, &out_ndims);
+        let k = for_float!(dtype, "MatrixPinv", T => RustKernel::of(
+            linalg::MatrixPinv::<T> { parallel, mode, layouts, hermitian, element: PhantomData },
+            vec![mode],
             desc,
         )?);
         Ok(PyClassInitializer::from(k).add_subclass(MatrixPinv))
@@ -941,8 +882,6 @@ impl Function {
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<OutputMode>()?;
     m.add_class::<RustKernel>()?;
-    m.add_class::<DimShuffle>()?;
-    m.add_class::<Copy>()?;
     m.add_class::<Dot>()?;
     m.add_class::<Sort>()?;
     m.add_class::<Cholesky>()?;

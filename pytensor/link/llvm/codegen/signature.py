@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 
 from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
-from pytensor.link.llvm.codegen.interface import llvm_layout
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import (
     NoneRepr,
     ScalarRepr,
@@ -123,20 +123,23 @@ def node_outputs(node, in_layouts=None, writable=frozenset()) -> list[Output]:
     view of (`op_view_parents`: the op's `view_map`, or for an OpFromGraph, whatever
     its inner graph may pass through).
 
-    An output the op may write over an input (`destroyed_input`) has that input's
-    layout, where new memory can have it too (`new_memory_layout`): it is the input's
-    memory or new memory, as its emitter decides. It may be the input's memory only if
-    the input is `writable` (positions the planner lets the node overwrite)."""
+    An output the op's generated code may write over an input (`destroyed_input`) has
+    that input's layout, where new memory can have it too (`new_memory_layout`): it is
+    the input's memory or new memory, as its emitter decides. It may be the input's
+    memory only if the input is `writable` (positions the planner lets the node
+    overwrite). (Ops without generated code run as kernels, which write their outputs
+    into new memory.)"""
     op = node.op
     in_layouts = known_layouts(node, in_layouts)
     layouts = llvm_layout(op, node, in_layouts)
     parents = op_view_parents(op, node)
+    generated = llvm_emit.dispatch(type(op)) is not llvm_emit.dispatch(object)
     outs = []
     for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):
         aliases: tuple = ()
         if isinstance(repr_of(o.type), TensorRepr):
             aliases = tuple(i for i, var in enumerate(node.inputs) if var in parents[k])
-            i = destroyed_input(node, k)
+            i = destroyed_input(node, k) if generated else None
             if i is not None:
                 lay = new_memory_layout(in_layouts[i], o.type)
                 if i in writable and i not in aliases:

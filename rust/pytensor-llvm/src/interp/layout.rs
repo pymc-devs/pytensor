@@ -1,72 +1,10 @@
-//! Layouts as the kernels declare them (the Python side, `llvm/layout.py`, has the
-//! full story): an axis order (outermost first) and per axis a packed, static or
-//! dynamic stride. Exchanged with Python as `(order, strides)`, a stride being `"P"`,
-//! `"?"` or a number of bytes.
+//! Layouts (`crate::layout`) exchanged with Python as `(order, strides)`, a stride
+//! being `"P"`, `"?"` or a number of bytes.
 
+pub use crate::layout::{Layout, Stride};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyString, PyTuple};
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Stride {
-    Packed,
-    Dynamic,
-    Static(i64),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Layout {
-    pub order: Vec<usize>,
-    pub strides: Vec<Stride>,
-}
-
-impl Layout {
-    /// C-contiguous.
-    pub fn c(ndim: usize) -> Layout {
-        Layout {
-            order: (0..ndim).collect(),
-            strides: vec![Stride::Packed; ndim],
-        }
-    }
-
-    pub fn dynamic(ndim: usize) -> Layout {
-        Layout {
-            order: (0..ndim).collect(),
-            strides: vec![Stride::Dynamic; ndim],
-        }
-    }
-
-    pub fn ndim(&self) -> usize {
-        self.strides.len()
-    }
-
-    /// The layout of a DimShuffle view (`order[k]`: input axis of output axis k, None
-    /// for a new length-1 axis, which is packed). Dropped input axes have length 1.
-    pub fn dimshuffle(&self, order: &[Option<usize>]) -> Layout {
-        let mut out_of = vec![None; self.ndim()];
-        let mut strides = Vec::with_capacity(order.len());
-        for (j, o) in order.iter().enumerate() {
-            match o {
-                Some(a) => {
-                    out_of[*a] = Some(j);
-                    strides.push(self.strides[*a].clone());
-                }
-                None => strides.push(Stride::Packed),
-            }
-        }
-        let mut new_order: Vec<usize> = order
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| o.is_none())
-            .map(|(j, _)| j)
-            .collect();
-        new_order.extend(self.order.iter().filter_map(|&a| out_of[a]));
-        Layout {
-            order: new_order,
-            strides,
-        }
-    }
-}
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Layout {
     type Error = PyErr;
