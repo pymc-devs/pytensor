@@ -1357,6 +1357,20 @@ def test_space_ops(op, dtype, start, stop, num_samples, endpoint, axis):
     )
 
 
+def test_geomspace_negative():
+    start, stop = pt.dvector("start"), pt.dvector("stop")
+    fn = function(
+        [start, stop],
+        pt.geomspace(start, stop, 4, axis=-1, dtype="float64"),
+        mode="FAST_COMPILE",
+    )
+
+    for start_val, stop_val in [([-2.0], [-30.0]), ([-1.0, 2.0], [-8.0, 16.0])]:
+        np.testing.assert_allclose(
+            fn(start_val, stop_val), np.geomspace(start_val, stop_val, 4, axis=-1)
+        )
+
+
 @pytest.mark.parametrize("dtype", [None, "int64"])
 def test_linspace_retstep(dtype):
     samples, step = pt.linspace(0, 1, num=3, retstep=True, dtype=dtype)
