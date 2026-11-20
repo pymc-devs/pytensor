@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pytensor.link.llvm.codegen.emit import (
     Array,
-    ProvidedOutput,
     c_array,
     c_strides,
     cast,
@@ -16,7 +15,7 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import ir, is_float
 from pytensor.link.llvm.layout import Layout, same_layout
 from pytensor.raise_op import CheckAndRaise
@@ -186,19 +185,16 @@ def _(op, node, cg, inputs, outputs):
         shape.append(n)
     cg.check(b.eq(size(b, shape), total), "cannot reshape: the total size changes")
     out = outputs[0]
-    if isinstance(out, ProvidedOutput):
-        # (provided C-contiguous, as declared)
-        _copy_reshaped(cg, x, out.array)
-        return
     contig = is_contiguous(b, x.shape, x)
 
     def view():
-        out.set_view(c_array(x.dtype, x.data, shape, c_strides(b, x.dtype, shape)))
+        strides = c_strides(b, x.dtype, shape)
+        out.view(x.view(x.data, shape, strides, Layout.c(len(shape))))
         return []
 
     def fresh():
-        dst = out.allocate(shape)
-        _copy_reshaped(cg, x, dst)
+        # (C-contiguous, as declared)
+        _copy_reshaped(cg, x, out.allocate(shape))
         return []
 
     c = contig.const_int
@@ -208,7 +204,6 @@ def _(op, node, cg, inputs, outputs):
         fresh()
     else:
         b.if_else(contig, view, fresh)
-        out.done = True
 
 
 def _copy_reshaped(cg, src: Array, dst: Array):
@@ -274,4 +269,4 @@ def _(op, node, cg, inputs, outputs):
         dt = var.type.dtype
         ok = v if dt == "bool" else cast(b, v, dt, "bool")
         cg.check(ok, op.msg or "Assertion failed")
-    outputs[0].set_view(inputs[0])
+    outputs[0].view(inputs[0])

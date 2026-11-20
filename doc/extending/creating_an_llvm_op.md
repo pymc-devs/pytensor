@@ -286,7 +286,7 @@ byte in memory and an `i1` in a register, and they know.
 ### The emitter
 
 ```python
-from pytensor.link.llvm.codegen.function import llvm_emit
+from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.num import Num
 
 
@@ -621,7 +621,7 @@ layouts of its inputs, and what the layout fixes arrives in the emitter as a con
 element with a constant step. A packed stride is not even passed to the generated function:
 
 ```python
-from pytensor.link.llvm.codegen.function import build_node_function
+from pytensor.link.llvm.codegen.node import build_node_function
 
 node = cummax(x).owner
 any_strides = build_node_function(ir.Module("any"), node, "node")
@@ -700,12 +700,16 @@ reverse = Reverse()
 An output that may be a view is filled in one of two ways, and the emitter chooses
 freely, even when the code runs:
 
-* `outputs[k].set_view(array)` hands over a view of an input the `view_map` lists.
-  `array` must come from that input: build it with `x.view(data, shape, strides,
-  layout)`, or with `x.at(...)`, which remember where they come from.
+* `outputs[k].view(array)`: the result is `array`, which lies in an input's memory. It
+  is handed over as a view where the output may be one (the `view_map` lists that
+  input), else copied. `array` must come from the input: build it with `x.view(data,
+  shape, strides, layout)`, or with `x.at(...)`, which remember where they come from.
 * `outputs[k].allocate(shape)` allocates instead, as for any other output. An op
   that only sometimes can return a view (a reshape of a non-contiguous array) does
   this in a branch.
+
+Which one happens is not the emitter's business: the same emitter is right when the
+output's memory is provided by the caller (then `view` copies into it).
 
 ```python
 @llvm_emit.register(Reverse)
@@ -716,15 +720,14 @@ def _(op, node, cg, inputs, outputs):
     (stride,) = x.strides
     # the last element (the first, for an empty vector: stay inside the array)
     last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
-    outputs[0].set_view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)]))
+    outputs[0].view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)]))
 
 
 r = pytensor.function([x], cummax(reverse(x)), mode=STRICT)
 np.testing.assert_array_equal(r(values), [4.0, 5.0, 5.0, 5.0, 5.0])
 ```
 
-Mistakes are caught while generating. An output the `view_map` doesn't list can't be a
-view, and inputs can't be written:
+Inputs are only read; writing one is caught while generating:
 
 ```python
 class Careless(Op):
@@ -735,15 +738,6 @@ class Careless(Op):
 
     def perform(self, node, inputs, output_storage):
         output_storage[0][0] = inputs[0].copy()
-
-
-@llvm_emit.register(Careless)
-def _(op, node, cg, inputs, outputs):
-    outputs[0].set_view(inputs[0])  # no view_map
-
-
-with pytest.raises(ValueError, match="this output can't be a view"):
-    pytensor.function([x], Careless()(x), mode=STRICT)
 
 
 @llvm_emit.register(Careless)
@@ -763,11 +757,19 @@ implementation to do what its op declares.
 The other thing an op says about memory is `destroy_map`: `{0: [0]}` means computing
 output 0 invalidates input 0. PyTensor's inplace rewrites put such ops into a graph
 where it is safe, and they are an offer, not an obligation: an implementation that
-ignores `destroy_map` and produces new memory is correct. That is what happens unless
-the emitter opts in.
+ignores `destroy_map` and produces new memory is correct.
 
-Many results are "the input, with a few changes". `outputs[k].overwrite(cg, x)` gives
-memory that already holds the values of `x`: a copy, or, in place, `x` itself.
+The planner decides, node by node, whether a node may overwrite an input: when the
+graph was checked for it (it has PyTensor's `DestroyHandler`, as every graph that went
+through the inplace rewrites has) and nothing else can see the memory (the value is not
+a constant and shares no memory with the node's other inputs). The emitter then gets
+that input with `writable` set: it may write it, and return it, or a view of it, with
+`view` for an output the op destroys it for. Otherwise the input is read-only like any
+other, so the emitter decides at most whether to use what it is given.
+
+Many results are "the input, with a few changes". `overwrite_or_copy(cg, out, x)` gives
+memory for the output that already holds the values of `x`: `x` itself where it is
+writable, else a copy.
 
 ```python
 class ZeroFirst(Op):
@@ -790,11 +792,14 @@ class ZeroFirst(Op):
         output_storage[0][0] = x
 
 
+from pytensor.link.llvm.codegen.interface import overwrite_or_copy
+
+
 @llvm_emit.register(ZeroFirst)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     (x,) = inputs
-    out = outputs[0].overwrite(cg, x)
+    out = overwrite_or_copy(cg, outputs[0], x)
     with b.if_(b.sgt(out.shape[0], 0)):
         out.store(b, 0.0, 0)
 
@@ -803,26 +808,11 @@ z = pytensor.function([x], ZeroFirst()(x), mode=STRICT)
 np.testing.assert_array_equal(z(values), [0.0, *values[1:]])
 ```
 
-This emitter is already right for both versions of the op, and both copy. To let the
-in-place version skip the copy, say which output can be written over which input:
-
-```python
-from pytensor.link.llvm.codegen.function import llvm_inplace
-
-
-@llvm_inplace.register(ZeroFirst)
-def _(op, node):
-    return {0: 0} if op.inplace else {}
-```
-
-The planner then decides, node by node. It lets a node overwrite an input when the
-graph was checked for it (it has PyTensor's `DestroyHandler`, as every graph that went
-through the inplace rewrites has) and nothing else can see the memory: the value is
-not a constant and shares no memory with the node's other inputs. When it does,
-`overwrite` returns `x`'s memory and no copy is made; `allocate` would return the same
-memory, still holding `x`'s values, for emitters that read each element before writing
-it (Elemwise does that). Otherwise the output is new memory as before, so the emitter
-never needs to know.
+This emitter is right for both versions of the op. `ZeroFirst()` destroys nothing: its
+input is never writable, and it copies. `ZeroFirst(inplace=True)` writes over its input
+where the planner lets it. An emitter that reads each element before writing it can also
+use the writable input as its output's memory directly (`outputs[k].view(x)`, then write
+it), which is what Elemwise does.
 
 A rewrite would normally put `ZeroFirst(inplace=True)` into the graph. Here we build
 such a graph by hand:
@@ -844,13 +834,10 @@ np.testing.assert_array_equal(
 ['ZeroFirst{inplace=True}']
 ```
 
-Two things to keep in mind when opting in:
-
-* `overwrite` takes the destroyed input and nothing else (anything else is an error
-  when the code is generated), and the result must be correct when the output and that
-  input are the same memory. Reading other inputs is always safe: the planner doesn't
-  grant in-place work when they might overlap.
-* Only opt in for pairs in the op's `destroy_map`; others are ignored.
+(`stats.inplace` lists the nodes that were allowed to overwrite an input.) When writing
+over an input, the result must be correct when the output and that input are the same
+memory. Reading other inputs is always safe: an input that might overlap them isn't
+writable.
 
 ### Declaring the layout of an output
 
@@ -863,7 +850,7 @@ An op that returns a view should say what it knows. The stride of a reversed vec
 minus the stride of the input, so if the one is known, so is the other:
 
 ```python
-from pytensor.link.llvm.codegen.function import llvm_layout
+from pytensor.link.llvm.codegen.interface import llvm_layout
 from pytensor.link.llvm.layout import itemsize_of, shape_of
 
 
@@ -892,7 +879,7 @@ def _(op, node, cg, inputs, outputs):
     (stride,) = x.strides
     last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
     layout = reverse_layout(node, x.layout)
-    outputs[0].set_view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)], layout))
+    outputs[0].view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)], layout))
 ```
 
 The layout function is shared by the declaration and the emitter, which is how the
@@ -924,7 +911,7 @@ packed.
 
 Two things guard against wrong declarations:
 
-* `set_view` compares the layout of the array it is given with the declaration, while
+* `view` compares the layout of the array it is given with the declaration, while
   generating. An emitter that forgets the layout is caught:
 
   ```python
@@ -935,10 +922,10 @@ Two things guard against wrong declarations:
   @llvm_emit.register(Forgetful)
   def _(op, node, cg, inputs, outputs):
       (x,) = inputs
-      outputs[0].set_view(x.view(x.data, x.shape, x.strides))  # no layout: all DYNAMIC
+      outputs[0].view(x.view(x.data, x.shape, x.strides))  # no layout: all DYNAMIC
 
 
-  with pytest.raises(ValueError, match="llvm_layout declared"):
+  with pytest.raises(ValueError, match="is declared"):
       pytensor.function([x], Forgetful()(x), mode=CHECKED)
   ```
 
@@ -1162,8 +1149,7 @@ belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/codegen/
    `work.py`; distributions into the `SAMPLERS` table of `codegen/random.py`.
 3. Register `llvm_work` in `work.py` if one unit per output element is far off, and
    `llvm_layout` next to the emitter if an output is a view (its layout function goes
-   into `layout.py`), and `llvm_inplace` if the emitter can write over an input its op
-   destroys.
+   into `layout.py`).
 4. Add a test to `tests/link/llvm/test_ops.py` that compiles with
    `numba_fallback=False` and compares with numpy, over the dtypes, with a strided
    input and with static and unknown shapes; for a view, also with
@@ -1182,9 +1168,9 @@ Things that commonly go wrong:
   this costs nothing when the input is contiguous.
 * **A temporary inside a loop.** Each request is new memory until the task ends. Ask
   once, before the loop.
-* **Writing an input.** The planner assumes inputs are only read. The one way to write
-  over an input is through an output: `outputs[k].overwrite(cg, x)`.
+* **Writing an input.** Inputs are only read, except one the op destroys and the
+  planner lets the node overwrite (`writable`); `overwrite_or_copy` handles both cases.
 * **Declaring more than is true.** A layout is trusted. Declare `DYNAMIC` for whatever
   the op can't guarantee.
-* **Leaving an output unset.** Every output must be written, or set with `set_view` for
-  a view; the backend raises when a node function ends with an output never set.
+* **Leaving an output unset.** Every output must be allocated or set (`view`, `set` for
+  a scalar); the backend raises when a node function ends with an output never set.

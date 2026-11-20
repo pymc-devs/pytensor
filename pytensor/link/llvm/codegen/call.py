@@ -123,19 +123,13 @@ def call_kernel(
 ) -> None:
     """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, dtype) pairs) and
-    `outputs` (ProvidedOutput, InplaceOutput (the input's memory is passed again),
-    SlotOutput, or None).
+    `outputs` (`ProvidedOutput`, `SlotOutput`, or None).
 
     Allocated and view outputs land in their output slots, owner included, also when the
     call fails (the caller releases them); a failure returns its code (the kernel set
     the message). The kernel's scratch is released after the call."""
-    from pytensor.link.llvm.codegen.emit import (
-        Array,
-        InplaceOutput,
-        ProvidedOutput,
-        SlotOutput,
-        store,
-    )
+    from pytensor.link.llvm.codegen.emit import Array, store
+    from pytensor.link.llvm.codegen.interface import ProvidedOutput, SlotOutput
 
     b = cg.b
     pa = ptarray_type()
@@ -172,9 +166,7 @@ def call_kernel(
     for o in outputs:
         if o is None:
             continue
-        if isinstance(o, ProvidedOutput | InplaceOutput):
-            if isinstance(o, InplaceOutput):
-                o.done = True
+        if isinstance(o, ProvidedOutput):
             a = o.array
             args_of.append(
                 (
@@ -261,14 +253,10 @@ def build_call_function(
     code runs a kernel that isn't a node's (a compiled unit, a separately compiled node,
     a subprogram), and nodes the planner gives a kernel. `index`: the kernel's entry
     in `links` (default: linked here). Returns a `NodeFunction`."""
-    from pytensor.link.llvm.codegen.emit import (
-        Codegen,
-        InplaceOutput,
-        ProvidedOutput,
-        SlotOutput,
-        unpack,
-    )
-    from pytensor.link.llvm.codegen.function import NodeFunction, OutputMode
+    from pytensor.link.llvm.codegen.emit import Codegen, unpack
+    from pytensor.link.llvm.codegen.interface import ProvidedOutput, SlotOutput
+    from pytensor.link.llvm.codegen.node import NodeFunction
+    from pytensor.link.llvm.codegen.signature import OutputMode
 
     fn = module.function(
         name,
@@ -288,13 +276,8 @@ def build_call_function(
     for o in signature.outputs:
         if o.mode is OutputMode.ABSENT:
             outputs.append(None)
-        elif o.mode is OutputMode.INPLACE:
-            source = inputs[o.aliases[0]]
-            a = source.view(source.data, source.shape, source.strides, source.layout)
-            a.writable = True
-            outputs.append(InplaceOutput(a, source))
         elif o.mode is OutputMode.PROVIDED:
-            outputs.append(ProvidedOutput(unpack(b, o.repr, next(params))))
+            outputs.append(ProvidedOutput(cg, unpack(b, o.repr, next(params))))
         else:
             outputs.append(
                 SlotOutput(cg, next(params), o.repr.dtype, o.repr.ndim, o.aliases)

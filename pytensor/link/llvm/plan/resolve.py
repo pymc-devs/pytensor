@@ -36,16 +36,16 @@ from pytensor.link.llvm.codegen.blockwise import (
     blockwise_core_layouts,
 )
 from pytensor.link.llvm.codegen.call import CalledKernel
-from pytensor.link.llvm.codegen.function import (
+from pytensor.link.llvm.codegen.interface import llvm_emit
+from pytensor.link.llvm.codegen.node import build_node_function
+from pytensor.link.llvm.codegen.scan import scan_body_layouts
+from pytensor.link.llvm.codegen.signature import (
     Output,
     OutputMode,
     Signature,
-    build_node_function,
-    llvm_emit,
     node_outputs,
     node_signature,
 )
-from pytensor.link.llvm.codegen.scan import scan_body_layouts
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
 from pytensor.link.llvm.layout import Layout, itemsize_of, shape_of
 from pytensor.link.llvm.plan.flatten import flatten

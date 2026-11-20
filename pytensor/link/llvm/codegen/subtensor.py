@@ -8,11 +8,14 @@ from pytensor.link.llvm.codegen.emit import (
     checked_index,
     for_each,
     load,
-    set_output,
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    llvm_emit,
+    llvm_layout,
+    overwrite_or_copy,
+)
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.layout import subtensor_layout
 from pytensor.scalar.basic import add as scalar_add
@@ -90,7 +93,7 @@ def _entries(op, node, inputs, first):
 def _(op, node, cg, inputs, outputs):
     view = index(cg, inputs[0], _entries(op, node, inputs, 1))
     view.layout = subtensor_layout(op, node, inputs[0].layout)
-    set_output(cg, outputs[0], view)
+    outputs[0].view(view)
 
 
 @llvm_layout.register(Subtensor)
@@ -98,16 +101,11 @@ def _(op, node, in_layouts):
     return [subtensor_layout(op, node, in_layouts[0])]
 
 
-@llvm_inplace.register(IncSubtensor)
-def _(op, node):
-    return {0: 0} if op.inplace else {}
-
-
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x, y = inputs[0], inputs[1]
-    out = outputs[0].overwrite(cg, x)  # x itself if it may be destroyed, else a copy
+    out = overwrite_or_copy(cg, outputs[0], x)
     view = index(cg, out, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type

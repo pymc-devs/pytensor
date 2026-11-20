@@ -11,10 +11,8 @@ import pytensor.tensor as pt
 ir = pytest.importorskip("pytensor_llvm.ir")
 interp = pytest.importorskip("pytensor_llvm.interp")
 
-from pytensor.link.llvm.codegen.function import (  # noqa: E402
-    build_kernel_wrapper,
-    build_node_function,
-)
+from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
+from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
 
 
 f64 = np.dtype("float64")

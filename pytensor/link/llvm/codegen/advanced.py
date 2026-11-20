@@ -23,7 +23,7 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace
+from pytensor.link.llvm.codegen.interface import llvm_emit, overwrite_or_copy
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -151,16 +151,11 @@ def _(op, node, cg, inputs, outputs):
     for_each(b, pat.view_shape, [base_op, *idx_ops, out], body)
 
 
-@llvm_inplace.register(AdvancedIncSubtensor)
-def _(op, node):
-    return {0: 0} if op.inplace else {}
-
-
 @llvm_emit.register(AdvancedIncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x, y = inputs[0], inputs[1]
-    out = outputs[0].overwrite(cg, x)  # x itself if it may be destroyed, else a copy
+    out = overwrite_or_copy(cg, outputs[0], x)
     pat = pattern(cg, out, node, inputs[2:], node.inputs[2:], op)
     base_op, idx_ops = operands(cg, out, pat)
     # y broadcasts against the indexed view, aligned on the right; like numpy, a

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.link.llvm.codegen.emit import Array, cast, copy
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.layout import dimshuffle_layout, same_layout
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
@@ -40,14 +40,14 @@ def _(op, node, cg, inputs, outputs):
             shape.append(x.shape[o])
             strides.append(x.strides[o])
     # the view's layout follows from the input's (the same rule `llvm_layout` uses)
-    outputs[0].set_view(
+    outputs[0].view(
         x.view(x.data, shape, strides, dimshuffle_layout(op, node, x.layout))
     )
 
 
 @llvm_emit.register(ViewOp)
 def _(op, node, cg, inputs, outputs):
-    outputs[0].set_view(inputs[0])
+    outputs[0].view(inputs[0])
 
 
 @llvm_emit.register(SpecifyShape)
@@ -70,7 +70,7 @@ def _(op, node, cg, inputs, outputs):
         n if s is None else b.i64(s)
         for n, s in zip(x.shape, node.outputs[0].type.shape, strict=True)
     ]
-    outputs[0].set_view(x.view(x.data, shape, x.strides, same_layout(node, x.layout)))
+    outputs[0].view(x.view(x.data, shape, x.strides, same_layout(node, x.layout)))
 
 
 @llvm_emit.register(DeepCopyOp)
@@ -82,7 +82,7 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(ScalarFromTensor)
 def _(op, node, cg, inputs, outputs):
     x = inputs[0]
-    outputs[0].set(cg.b, x.load(cg.b).value)
+    outputs[0].set(x.load(cg.b).value)
 
 
 @llvm_emit.register(TensorFromScalar)

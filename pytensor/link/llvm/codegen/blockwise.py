@@ -19,7 +19,8 @@ import dataclasses
 
 from pytensor.graph.basic import Constant, Variable
 from pytensor.link.llvm.codegen.emit import copy, size
-from pytensor.link.llvm.codegen.function import known_layouts, llvm_emit
+from pytensor.link.llvm.codegen.interface import llvm_emit
+from pytensor.link.llvm.codegen.signature import known_layouts
 from pytensor.link.llvm.codegen.types import repr_of
 from pytensor.link.llvm.codegen.unit import (
     Destination,
