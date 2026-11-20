@@ -6,14 +6,14 @@ shrink the Scan signature without changing what it computes:
 * :func:`scan_inline_invariant_constants` — inline constant non-sequences
   and iteration-invariant constant sequences, including ``Alloc`` expressions.
 * :func:`scan_merge_duplicate_inputs` — collapse outer seqs / non_seqs
-  whose values are :func:`equal_computations`.
+  that are passed in more than once.
 * :func:`scan_remove_unused` — drop inner-/outer-side state slots,
   sequences, and non-sequences that nobody downstream reads.
 """
 
 from typing import NamedTuple
 
-from pytensor.graph.basic import Constant, equal_computations
+from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.scan.op import Scan
@@ -86,26 +86,25 @@ def scan_inline_invariant_constants(fgraph, node):
 
 @node_rewriter([Scan])
 def scan_merge_duplicate_inputs(fgraph, node):
-    """Merge outer seqs / non_seqs that are ``equal_computations``.
+    """Merge outer seqs / non_seqs that are the same variable.
 
-    When two outer inputs compute the same value, the later one's inner
+    When the same outer variable is passed more than once, the later inner
     variable is rewired to the earlier one's, and the duplicate inner /
-    outer input pair is dropped.
+    outer input pair is dropped. Equal computations that are distinct
+    variables are left to ``MergeOptimizer``, which runs before this rewrite.
     """
     op = node.op
 
     def _duplicates(inner_list, outer_list):
         subs: dict = {}
         drop: set = set()
-        canonical: list[tuple] = []
+        canonical: dict = {}
         for k, (inner, outer) in enumerate(zip(inner_list, outer_list, strict=True)):
-            for canon_outer, canon_inner in canonical:
-                if equal_computations([outer], [canon_outer]):
-                    subs[inner] = canon_inner
-                    drop.add(k)
-                    break
+            if (canon_inner := canonical.get(outer)) is not None:
+                subs[inner] = canon_inner
+                drop.add(k)
             else:
-                canonical.append((outer, inner))
+                canonical[outer] = inner
         return subs, drop
 
     seq_subs, drop_seqs = _duplicates(
