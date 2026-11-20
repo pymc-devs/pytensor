@@ -92,6 +92,7 @@ include = ["pytensor*"]
 [tool.setuptools.package-data]
 pytensor = ["py.typed"]
 "pytensor.d3viz" = ["html/*", "css/*", "js/*"]
+"pytensor.link.numba" = ["_profiling_unwind.c"]
 
 [tool.coverage.run]
 omit = [

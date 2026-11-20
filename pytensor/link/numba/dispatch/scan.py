@@ -74,7 +74,10 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     }
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
-        op.fgraph, fgraph_name="numba_scan", ofg_memo=kwargs.get("ofg_memo")
+        op.fgraph,
+        fgraph_name="numba_scan",
+        ofg_memo=kwargs.get("ofg_memo"),
+        node_functions=kwargs.get("node_functions"),
     )
 
     outer_in_names_to_vars = {

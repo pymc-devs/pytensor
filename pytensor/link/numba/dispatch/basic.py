@@ -510,6 +510,7 @@ def numba_funcify_FunctionGraph(
     node=None,
     fgraph_name="numba_funcified_fgraph",
     ofg_memo=None,
+    node_functions=None,
     **kwargs,
 ):
     # Memoize compiled OpFromGraph inner functions by Op, so repeated uses of
@@ -518,6 +519,8 @@ def numba_funcify_FunctionGraph(
     if ofg_memo is None:
         ofg_memo = {}
     kwargs["ofg_memo"] = ofg_memo
+    if node_functions is not None:
+        kwargs["node_functions"] = node_functions
     # Collect cache keys of every Op/Constant in the FunctionGraph
     # so we can create a global cache key for the whole FunctionGraph
     fgraph_can_be_cached = [True]
@@ -537,6 +540,8 @@ def numba_funcify_FunctionGraph(
 
         # We also Cache each Op so Numba can do less work next time it sees it
         func, key = numba_funcify_ensure_cache(op, node=node, *args, **kwargs)
+        if node_functions is not None:
+            node_functions[node] = func
         if key is None:
             fgraph_can_be_cached[0] = False
         else:

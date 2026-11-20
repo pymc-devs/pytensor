@@ -17,7 +17,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -26,6 +26,10 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.link.utils import get_destroy_dependencies
+
+
+if TYPE_CHECKING:
+    from pytensor.link.numba.profiling import NativeSamplingBackend
 
 
 @contextmanager
@@ -123,6 +127,149 @@ def register_profiler_printer(fct):
     return fct
 
 
+def _print_native_summary(report, file, n_functions=20, line_width=120):
+    print("Native execution sampling (self event weight)", file=file)
+    print(f"  Event: {report['event']}; samples: {report['total_samples']}", file=file)
+    coverage = report["coverage"]
+    if "node_coverage" in report:
+        node_coverage = report["node_coverage"]
+        print(
+            f"  Node attribution: {report['node_attributed_percent']:.2f}% "
+            f"(one node: {node_coverage['one node']['percent_self']:.2f}%, "
+            f"shared: {node_coverage['shared / ambiguous']['percent_self']:.2f}%, "
+            f"unassigned: {node_coverage['unassigned']['percent_self']:.2f}%)",
+            file=file,
+        )
+    print(
+        f"  JIT address coverage: {report['captured_jit_percent']:.2f}% "
+        f"(one node: {coverage['one node']['percent_self']:.2f}%, "
+        f"ambiguous: {coverage['shared / ambiguous']['percent_self']:.2f}%, "
+        f"no node: {coverage['native only']['percent_self']:.2f}%)",
+        file=file,
+    )
+    print(
+        f"  Library/runtime/unresolved: {coverage['library / unmapped']['percent_self']:.2f}% "
+        "(includes graph calls)",
+        file=file,
+    )
+    print("  Percent  Samples  Attribution           Graph nodes / symbol", file=file)
+    for row in report["functions"][:n_functions]:
+        label = ", ".join(
+            f"{location} {op}"
+            for location, op in zip(row["locations"], row["ops"], strict=True)
+        ) or (
+            f"[{Path(row['library']).name}] {row['name']}"
+            if "library" in row
+            else row["name"]
+        )
+        if row.get("caller_locations"):
+            callers = ", ".join(
+                f"{loc} {op}"
+                for loc, op in zip(
+                    row["caller_locations"], row["caller_ops"], strict=True
+                )
+            )
+            mapped = 100 * row["caller_sample_weight"] / row["sample_weight"]
+            label += f" -> {callers} ({mapped:.0f}% of this hotspot attributed)"
+        attribution = (
+            ("library candidates" if "library" in row else "native candidates")
+            if row.get("caller_locations")
+            else row["attribution"]
+        )
+        line = (
+            f"  {row['percent_self']:7.2f}  {row['samples']:7d}  "
+            f"{attribution:20s}  {label}"
+        )
+        if len(line) > line_width:
+            line = line[: max(0, line_width - 3)] + "..."
+        print(line, file=file)
+        if "disassembly_file" in row:
+            print(
+                f"                     Assembly: {row['disassembly_file']}", file=file
+            )
+    if report["mapping_errors"]:
+        print(
+            f"  {len(report['mapping_errors'])} cache metadata errors; "
+            "some node associations are unavailable (see report.json).",
+            file=file,
+        )
+    if report.get("assembly_errors"):
+        print(
+            f"  Assembly recovery unavailable for {len(report['assembly_errors'])} objects; "
+            "partial results retained (see report.json).",
+            file=file,
+        )
+    print(
+        "  Shared helpers are counted once. All percentages use the total sampled weight.\n"
+        "  Fusion and inlining limit attribution; these are not Op wall times.",
+        file=file,
+    )
+    print(f"  Artifacts: {report['output']}\n", file=file)
+
+
+def _native_graph_annotations(graph_profiles):
+    reports = {}
+    for graph, profile in graph_profiles:
+        if profile is None or not profile.native_samples:
+            continue
+        report = profile.native_samples[-1]
+        locations = reports.setdefault(id(report), (report, defaultdict(set)))[1]
+        for profiler in profile._native_profilers:
+            if profiler.fgraph is graph:
+                for node, paths in getattr(profiler, "node_locations", {}).items():
+                    for path in paths:
+                        locations[path].add(node)
+
+    annotations = defaultdict(list)
+    node_costs = {}
+    legends = []
+    for report, locations in reports.values():
+        if not locations:
+            continue
+        legends.append(
+            f"Event: {report['event']}; samples: {report['total_samples']}; "
+            f"JIT address coverage: {report['captured_jit_percent']:.2f}%; "
+            f"library/runtime/unresolved: {report['coverage']['library / unmapped']['percent_self']:.2f}%"
+        )
+        node_weights = Counter()
+        shared_weights = Counter()
+        if "node_attributed_percent" in report:
+            legends.append(
+                f"Node attribution: {report['node_attributed_percent']:.2f}% of total sampled weight"
+            )
+        for row in report.get("node_samples", report["functions"]):
+            candidates = row["locations"]
+            nodes = {node for path in candidates for node in locations.get(path, ())}
+            if not nodes:
+                continue
+            weights = node_weights if len(candidates) == 1 else shared_weights
+            for node in nodes:
+                weights[node] += row["sample_weight"]
+        for node, weight in node_weights.items():
+            annotations[node].insert(
+                0, f"self {100 * weight / report['total_sample_weight']:.2f}%"
+            )
+        for node, weight in shared_weights.items():
+            annotations[node].append(
+                f"shared {100 * weight / report['total_sample_weight']:.2f}%"
+            )
+        for node in node_weights.keys() | shared_weights.keys():
+            node_costs[node] = (node_weights[node] + shared_weights[node]) / report[
+                "total_sample_weight"
+            ]
+        legends.append(f"Artifacts: {report['output']}")
+    if legends:
+        legends.append(
+            "Percentages use the total sampled event weight, including library/runtime code. "
+            "Shared percentages overlap across candidates; unmarked nodes can still contribute."
+        )
+    return (
+        {node: "; ".join(parts) for node, parts in annotations.items()},
+        legends,
+        node_costs,
+    )
+
+
 class ProfileStats:
     """
     Object to store runtime and memory profiling information for all of
@@ -147,6 +294,7 @@ class ProfileStats:
         self.vm_call_time = 0.0
         self.apply_time = defaultdict(float)
         self.apply_callcount = Counter()
+        self.native_samples = []
         # self.apply_cimpl = None
         # self.message = None
 
@@ -178,6 +326,9 @@ class ProfileStats:
     apply_time: dict[tuple["FunctionGraph", Apply], float]
 
     apply_callcount: dict[tuple["FunctionGraph", Apply], int]
+
+    native_samples: list[dict[str, Any]]
+    # Completed native sampling reports, separate from timed Op execution.
 
     apply_cimpl: dict[Apply, bool] | None = None
     # dict from node -> bool (1 if c, 0 if py)
@@ -233,6 +384,8 @@ class ProfileStats:
     # param is called flag_time_thunks because most other attributes with time
     # in the name are times *of* something, rather than configuration flags.
     def __init__(self, atexit_print=True, flag_time_thunks=None, **kwargs):
+        self._native_profilers = []
+        self.native_samples = []
         self.apply_callcount = Counter()
         self.output_size = {}
         self.apply_time = defaultdict(float)
@@ -1362,6 +1515,58 @@ class ProfileStats:
         )
         print("", file=file)
 
+    def sample(
+        self,
+        *,
+        output=None,
+        frequency=499,
+        event=None,
+        n_hot_functions=5,
+        call_graph=True,
+        backend: "NativeSamplingBackend | None" = None,
+    ):
+        """Sample warmed Numba execution inside a native recording context.
+
+        Compile with ``profile=True`` and call the function with each input
+        signature before entering the context. Only calls made by the caller
+        are executed; this method never warms up or repeats the workload.
+        ``output`` can name a new directory for artifacts; by default, a temporary
+        directory is created and printed in :meth:`summary`. The leading
+        ``n_hot_functions`` JIT functions receive annotated disassembly when
+        supported by the backend; set this to zero to disable disassembly.
+        Caller stacks attribute library samples to candidate graph callers when
+        possible. Set ``call_graph=False`` for flat sampling only.
+        On Linux x86-64 the default backend uses perf with DWARF caller recovery,
+        an 8 KiB stack snapshot, and a cached libdw/libelf C helper. It requires
+        ``cc``, the development headers, and ``objdump``. Its default event is
+        ``cycles:u``. ``LinuxPerfBackend()`` selects frame-pointer collection
+        without the helper. Pass a backend implementing
+        ``pytensor.link.numba.profiling.NativeSamplingBackend`` to adapt other
+        platforms or tools. Event names and caller collection are backend-specific.
+        Keep ``numba__cache=True`` and cache files available through decoding.
+        Decoded results are retained. The DWARF backend deletes raw data after
+        successful decoding; use ``LinuxDwarfBackend(keep_raw=True)`` to retain it.
+        """
+        if not self._native_profilers:
+            raise ValueError(
+                "Native sampling requires a Numba function with profile=True"
+            )
+        from pytensor.link.numba.profiling import sample
+
+        return sample(
+            self,
+            output=output,
+            frequency=frequency,
+            event=event,
+            n_hot_functions=n_hot_functions,
+            call_graph=call_graph,
+            backend=backend,
+        )
+
+    def summary_native(self, file, n_functions=20):
+        for report in self.native_samples:
+            _print_native_summary(report, file, n_functions, self.line_width)
+
     def summary(self, file=sys.stderr, n_ops_to_print=20, n_apply_to_print=20):
         self.summary_function(file)
         self.summary_globals(file)
@@ -1370,12 +1575,19 @@ class ProfileStats:
             self.summary_class(file, n_ops_to_print)
             self.summary_ops(file, n_ops_to_print)
             self.summary_nodes(file, n_apply_to_print)
+        elif self.fct_callcount > 0 and self._native_profilers:
+            if not self.native_samples:
+                print(
+                    "  Use profile.sample(output=...) around warmed calls for native sampling.",
+                    file=file,
+                )
         elif self.fct_callcount > 0:
             print(
                 "  No execution time accumulated "
                 "(hint: try config profiling__time_thunks=1)",
                 file=file,
             )
+        self.summary_native(file, n_apply_to_print)
         if config.profiling__debugprint:
             fcts = {fgraph for (fgraph, n) in self.apply_time}
             pytensor.printing.debugprint(fcts, print_type=True)

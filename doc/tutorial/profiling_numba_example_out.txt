@@ -1,0 +1,34 @@
+Native execution sampling (self event weight)
+  Event: cycles:u; samples: 6302
+  Node attribution: 98.58% (one node: 98.58%, shared: 0.00%, unassigned: 1.42%)
+  JIT address coverage: 5.22% (one node: 5.22%, ambiguous: 0.00%, no node: 0.00%)
+  Library/runtime/unresolved: 94.78% (includes graph calls)
+  Percent  Samples  Attribution           Graph nodes / symbol
+    42.81     2688  library candidates    [libm.so.6] __lgamma_r_finite -> graph0/0/3 gammaln (99% of this hotspot at...
+    18.89     1188  library candidates    [cython_special.cpython-312-x86_64-linux-gnu.so] _ZN3xsf6cephes6detail15dig...
+    16.30     1025  library candidates    [cython_special.cpython-312-x86_64-linux-gnu.so] _ZN3xsf6cephes3psiEd.part....
+     4.56      288  library candidates    [libm.so.6] __ieee754_exp_fma -> graph0/0/0 exp (100% of this hotspot attri...
+     4.07      254  one node              graph0/0 Composite{...}
+                     Assembly: hot_1.asm
+  Shared helpers are counted once. All percentages use the total sampled weight.
+  Fusion and inlining limit attribution; these are not Op wall times.
+  Artifacts: /tmp/pytensor-native-profile-cwbfyey1
+
+
+Composite{...}.0 [id A] 0 [self 4.08%]
+ └─ x [id B]
+Composite{...}.1 [id A] 0
+ └─ ···
+
+Inner graphs:
+
+Composite{...} [id A]
+ ← gammaln [id C] [self 48.85%]
+    └─ exp [id D] [self 7.19%]
+       └─ i0 [id E]
+ ← mul [id F]
+    ├─ psi [id G] [self 38.46%]
+    │  └─ exp [id D]
+    │     └─ ···
+    └─ exp [id D]
+       └─ ···
