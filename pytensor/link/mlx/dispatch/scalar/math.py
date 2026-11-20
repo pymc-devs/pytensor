@@ -7,6 +7,7 @@ from pytensor.link.mlx.dispatch.scalar.helpers import (
     _metal_unary_call,
     _working_precision,
 )
+from pytensor.scalar import _gamma_tables as gamma_tables
 from pytensor.scalar.math import (
     GammaLn,
     Log1mexp,
@@ -46,27 +47,81 @@ _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
 _PSI_SHIFTS_SINGLE = 6
 
 
+def _flat(table):
+    return tuple(float(v) for v in np.ravel(table))
+
+
+# The panels cover [1, 64), where Stirling's series takes over
+_TABLE_END = 64.0
+_STIRLING32 = gamma_tables.STIRLING32
+_DSTIRLING32 = _STIRLING32 * np.arange(1, 2 * _STIRLING32.size, 2)
+
+
 # Both functions are a chain of elementwise ops on the vectorized path, long enough that
 # mx.compile splits it into several kernel launches. A kernel is one launch, and it can
-# branch: small positive arguments shift up rather than reflect, and the psi recurrence
-# stops once the argument is large enough for the asymptotic series. Metal's sinpi and
-# tanpi reduce the argument themselves, so the reflections need no half-angle detour.
+# branch, which lets positive arguments read the float32 Chebyshev panels of
+# pytensor.scalar._gamma_tables: a row lookup and a short Horner sum on [1, 64), with no
+# division, where the series and the recurrence above cost several. Below 1 the argument
+# shifts up by one, and from 64 Stirling's series takes over. Negative arguments reflect
+# onto the same positive kernels. Metal's sinpi and tanpi reduce the argument themselves,
+# so the reflections need no half-angle detour.
 _METAL_MATH_HEADER = (
-    _metal_constants(LG_LANCZOS=_LANCZOS_COEFFS, PSI_C=_PSI_COEFFS_SINGLE)
+    _metal_constants(
+        LG_TABLE=_flat(gamma_tables.LGAMMA32),
+        PSI_TABLE=_flat(gamma_tables.PSI32),
+        STIRLING=_flat(_STIRLING32),
+        DSTIRLING=_flat(_DSTIRLING32),
+        INV_POW2=(1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125),
+    )
     + f"""
-#define LG_LANCZOS_N      {len(_LANCZOS_COEFFS)}
-#define LG_LANCZOS_T      {_LANCZOS_G + 0.5}f
-#define LG_LOG_SQRT_2PI   {float(0.5 * np.log(2.0 * np.pi))!r}f
+#define LG_WIDTH          {gamma_tables.LGAMMA32.shape[1]}
+#define PSI_WIDTH         {gamma_tables.PSI32.shape[1]}
+#define STIRLING_C        {float(gamma_tables.STIRLING_C)!r}f
+#define X0_HI             {float(gamma_tables.X0_HI32)!r}f
+#define X0_LO             {float(gamma_tables.X0_LO32)!r}f
 #define LG_LOG_PI         {float(np.log(np.pi))!r}f
-#define PSI_TERMS         {len(_PSI_COEFFS_SINGLE)}
-#define PSI_MIN           {float(_PSI_SHIFTS_SINGLE)}f
+#define TABLE_END         {_TABLE_END}f
 
-// log Gamma(w + 1) for w >= -0.5
-static inline float lg_lgamma1p(float w) {{
-    float series = LG_LANCZOS[0];
-    for (int i = 1; i < LG_LANCZOS_N; ++i) series += LG_LANCZOS[i] / (w + (float)i);
-    float t = w + LG_LANCZOS_T;
-    return LG_LOG_SQRT_2PI + (w + 0.5f) * log(t) - t + log(series);
+// The series of panel m of octave e of y in [1, 64), 32 panels an octave. Scaling by
+// a power of two and subtracting one are exact, so the panel index cannot leave [0, 32)
+static inline float panel_series(constant float* table, int width, float y) {{
+    int e = int(y >= 2.0f) + int(y >= 4.0f) + int(y >= 8.0f) + int(y >= 16.0f)
+            + int(y >= 32.0f);
+    float u = (y * INV_POW2[e] - 1.0f) * 32.0f;
+    int m = int(u);
+    float s = 2.0f * (u - float(m)) - 1.0f;
+    constant float* row = table + (32 * e + m) * width;
+    float p = row[width - 1];
+    for (int k = width - 2; k >= 0; --k) p = p * s + row[k];
+    return p;
+}}
+
+// lgamma(x) for finite x > 0
+static inline float lgamma_positive(float x) {{
+    if (x >= TABLE_END) {{
+        float inv = 1.0f / x;
+        float series = inv * (STIRLING[0] + STIRLING[1] * inv * inv);
+        return (x - 0.5f) * (log(x) - 1.0f) + STIRLING_C + series;
+    }}
+    // the table holds lgamma(y) / ((y - 1) (y - 2)) on [1, 4)
+    float f = panel_series(LG_TABLE, LG_WIDTH, x >= 1.0f ? x : x + 1.0f);
+    if (x >= 4.0f) return f;
+    if (x >= 1.0f) return (x - 1.0f) * (x - 2.0f) * f;
+    return x * (x - 1.0f) * f - log(x);
+}}
+
+// digamma(x) for x >= 0 or +inf, -inf at 0
+static inline float psi_positive(float x) {{
+    if (x >= TABLE_END) {{
+        float inv = 1.0f / x;
+        float p = inv * inv;
+        return log(x) - 0.5f * inv - p * (DSTIRLING[0] + DSTIRLING[1] * p);
+    }}
+    float y = x >= 1.0f ? x : x + 1.0f;
+    float r = panel_series(PSI_TABLE, PSI_WIDTH, y);
+    // the table holds digamma(y) / (y - x0) on [1, 2), and y - X0_HI is exact
+    if (y < 2.0f) r = r * (y - X0_HI) - r * X0_LO;
+    return x >= 1.0f ? r : r - 1.0f / x;
 }}
 """
 )
@@ -76,17 +131,17 @@ _METAL_GAMMALN_SOURCE = """
     uint i = thread_position_in_grid.x;
     float z = (float)x[i];
     float res;
-    if (isinf(z)) {
-        // the series forms inf - inf at either end, where both limits are +inf
+    if (isnan(z)) {
+        res = z;
+    } else if (isinf(z)) {
+        // both limits are +inf
         res = INFINITY;
-    } else if (z >= 0.5f) {
-        res = lg_lgamma1p(z - 1.0f);
     } else if (z > 0.0f) {
-        res = lg_lgamma1p(z) - log(z);
+        res = lgamma_positive(z);
     } else {
         // log|sin(pi z)| is -inf at the poles, which makes the result +inf there
         float log_sin = log(fabs(sinpi(z)));
-        res = LG_LOG_PI - log_sin - lg_lgamma1p(-z);
+        res = LG_LOG_PI - log_sin - lgamma_positive(1.0f - z);
     }
     out[i] = (T)res;
 """
@@ -95,19 +150,14 @@ _METAL_GAMMALN_SOURCE = """
 _METAL_PSI_SOURCE = """
     uint i = thread_position_in_grid.x;
     float z = (float)x[i];
-    float y = (z < 0.0f) ? 1.0f - z : z;
-    float res = 0.0f;
-    while (y < PSI_MIN) {
-        res -= 1.0f / y;
-        y += 1.0f;
-    }
-    float r2 = 1.0f / (y * y);
-    float series = PSI_C[PSI_TERMS - 1];
-    for (int k = PSI_TERMS - 2; k >= 0; --k) series = PSI_C[k] + series * r2;
-    res += log(y) - 0.5f / y - series * r2;
-    if (z < 0.0f) {
+    float res;
+    if (isnan(z)) {
+        res = z;
+    } else if (z >= 0.0f) {
+        res = psi_positive(z);
+    } else {
         // the tangent lands on a true zero at every pole, so those come back infinite
-        res -= M_PI_F / tanpi(z - rint(z));
+        res = psi_positive(1.0f - z) - M_PI_F / tanpi(z - rint(z));
     }
     out[i] = (T)res;
 """
