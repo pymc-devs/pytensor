@@ -12,6 +12,7 @@ import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.assumptions import assume
 from pytensor.compile import optdb
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.debugmode import DebugMode
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
@@ -332,6 +333,31 @@ class TestAlgebraicCanonizer:
             [x, y], [pt.add(0.0, x, y)], include=[], custom_rewrite=local_add_canonizer
         )
         result.assert_graph(x + y)
+
+    @pytest.mark.parametrize("pad_twice", [False, True])
+    def test_neg_of_left_expanded_flat_add(self, pad_twice):
+        # Regression test for #2697.
+        x, y = pt.vectors("xy")
+        total = x + y
+        padded = total[None, :]
+        if pad_twice:
+            padded = padded[None, :, :]
+        negated = -padded
+        result = RewriteTester(
+            [x, y], [negated, total], include=None, custom_rewrite=local_add_canonizer
+        )
+        result.assert_graph(negated, total)
+
+    def test_neg_of_left_expanded_zero_input_op(self):
+        value = OpFromGraph([], [pt.constant([1.0, 2.0])])()
+        negated = -value[None, :]
+        result = RewriteTester(
+            [],
+            [negated],
+            include=None,
+            custom_rewrite=in2out(local_add_canonizer, ignore_newtrees=True),
+        )
+        result.assert_graph(negated)
 
     def test_elemwise_multiple_inputs_rewrites(self):
         """Verify that the `AlgebraicCanonizer` merges sequential ``Elemwise({mul,add})``."""

@@ -1308,6 +1308,16 @@ class AlgebraicCanonizer(NodeRewriter):
     def tracks(self):
         return [self.main, self.inverse, self.reciprocal]
 
+    @staticmethod
+    def _strip_left_padding(var):
+        # Elemwise can recreate leading broadcast dimensions when rebuilding
+        # the expression.
+        while isinstance(op := var.owner_op, DimShuffle) and (
+            op.is_left_expand_dims or op.new_order == tuple(range(op.input_ndim))
+        ):
+            var = var.owner.inputs[0]
+        return var
+
     def get_num_denum(self, inp):
         r"""
         This extract two lists, ``num`` and ``denum``, such that the input is:
@@ -1356,15 +1366,11 @@ class AlgebraicCanonizer(NodeRewriter):
             elif op is reciprocal or op == reciprocal:
                 # reciprocal(x) contributes x with num/denum flipped
                 stack.append((apply.inputs[0], not inverted))
-            elif isinstance(op, DimShuffle) and (
-                op.is_left_expand_dims
-                or op.new_order == tuple(range(apply.inputs[0].type.ndim))
+            elif (
+                isinstance(op, DimShuffle)
+                and (unpadded := self._strip_left_padding(v)) is not v
             ):
-                # DimShuffles that only complete the shape with broadcastable
-                # dimensions to the left are inserted automatically by Elemwise
-                # when inputs have different numbers of dimensions. They are
-                # transparent to the walk: merge_num_denum recreates them.
-                stack.append((apply.inputs[0], inverted))
+                stack.append((unpadded, inverted))
             else:
                 (denum if inverted else num).append(v)
         return num, denum
@@ -1676,32 +1682,26 @@ class AlgebraicCanonizer(NodeRewriter):
         orig_num, orig_denum = self.get_num_denum(out)
         num, denum = self.simplify(list(orig_num), list(orig_denum), out.type)
 
-        if (
-            # Variable equality is identity, so these are cheap element-wise
-            # identity checks.
-            orig_num == num
-            and orig_denum == denum
-            and
-            # Check to see if we've collapsed some nested ops.
-            not (
-                len(orig_denum) == 0
-                and
-                # Make sure this change would increase the number of vector
-                # arguments--decreasing the number of unnecessary `self.main`
-                # nodes.
-                len(node.inputs) < len(orig_num)
-            )
-            and
-            # Do a similar check for the reciprocal op.
-            not (
-                self.use_reciprocal
+        # With the same terms, only rebuild to combine more inputs in one main Op.
+        if orig_num == num and orig_denum == denum:
+            if not orig_denum:
+                term_count = len(orig_num)
+                existing_node = node
+            elif (
+                not orig_num
+                and self.use_reciprocal
                 and (op is reciprocal or op == reciprocal)
-                and len(orig_num) == 0
-                and node.inputs[0].owner
-                and len(node.inputs[0].owner.inputs) < len(orig_denum)
-            )
-        ):
-            return False
+            ):
+                term_count = len(orig_denum)
+                existing_node = self._strip_left_padding(node.inputs[0]).owner
+            else:
+                return False
+            if (
+                term_count < 2
+                or existing_node is None
+                or term_count <= len(existing_node.inputs)
+            ):
+                return False
 
         new = self.merge_num_denum(num, denum)
         if new.type.dtype != out.type.dtype:
