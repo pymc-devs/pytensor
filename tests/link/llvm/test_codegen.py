@@ -308,7 +308,7 @@ def test_empty_arrays():
 def test_alias_metadata_on_array_accesses():
     # inputs and written outputs get scopes and TBAA tags; the gather's inner row copy
     # then doesn't reload the index (and vectorizes)
-    from pytensor.link.llvm.codegen.function import build_node_function
+    from pytensor.link.llvm.codegen.node import build_node_function
 
     x = pt.matrix("x")
     i = pt.vector("i", dtype="int32")

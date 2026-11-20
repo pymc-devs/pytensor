@@ -14,20 +14,9 @@ from pytensor.graph.op import Op
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.emit import (  # noqa: E402
-    Array,
-    load,
-    set_output,
-    unknown_layout,
-)
-from pytensor.link.llvm.codegen.function import (  # noqa: E402
-    OutputMode,
-    build_node_function,
-    llvm_emit,
-    llvm_layout,
-    node_outputs,
-    output_aliases,
-)
+from pytensor.link.llvm.codegen.emit import Array, load, unknown_layout  # noqa: E402
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout  # noqa: E402
+from pytensor.link.llvm.codegen.signature import OutputMode, node_outputs  # noqa: E402
 from pytensor.link.llvm.layout import Layout  # noqa: E402
 from pytensor.link.llvm.plan.memory import (  # noqa: E402
     first_fit,
@@ -41,17 +30,6 @@ P, R = OutputMode.PROVIDED, OutputMode.RETURNED
 
 
 # ------------------------------------------------------------------ what the op says
-
-
-def test_aliases_come_from_the_view_map():
-    op = SimpleNamespace(view_map={0: [1]}, destroy_map={})
-    assert output_aliases(op, 0) == (1,) and output_aliases(op, 1) == ()
-    op = SimpleNamespace(view_map={0: [0, 2]})
-    assert output_aliases(op, 0) == (0, 2)
-    # what an op destroys says nothing about its outputs
-    op = SimpleNamespace(view_map={}, destroy_map={0: [0]})
-    assert output_aliases(op, 0) == ()
-    assert output_aliases(SimpleNamespace(), 0) == ()
 
 
 def test_how_an_output_comes_to_be_follows_from_the_op_and_the_type():
@@ -161,9 +139,9 @@ def _(op, node, cg, inputs, outputs):
     flag, x, y = inputs
     layout = x.layout.join(y.layout, (None,), 8)
     with b.if_(b.ne(load(b, flag.dtype, flag.data), 0)):
-        outputs[0].set_view(x.view(x.data, x.shape, x.strides, layout))
+        outputs[0].view(x.view(x.data, x.shape, x.strides, layout))
     with b.else_():
-        outputs[0].set_view(y.view(y.data, y.shape, y.strides, layout))
+        outputs[0].view(y.view(y.data, y.shape, y.strides, layout))
 
 
 pick = Pick()
@@ -201,43 +179,10 @@ def test_an_output_may_alias_several_inputs():
         np.testing.assert_allclose(r1, want * 2)
         np.testing.assert_allclose(r2, want[::-1] + 1)
     dump = g.maker.linker.program.dump()
-    assert "may be a view of %" in dump and dump.count("Pick") == 1
+    assert "may be (a view of) %" in dump and dump.count("Pick") == 1
 
 
-def test_views_are_checked_against_the_view_map():
-    x, y = pt.vector("x"), pt.vector("y")
-
-    class Wrong(Pick):
-        view_map = {0: [1]}
-
-    @llvm_emit.register(Wrong)
-    def _(op, node, cg, inputs, outputs):
-        outputs[0].set_view(inputs[2])  # input 2 isn't in the view_map
-
-    with pytest.raises(
-        ValueError,
-        match=r"a view of input 2, but the op's view_map only lets this output alias \[1\]",
-    ):
-        build_node_function(
-            ir.Module("m"), Wrong()(pt.scalar("f", dtype="int8"), x, y).owner, "node"
-        )
-
-    class NoView(Op):
-        def make_node(self, a):
-            return Apply(self, [a], [a.type()])
-
-        def perform(self, node, inputs, output_storage):
-            output_storage[0][0] = inputs[0].copy()
-
-    @llvm_emit.register(NoView)
-    def _(op, node, cg, inputs, outputs):
-        outputs[0].set_view(inputs[0])
-
-    with pytest.raises(ValueError, match="this output can't be a view"):
-        build_node_function(ir.Module("m"), NoView()(x).owner, "node")
-
-
-def test_set_output_copies_where_a_view_isnt_allowed():
+def test_a_view_is_copied_where_the_output_cant_be_one():
     class Passes(Op):
         def __init__(self, view):
             if view:
@@ -252,9 +197,7 @@ def test_set_output_copies_where_a_view_isnt_allowed():
     @llvm_emit.register(Passes)
     def _(op, node, cg, inputs, outputs):
         (x,) = inputs
-        set_output(
-            cg, outputs[0], x.view(x.data, [cg.b.i64(2)], [cg.b.mul(x.strides[0], 2)])
-        )
+        outputs[0].view(x.view(x.data, [cg.b.i64(2)], [cg.b.mul(x.strides[0], 2)]))
 
     x = pt.vector("x", shape=(4,))
     v = np.arange(4.0)

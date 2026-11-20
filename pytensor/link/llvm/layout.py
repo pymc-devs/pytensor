@@ -24,7 +24,7 @@ its strides. They come from how a value is produced:
 * graph inputs are DYNAMIC unless checked.
 
 How each output comes to be, and with which layout, is declared per op by
-`llvm_layout` (codegen/function.py). What it declares is binding: the `LayoutFeature`
+`llvm_layout` (codegen/interface.py). What it declares is binding: the `LayoutFeature`
 of the graph holds the layout of every value (`node_outputs`), and the planner makes
 whatever runs a node give its outputs those layouts.
 """
@@ -480,7 +480,7 @@ def infer_layouts(fgraph, input_layouts=None) -> dict:
     """{variable: Layout} for the variables of `fgraph` (`node_outputs`; None for
     those that aren't tensors). `input_layouts`: per graph input (default: nothing
     known)."""
-    from pytensor.link.llvm.codegen.function import node_outputs
+    from pytensor.link.llvm.codegen.signature import node_outputs
 
     lays = {}
     for k, v in enumerate(fgraph.inputs):
@@ -546,7 +546,7 @@ class LayoutFeature(Feature):
 
     def llvm_layout(self, fgraph, var) -> Layout | None:
         """The layout of `var`."""
-        from pytensor.link.llvm.codegen.function import node_outputs
+        from pytensor.link.llvm.codegen.signature import node_outputs
 
         cache = self.cache
         if var in cache:

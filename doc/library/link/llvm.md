@@ -233,9 +233,9 @@ Memory reached through a view is only written by an item that overwrites it.
 Node functions tell LLVM exactly that: `Builder.alias_domain(name)` starts a scope
 domain and a TBAA root for the function, and `Builder.mark_array(ptr, scope, noalias)`
 marks the data pointer of each input (`i<pos>`) and of each written output (`o<j>`).
-A written output doesn't alias the inputs or the other outputs; an input that is
-overwritten carries its output's scope instead of one of its own, and inputs of one
-node may overlap each other freely (they are only read). Pointers derived from a
+A written output doesn't alias the inputs or the other outputs, and neither does an
+input the node may overwrite (`writable`); inputs that are only read may overlap each
+other freely. Pointers derived from a
 marked one (GEPs, captures into parallel bodies) inherit the marks; loads and stores
 through them get `!alias.scope`, `!noalias` and a `!tbaa` tag of the accessed type.
 Accesses through anything else (slots, shapes, pointers through phis or selects) get
@@ -250,14 +250,14 @@ before vectorized loops.
 ## 3. Outputs
 
 How an output comes to be follows from the op and the types, not from the emitter
-(`node_outputs` in `codegen/function.py`):
+(`node_outputs` in `codegen/signature.py`):
 
 | the op says | the type says | mode |
 |---|---|---|
 | new memory (no `view_map` entry) | static shape | provided |
 | new memory | shape known at run time only | returned, aliases nothing |
 | may be a view (`view_map[o] = [i, ...]`) | | returned, may alias inputs `i, ...` |
-| destroys input *i*, and the planner grants it | | in place |
+| destroys input *i* (of the output's type), and the planner lets the node overwrite it | | returned, may alias input *i* |
 | | a ScalarType | scalar |
 | | no data (a random generator) | absent |
 
@@ -273,15 +273,15 @@ kernel returns new memory of unknown layout. Declarations are binding:
   own layout (C-contiguous for a graph output); one declared otherwise is written to an
   arena temporary and copied. A graph output handed over in a buffer is handed over in
   any layout;
-* returned: `allocate` gives memory in the declared layout, and `set_view` checks,
-  when generating the code, that the view's layout implies the declared one;
-* in place: the output has the input's layout.
+* returned: `allocate` gives memory in the declared layout, and `view` checks, when
+  generating the code, that the view's layout implies the declared one;
+* an output the op destroys an input for has that input's layout, where new memory can
+  have it too (`new_memory_layout`), whether it ends up being the input's memory or not.
 
 | mode | argument | the caller | the called function |
 |---|---|---|---|
 | provided | the representation, like an input | owns the memory, chooses lengths and strides | writes the elements |
 | returned | `ptr` to an output slot | zero-initializes the slot | allocates and fills the slot (one new reference), or fills data, lengths and strides of a view of an input the op names |
-| in place | none: the output is the input | makes sure nothing else reads the input | writes the input's elements |
 | scalar | `ptr` to the value | | stores the value |
 | absent | none | | (a value without data: a random generator) |
 
@@ -292,30 +292,27 @@ that input's. One that may alias several comes back without an owner: the unit (
 program) keeps all the candidates alive as long as the output, and copies it if it
 leaves.
 
-**What emitters do.** Each output the emitter gets has the same three methods, so an
-emitter doesn't need to know the mode:
+**What emitters do** (`codegen/interface.py`). An emitter gets an `Array` per tensor
+input, read-only unless the node may overwrite it (`writable`), and a `NodeOutput` per
+output, with the same methods whatever the mode, so it doesn't need to know it:
 
-* `allocate(shape)`: memory for the result (the provided memory, new memory, or,
-  in place, the input's memory still holding the input's values);
-* `overwrite(cg, x)`: memory holding the values of input `x`, for results computed by
-  modifying `x`: `x`'s own memory in place, else `allocate` and a copy;
-* `set_view(array)`: the output is this view of an input (`x.view(...)`). Only where
-  the `view_map` allows that input, and checked when the code is generated.
-  `set_output(cg, out, array)` does this if the output may be a view of the array's
-  input and copies otherwise.
+* `allocate(shape)`: memory for the result (the provided memory, or new memory);
+* `view(array)`: the result is `array`, which lies in an input's memory (`x.view(...)`):
+  a view where the output may be one (the `view_map` lists that input, or it is the
+  writable input the op destroys for this output), else a copy into `allocate`d memory;
+* `set(value)`: the value of a ScalarType output.
 
-Mistakes that are cheap to see are errors when the code is generated (a view of an
-input the `view_map` doesn't name, `overwrite` with another array than the destroyed
-input, a layout that doesn't hold, an output never produced). Beyond that
-implementations are trusted: an emitter that writes to an input it wasn't given as an
-output is a bug nothing catches.
+`overwrite_or_copy(cg, out, x)` gives memory holding the values of `x` for results
+computed by modifying `x`: `x` itself where it is writable, else a copy.
 
-**In place.** An emitter that can write its result over an input says so:
-`llvm_inplace(op, node) -> {output: input}`, for pairs in the op's `destroy_map`. The
-default is `{}`: ignore `destroy_map` and produce new memory, which is always correct.
-Elemwise (every element is read before it is written), IncSubtensor and
-AdvancedIncSubtensor opt in. The planner grants a pair (`Planner.grant_inplace`) when
-nothing else can see the memory:
+Mistakes that are cheap to see are errors when the code is generated (storing into an
+input that isn't writable, a view whose layout doesn't hold, an output never produced).
+Beyond that implementations are trusted: an emitter that writes to an input through a
+raw pointer is a bug nothing catches.
+
+**In place.** The planner decides which inputs a node may overwrite
+(`Planner.writable_inputs`): inputs its op destroys, where nothing else can see the
+memory:
 
 * the node is one of the graph being planned, and that graph has a DestroyHandler
   (PyTensor then guarantees the destroyed variable isn't a protected input or constant
@@ -326,14 +323,16 @@ nothing else can see the memory:
 * it shares no memory with the node's other inputs (PyTensor's `ViewFeature` says which
   graph variables a value's memory may lie in).
 
-Nodes inside units, in inlined inner graphs, in Scan bodies and Blockwise cores never
-work in place. A numba kernel does what PyTensor's numba implementation does, which
+The emitter gets those inputs `writable` and decides whether to write over them: Elemwise
+(every element is read before it is written), IncSubtensor, AdvancedIncSubtensor and
+Scan (its state buffers) do; an emitter that ignores it produces new memory, which is
+always correct. Nodes inside units, in inlined inner graphs, in Scan bodies and
+Blockwise cores never work in place. A numba kernel does what PyTensor's numba implementation does, which
 overwrites destroyed inputs; where the conditions above don't hold, and always inside
 units, the call passes it copies (`CalledKernel.destroys`).
 
-In generated code an in-place output is the input's array under the output's value
-id; the arena keeps the memory until the last reader of either (`plan/memory.py`
-treats the output as a view of the input).
+An output that may be the input's memory is a returned output that may alias it, as a
+view: the arena keeps the memory until the last reader of either (`plan/memory.py`).
 
 **Layout.** Nothing is contiguous unless the signature says so (section 1a). Every
 output's layout is part of the signature, as declared (above); a provided output can
@@ -669,9 +668,9 @@ The same functions, with their machine code, go to a jitdump, `jit-<pid>.dump` i
 `PYTENSOR_LLVM_JITDUMP_DIR` (default `/tmp`), for `perf annotate`. With debug
 information (section 10a) each function also gets its source lines: a jitdump holds one
 file:line per address, so of the Python call stack in the debug information, the line
-of the innermost frame outside the generic helpers (`emit.py`, `num.py`, `types.py`),
-usually the op's emitter. The line tables are read from the object's DWARF (`gimli`,
-relocations applied, `addr2line` for the inlined frames). Usage:
+of the innermost frame outside the generic helpers (`emit.py`, `interface.py`, `num.py`,
+`types.py`), usually the op's emitter. The line tables are read from the object's DWARF
+(`gimli`, relocations applied, `addr2line` for the inlined frames). Usage:
 
 ```
 PYTENSOR_LLVM_PERF=1 PYTENSOR_LLVM_DEBUG_INFO=1 perf record -k 1 -g python script.py

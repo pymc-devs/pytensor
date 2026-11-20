@@ -23,7 +23,7 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit
+from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize
 from pytensor.link.llvm.layout import Layout
 

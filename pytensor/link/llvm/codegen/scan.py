@@ -27,8 +27,6 @@ from dataclasses import dataclass
 
 from pytensor.link.llvm.codegen.emit import (
     Array,
-    InplaceOutput,
-    SlotOutput,
     advance,
     cast,
     constant,
@@ -37,7 +35,12 @@ from pytensor.link.llvm.codegen.emit import (
     load,
     store,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    NodeOutput,
+    SlotOutput,
+    llvm_emit,
+    llvm_layout,
+)
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
 from pytensor.link.llvm.codegen.unit import (
     Destination,
@@ -58,16 +61,6 @@ def register():
             None if is_absent(o.type) else Layout.c(o.type.ndim) for o in node.outputs
         ]
 
-    @llvm_inplace.register(Scan)
-    def _(op, node):
-        # a traced state's buffer can be the outer one (output k destroys input
-        # 1 + n_seqs + k); not in while-loops, whose outputs are truncated
-        info = op.info
-        if info.as_while:
-            return {}
-        n_traced = info.n_mit_mot + info.n_mit_sot + info.n_sit_sot
-        return {k: 1 + info.n_seqs + k for k in range(n_traced)}
-
     @llvm_emit.register(Scan)
     def _(op, node, cg, inputs, outputs):
         if cg.body is None or cg.links is None or cg.module is None:
@@ -82,7 +75,7 @@ def register():
 class _StateBuffer:
     """The buffer of a traced state (mit-mot, mit-sot, sit-sot): the outer output."""
 
-    output: SlotOutput | InplaceOutput
+    output: NodeOutput
     buffer: Array
     #: rows before the one iteration 0 reads as tap 0 (the initial values)
     lookback: int
@@ -249,8 +242,9 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
         reads = [int(t) for t in reads]
         lookback = -min(min(reads, default=0), 0)
         is_mit_mot = k < info.n_mit_mot
-        if isinstance(out, InplaceOutput):
-            buffer = out.overwrite(cg, init)
+        if init.writable:
+            # the outer buffer itself, if the output may be it
+            buffer = out.view(init)
         else:
             buffer = out.allocate(list(init.shape))
             if is_mit_mot:

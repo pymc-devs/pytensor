@@ -13,11 +13,9 @@ from pytensor.tensor.elemwise import DimShuffle
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.function import (  # noqa: E402
-    build_kernel_wrapper,
-    build_node_function,
-    node_outputs,
-)
+from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
+from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
+from pytensor.link.llvm.codegen.signature import node_outputs  # noqa: E402
 from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
 
@@ -258,7 +256,7 @@ def test_compiled_graph_has_the_layouts_of_its_values():
 def _blocks(node, lays):
     import pytensor_llvm.ir as pir
 
-    from pytensor.link.llvm.codegen.function import build_node_function
+    from pytensor.link.llvm.codegen.node import build_node_function
 
     m = pir.Module("t")
     build_node_function(m, node, "node", in_layouts=lays)
@@ -334,7 +332,7 @@ def test_elemwise_output_follows_its_inputs():
 
 
 def test_declared_outputs():
-    from pytensor.link.llvm.codegen.function import OutputMode
+    from pytensor.link.llvm.codegen.signature import OutputMode
 
     x = pt.dmatrix("x")
     (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
@@ -374,12 +372,8 @@ def test_provided_layouts_are_binding():
 def test_view_layout_is_checked_when_generating():
     from pytensor.graph.basic import Apply
     from pytensor.graph.op import Op
-    from pytensor.link.llvm.codegen.emit import Array
-    from pytensor.link.llvm.codegen.function import (
-        build_node_function,
-        llvm_emit,
-        llvm_layout,
-    )
+    from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+    from pytensor.link.llvm.codegen.node import build_node_function
 
     class BadTranspose(Op):
         """Claims its view is C-contiguous, but returns the transpose."""
@@ -400,7 +394,7 @@ def test_view_layout_is_checked_when_generating():
     def _(op, node, cx, inputs, outputs):
         x = inputs[0]
         lay = Layout.make([None, None], (1, 0), (PACKED, PACKED))
-        outputs[0].set_view(Array(x.dtype, x.data, x.shape[::-1], x.strides[::-1], lay))
+        outputs[0].view(x.view(x.data, x.shape[::-1], x.strides[::-1], lay))
 
     x = pt.dmatrix("x")
     node = BadTranspose()(x).owner
@@ -409,7 +403,7 @@ def test_view_layout_is_checked_when_generating():
 
 
 def test_kernels_declare_their_outputs():
-    from pytensor.link.llvm.codegen.function import OutputMode
+    from pytensor.link.llvm.codegen.signature import OutputMode
     from pytensor.link.llvm.rust_kernels import rust_kernel, rust_kernel_outputs
 
     x = pt.dmatrix("x")

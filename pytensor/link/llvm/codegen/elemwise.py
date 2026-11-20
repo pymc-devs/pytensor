@@ -22,7 +22,7 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_inplace, llvm_layout
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.link.llvm.layout import PACKED, Layout, common_order
@@ -70,18 +70,16 @@ def _(op, node, in_layouts):
     return layouts
 
 
-@llvm_inplace.register(Elemwise)
-def _(op, node):
-    # Every element is read before it is written, so an output can be an input's
-    # memory (`allocate` gives it back, with the input's values).
-    return dict(op.inplace_pattern)
-
-
 @llvm_emit.register(Elemwise)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     shape = broadcast_shape(cg, node, inputs)
-    outs = [o.allocate(shape) for o in outputs]
+    # every element is read before it is written: an output can be the memory of an
+    # input it may overwrite
+    outs = []
+    for k, o in enumerate(outputs):
+        x = inputs[op.inplace_pattern[k]] if k in op.inplace_pattern else None
+        outs.append(o.view(x) if x is not None and x.writable else o.allocate(shape))
     in_dtypes = [check_dtype(v.type.dtype) for v in node.inputs]
     out_dtypes = [check_dtype(v.type.dtype) for v in node.outputs]
     # inputs that are one element for the whole loop are read once, before it
@@ -118,7 +116,7 @@ def _(op, node, cg, inputs, outputs):
     ]
     res = emit_scalar(op, cg.b, args, [check_dtype(o.type.dtype) for o in node.outputs])
     for out, v in zip(outputs, res, strict=True):
-        out.set(cg.b, v)
+        out.set(v)
 
 
 # ------------------------------------------------------------------ CAReduce

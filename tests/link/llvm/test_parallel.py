@@ -80,7 +80,7 @@ def test_large_elemwise_and_reductions(static):
 
 
 def test_small_loops_have_no_region():
-    from pytensor.link.llvm.codegen.function import build_node_function
+    from pytensor.link.llvm.codegen.node import build_node_function
 
     small = pt.tensor("s", shape=(10, 10))
     large = pt.tensor("l", shape=(1000, 1000))

@@ -1,5 +1,6 @@
 """Tasks that overwrite an input: what the op destroys (`destroy_map`), where the
-emitter can (`llvm_inplace`) and the planner sees that nothing else reads the memory."""
+planner sees that nothing else reads the memory (the input is `writable`) and the
+emitter does."""
 
 import numpy as np
 import pytest
@@ -17,12 +18,17 @@ from pytensor.graph.op import Op
 
 pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen.emit import copy, for_each, load, store
-from pytensor.link.llvm.codegen.function import (
-    OutputMode,
-    inplace_outputs,
+from pytensor_llvm import ir
+
+from pytensor.link.llvm.codegen.emit import for_each, load, store
+from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
-    llvm_inplace,
+    overwrite_or_copy,
+)
+from pytensor.link.llvm.codegen.node import build_node_function
+from pytensor.link.llvm.codegen.signature import (
+    OutputMode,
+    destroyed_input,
     node_outputs,
 )
 from pytensor.link.llvm.plan.memory import lifetimes, place_temporaries
@@ -33,7 +39,7 @@ from tests.link.llvm.test_aliasing import item
 
 # (fused, a chain of Elemwise is one loop and has nothing to overwrite)
 MODE = get_mode("LLVM").excluding("fusion")
-P, R, I = OutputMode.PROVIDED, OutputMode.RETURNED, OutputMode.INPLACE
+P, R = OutputMode.PROVIDED, OutputMode.RETURNED
 
 
 def compiled(inputs, outputs, mode=MODE):
@@ -132,18 +138,16 @@ def test_layouts_are_checked_with_overwriting():
 # ------------------------------------------------------------------ what the op says
 
 
-def test_only_what_the_op_destroys_and_the_emitter_can_overwrite():
+def test_an_output_may_be_the_input_it_overwrites():
     x = pt.matrix("x")
-    plain = pt.exp(x).owner
-    assert inplace_outputs(plain, {}) == {}
+    assert destroyed_input(pt.exp(x).owner, 0) is None
     inplace = (
         pytensor.function([x], pt.exp(x * 2), mode=MODE).maker.fgraph.outputs[0].owner
     )
     assert inplace.op.destroy_map == {0: [0]}
-    assert llvm_inplace(inplace.op, inplace) == {0: 0}
-    assert inplace_outputs(inplace, {}) == {0: 0}
-    (o,) = node_outputs(inplace, inplace={0: 0})
-    assert o.mode is I and o.aliases == (0,)
+    assert destroyed_input(inplace, 0) == 0
+    (o,) = node_outputs(inplace, writable={0})
+    assert o.mode is R and o.aliases == (0,)
     (o,) = node_outputs(inplace)
     assert o.mode is R and o.aliases == ()  # without the planner's word: new memory
 
@@ -164,10 +168,7 @@ class Halve(Op):
         output_storage[0][0] = x
 
 
-@llvm_emit.register(Halve)
-def _(op, node, cg, inputs, outputs):
-    (x,) = inputs
-    out = outputs[0].overwrite(cg, x)  # x's memory if we may, else a copy of x
+def _halve(cg, out):
     b = cg.b
     for_each(
         b,
@@ -177,28 +178,38 @@ def _(op, node, cg, inputs, outputs):
     )
 
 
-class HalveInPlace(Halve):
-    """The same, and the emitter says it can overwrite."""
+@llvm_emit.register(Halve)
+def _(op, node, cg, inputs, outputs):
+    _halve(cg, overwrite_or_copy(cg, outputs[0], inputs[0]))
 
 
-@llvm_inplace.register(HalveInPlace)
-def _(op, node):
-    return {0: 0}
+class HalveCopying(Halve):
+    """The same, into new memory: its emitter ignores that it may overwrite x."""
 
 
-def test_an_emitter_that_doesnt_opt_in_gets_a_copy():
+@llvm_emit.register(HalveCopying)
+def _(op, node, cg, inputs, outputs):
+    (x,) = inputs
+    out = outputs[0].allocate(x.shape)
+    b = cg.b
+    for_each(
+        b,
+        x.shape,
+        [x, out],
+        lambda p: store(b, out.dtype, b.fmul(load(b, x.dtype, p[0]), 0.5), p[1]),
+    )
+
+
+def test_the_emitter_decides_whether_to_overwrite():
     x = pt.matrix("x")
-    f, stats = validated([x], [Halve()(x * 2)])
-    assert stats.inplace == []  # (no `llvm_inplace` for Halve)
-    np.testing.assert_allclose(f(X), X)
-
-    f, stats = validated([x], [HalveInPlace()(x * 2)])
-    assert stats.inplace == ["HalveInPlace"]
-    np.testing.assert_allclose(f(X), X)
+    for op in [Halve(), HalveCopying()]:
+        f, stats = validated([x], [op(x * 2)])
+        assert stats.inplace == [str(op)]  # it may
+        np.testing.assert_allclose(f(X), X)
 
     # a graph nobody validated (no DestroyHandler): nothing is overwritten
     program, stats = build_program(
-        FunctionGraph([x], [HalveInPlace()(x)], clone=False), Options()
+        FunctionGraph([x], [Halve()(x)], clone=False), Options()
     )
     assert stats.inplace == []
     xv = X.copy()
@@ -206,24 +217,23 @@ def test_an_emitter_that_doesnt_opt_in_gets_a_copy():
     np.testing.assert_array_equal(xv, X)
 
 
-def test_overwrite_takes_the_destroyed_input_only():
+def test_only_the_inputs_the_node_may_overwrite_are_writable():
     x, y = pt.matrix("x"), pt.matrix("y")
 
-    class Wrong(Halve):
+    class Two(Halve):
         def make_node(self, x, y):
             return Apply(self, [x, y], [x.type()])
 
-    @llvm_emit.register(Wrong)
+    seen = []
+
+    @llvm_emit.register(Two)
     def _(op, node, cg, inputs, outputs):
-        copy(cg, inputs[0], outputs[0].overwrite(cg, inputs[1]))
+        seen.append([a.writable for a in inputs])
+        inputs[1].store(cg.b, 0.0, 0, 0)
 
-    llvm_inplace.register(Wrong, lambda op, node: {0: 0})
-    from pytensor_llvm import ir
-
-    from pytensor.link.llvm.codegen.function import build_node_function
-
-    with pytest.raises(ValueError, match="overwrites input 0"):
-        build_node_function(ir.Module("m"), Wrong()(x, y).owner, "f", inplace={0: 0})
+    with pytest.raises(ValueError, match="storing into an input"):
+        build_node_function(ir.Module("m"), Two()(x, y).owner, "f", writable={0})
+    assert seen == [[True, False]]
 
 
 # ------------------------------------------------------------------ numba kernels
@@ -309,7 +319,7 @@ def test_a_value_that_stands_for_several_variables_is_not_overwritten():
 def test_an_overwritten_value_lives_on_under_another_name():
     items = [
         item([0], [1], [P]),
-        item([1], [2], [I], [(0,)]),  # 2 is 1, overwritten
+        item([1], [2], [R], [(0,)]),  # 2 is 1, overwritten
         item([0], [3], [P]),
         item([2, 3], [4], [P]),
     ]
@@ -319,5 +329,5 @@ def test_an_overwritten_value_lives_on_under_another_name():
     assert offsets[1] != offsets[3]
 
     # overwriting the function's output: alive until the end
-    _, end = lifetimes([item([0], [1], [P]), item([1], [2], [I], [(0,)])], kept=[2])
+    _, end = lifetimes([item([0], [1], [P]), item([1], [2], [R], [(0,)])], kept=[2])
     assert end[1] == 2

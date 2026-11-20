@@ -1,4 +1,4 @@
-"""Helpers for generating code: arrays, outputs, errors, temporary memory, casts, loops."""
+"""Helpers for generating code: arrays, errors, temporary memory, casts, loops."""
 
 from __future__ import annotations
 
@@ -111,8 +111,8 @@ class Array:
             value = constant(b, self.dtype, value)
         if not self.writable:
             raise ValueError(
-                "storing into an input: inputs are only read. Write the output (`out.allocate(shape)`), "
-                "or ask for the input's memory with `out.overwrite(x)` if the op destroys it"
+                "storing into an input: inputs are only read, unless the op may "
+                "destroy them (`writable`). Write the output (`out.allocate(shape)`)"
             )
         store(b, self.dtype, value, self.ptr(b, *index))
 
@@ -425,187 +425,6 @@ def cast(b, v, src: str, dst: str):
     if dt.bits < st.bits:
         return b.trunc(v, dt)
     return v  # int8 <-> uint8
-
-
-# ------------------------------------------------------------------ outputs
-
-
-@dataclass
-class ProvidedOutput:
-    """The caller's memory, with the caller's strides."""
-
-    array: Array
-
-    def allocate(self, shape: list) -> Array:
-        """The memory of the output (the caller's; `shape` is what it has)."""
-        return self.array
-
-    def overwrite(self, cg, x: Array) -> Array:
-        """The memory of the output, holding the values of `x` (here: a copy)."""
-        copy(cg, x, self.array)
-        return self.array
-
-
-@dataclass
-class InplaceOutput:
-    """An output that is the memory of an input the op destroys (`llvm_inplace`): the
-    result overwrites the input."""
-
-    #: the input's memory, writable
-    array: Array
-    #: the input
-    source: Array
-    done: bool = False
-
-    def allocate(self, shape: list) -> Array:
-        """The memory of the output: the input's, still holding the input's values."""
-        self.done = True
-        return self.array
-
-    def overwrite(self, cg, x: Array) -> Array:
-        """The memory of the output, holding the values of `x`: `x` itself."""
-        if x is not self.source:
-            raise ValueError(
-                f"this output overwrites input {self.source.base}, not the array given"
-            )
-        self.done = True
-        return self.array
-
-
-@dataclass
-class SlotOutput:
-    """An output the kernel returns through a slot: memory it allocates (`allocate`),
-    or a view of one of the inputs the op says it may alias (`set_view`)."""
-
-    cg: Codegen
-    slot: ir.Value
-    dtype: str
-    ndim: int
-    #: the node inputs it may be a view of (the op's view_map)
-    aliases: tuple = ()
-    #: allocate in temporary memory instead of a runtime buffer (a temporary inside a
-    #: compiled unit): the slot's owner is then the scratch memory, which the unit
-    #: frees (`emit_items`; null for a view)
-    temporary: bool = False
-    #: the (packed) layout `allocate` produces; default C-contiguous
-    layout: Layout | None = None
-    #: for a view: the layout `llvm_layout` declared (`set_view` checks it)
-    declared: Layout | None = None
-    #: (scope, noalias scopes) for the memory `allocate` returns (`Builder.mark_array`)
-    alias: tuple | None = None
-    done: bool = False
-
-    def _write(self, data, shape, strides):
-        b = self.cg.b
-        t = _slot_type(self.ndim)
-        b.store(data, b.field_ptr(t, self.slot, Slot.DATA))
-        lp, sp = (
-            b.field_ptr(t, self.slot, Slot.LENGTHS),
-            b.field_ptr(t, self.slot, Slot.STRIDES),
-        )
-        for a in range(self.ndim):
-            b.store(shape[a], b.gep(ir.i64, lp, a))
-            b.store(strides[a], b.gep(ir.i64, sp, a))
-
-    def allocate(self, shape: list) -> Array:
-        """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
-        owns it. An output that may be a view can always allocate instead (a reshape of
-        a non-contiguous array does): the owner it sets tells the caller."""
-        cg, b = self.cg, self.cg.b
-        if self.temporary:
-            # read by the unit after this node's function returned, which frees it
-            a = cg.temporary(self.dtype, shape, self.layout, escapes=True)
-            self._write(a.data, a.shape, a.strides)
-            b.store(a.data, b.field_ptr(_slot_type(self.ndim), self.slot, Slot.OWNER))
-            self._mark(a)
-            self.done = True
-            return a
-        nbytes = b.mul(size(b, shape), itemsize(self.dtype), nsw=True)
-        owner = b.field_ptr(_slot_type(self.ndim), self.slot, Slot.OWNER)
-        data = b.rt_alloc(cg.ctx, nbytes, owner)
-        cg.check(b.ne(data, b.null()), None)
-        a = packed_array(b, self.dtype, data, shape, self.layout)
-        self._write(data, shape, a.strides)
-        self._mark(a)
-        self.done = True
-        return a
-
-    def overwrite(self, cg, x: Array) -> Array:
-        """The memory of the output, holding the values of `x` (here: a copy)."""
-        a = self.allocate(x.shape)
-        copy(self.cg, x, a)
-        return a
-
-    def data(self):
-        """The data pointer in the slot (null until set)."""
-        b = self.cg.b
-        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, Slot.DATA))
-
-    def owner(self):
-        """The buffer reference in the slot (null for views)."""
-        b = self.cg.b
-        return b.load(ir.ptr, b.field_ptr(_slot_type(self.ndim), self.slot, Slot.OWNER))
-
-    def read(self) -> Array:
-        """The array in the slot (after `allocate`), in the slot's layout."""
-        lay = self.layout if self.layout is not None else Layout.c(self.ndim)
-        return read_slot(self.cg.b, self.slot, self.dtype, [None] * self.ndim, lay)
-
-    def set_length(self, axis, n):
-        """Shorten axis `axis` of the array in the slot to `n` (i64) -- a view of the
-        same memory with the same strides."""
-        b = self.cg.b
-        lp = b.field_ptr(_slot_type(self.ndim), self.slot, Slot.LENGTHS)
-        b.store(n, b.gep(ir.i64, lp, axis))
-
-    def _mark(self, a: Array):
-        if self.alias is not None:
-            self.cg.b.mark_array(a.data, *self.alias)
-
-    def set_view(self, a: Array):
-        """The output is `a`, a view of an input the op's view_map lists for this output
-        (the caller knows whose memory that is and keeps it alive)."""
-        if not self.aliases:
-            raise ValueError(
-                "this output can't be a view: the op's view_map doesn't list an input for it"
-            )
-        if a.base is not None and a.base not in self.aliases:
-            raise ValueError(
-                f"a view of input {a.base}, but the op's view_map only lets this output alias {list(self.aliases)}"
-            )
-        if self.declared is not None:
-            shape = a.static_shape()
-            if not a.layout.implies(self.declared, shape, itemsize(self.dtype)):
-                raise ValueError(
-                    f"the view has layout {a.layout.describe(shape)}, but llvm_layout declared "
-                    f"{self.declared.describe(shape)}"
-                )
-        self._write(a.data, a.shape, a.strides)
-        self.done = True
-
-
-def set_output(cg, out, a: Array) -> None:
-    """Make the output `out` the array `a`, which lies in an input's memory: as a view
-    where the op lets this output alias that input, else as a copy."""
-    if (
-        isinstance(out, SlotOutput)
-        and out.aliases
-        and (a.base is None or a.base in out.aliases)
-    ):
-        out.set_view(a)
-    else:
-        copy(cg, a, out.allocate(a.shape))
-
-
-@dataclass
-class ScalarOutput:
-    ptr: ir.Value
-    dtype: str
-    done: bool = False
-
-    def set(self, b, value):
-        b.store(value, self.ptr)
-        self.done = True
 
 
 def _slot_type(ndim):
@@ -932,10 +751,7 @@ def copy(cg, src: Array, dst: Array):
 __all__ = [
     "Array",
     "Codegen",
-    "ProvidedOutput",
-    "ScalarOutput",
     "ScalarRepr",
-    "SlotOutput",
     "TensorRepr",
     "advance",
     "c_array",

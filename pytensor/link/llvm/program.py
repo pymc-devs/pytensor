@@ -32,11 +32,10 @@ import numpy as np
 import pytensor.link.llvm.codegen  # noqa: F401 (registers the emitters)
 from pytensor.graph.features import view_feature
 from pytensor.link.llvm.codegen.call import CalledKernel, LinkTable
-from pytensor.link.llvm.codegen.function import (
+from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
+from pytensor.link.llvm.codegen.node import build_node_function
+from pytensor.link.llvm.codegen.signature import (
     OutputMode,
-    build_kernel_wrapper,
-    build_node_function,
-    inplace_outputs,
     node_outputs,
     node_signature,
     skipped_inputs,
@@ -229,7 +228,7 @@ class Stats:
     n_units: int = 0
     n_subprograms: int = 0
     numba: list = field(default_factory=list)
-    #: the ops of the items that overwrite an input
+    #: the ops of the generated items that may overwrite an input
     inplace: list = field(default_factory=list)
     #: the generated modules (GeneratedModule), including those of subprograms
     #: planned for this program
@@ -331,24 +330,23 @@ class Planner:
             and not self.roots_of(it.node.inputs[i]) & self.hidden
         )
 
-    def grant_inplace(self, it, folded) -> dict:
-        """{output: input} for the outputs of a node that may overwrite an input: its
-        op destroys it, its emitter can (`llvm_inplace`), and nothing else can see it."""
+    def writable_inputs(self, it, folded) -> frozenset:
+        """The inputs a node's generated code may overwrite: tensors its op destroys,
+        that nothing else can see, and whose memory isn't another input's. Its emitter
+        decides whether it does (interface.py)."""
         node = it.node
-        granted = {}
-        for k, i in inplace_outputs(node, folded).items():
-            if not self.may_destroy(it, i):
+        writable = set()
+        for i in {i for ins in node.op.destroy_map.values() for i in ins}:
+            if i in folded or not self.may_destroy(it, i):
                 continue
-            # nor may the memory be another input's
             mine = self.roots_of(node.inputs[i])
-            if any(
+            if not any(
                 mine & self.roots_of(var)
                 for pos, var in enumerate(node.inputs)
                 if pos != i and hasattr(var.type, "ndim")
             ):
-                continue
-            granted[k] = i
-        return granted
+                writable.add(i)
+        return frozenset(writable)
 
     def resolve_item(self, it) -> Resolved:
         """How the program's function runs an item."""
@@ -376,17 +374,17 @@ class Planner:
         # (its body is inlined into the generated loop), and not with folded constants
         # (a kernel would need them as arguments).
         nested = self.resolver.has_body(node)
-        inplace = self.grant_inplace(it, folded)
-        if not folded and not nested and not inplace:
+        writable = self.writable_inputs(it, folded)
+        if not folded and not nested and not writable:
             kernel = self.resolver.rust(node, in_layouts, binding)
             if kernel is not None:
                 return self.kernel_item(it, kernel)
         try:
-            return self.generated_item(it, folded, in_layouts, inplace)
+            return self.generated_item(it, folded, in_layouts, writable)
         except NotImplementedError:
             # (a kernel doesn't overwrite its inputs: it can stand in for an in-place
             # node too)
-            if nested or inplace:
+            if nested or writable:
                 kernel = self.resolver.rust(node, in_layouts, binding)
                 if kernel is not None:
                     return self.kernel_item(it, kernel)
@@ -394,7 +392,7 @@ class Planner:
                 raise
         kernel = self.resolver.numba(node, binding)
         # it overwrites the inputs its op destroys: that is what the graph asks for;
-        # where nothing else may see the memory (as in `grant_inplace`). Else it gets
+        # where nothing else may see the memory (as in `writable_inputs`). Else it gets
         # copies.
         keep = frozenset(i for i in kernel.destroys if not self.may_destroy(it, i))
         return self.kernel_item(it, replace(kernel, destroys=keep))
@@ -423,10 +421,12 @@ class Planner:
         self.modules.append((module, kernel))
         return kernel
 
-    def generated_item(self, it, folded, in_layouts, inplace=None) -> Resolved:
+    def generated_item(
+        self, it, folded, in_layouts, writable=frozenset()
+    ) -> Resolved:
         """A node whose code is generated, compiled on its own. Raises
-        NotImplementedError if no emitter handles it. `inplace`: {output: input} for
-        the outputs that overwrite an input (`grant_inplace`)."""
+        NotImplementedError if no emitter handles it. `writable`: the inputs it may
+        overwrite (`writable_inputs`)."""
         node = it.node
         body = (
             self.resolver.body(node, in_layouts)
@@ -447,9 +447,9 @@ class Planner:
             parallel=self.opts.parallel,
             links=LinkTable(),
             body=body,
-            inplace=inplace,
+            writable=writable,
         )
-        if inplace:
+        if writable:
             self.stats.inplace.append(str(node.op))
         skipped = skipped_inputs(node, folded)
         args = [k for pos, k in enumerate(it.inputs) if pos not in skipped]
@@ -910,9 +910,7 @@ def _dump(types, nf, resolved, in_ids, contiguous, out_ids, modes) -> str:
             kind = "constant (folded)"
         else:
             r, o = produced[k]
-            if o.mode is OutputMode.INPLACE:
-                kind = f"overwrites %{ids[r.arguments[o.aliases[0]]]}"
-            elif k in offsets:
+            if k in offsets:
                 kind = f"arena +{offsets[k]}"
                 order = list(o.layout.order) if o.layout is not None else []
                 if o.layout.fully_packed(o.repr.shape) and order != sorted(order):
@@ -922,7 +920,7 @@ def _dump(types, nf, resolved, in_ids, contiguous, out_ids, modes) -> str:
             elif o.mode is OutputMode.PROVIDED:
                 kind = "temporary"
             elif o.aliases:
-                kind = "returned by its item, may be a view of " + ", ".join(
+                kind = "returned by its item, may be (a view of) " + ", ".join(
                     f"%{ids[r.arguments[a]]}" for a in o.aliases
                 )
             else:
@@ -952,7 +950,7 @@ def _unit_views(it: UnitItem, resolved) -> dict:
     for r in resolved:
         args = r.arguments
         for vid, o in zip(r.item.outputs, r.signature.outputs, strict=True):
-            if o.mode in (OutputMode.RETURNED, OutputMode.INPLACE) and o.aliases:
+            if o.mode is OutputMode.RETURNED and o.aliases:
                 views[vid] = set().union(*(views.get(args[a], ()) for a in o.aliases))
     for k in it.inputs:
         del views[k]

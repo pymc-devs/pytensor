@@ -15,8 +15,6 @@ from dataclasses import dataclass
 from pytensor.link.llvm.codegen.elemwise import identity_value
 from pytensor.link.llvm.codegen.emit import (
     Array,
-    ProvidedOutput,
-    ScalarOutput,
     advance,
     cast,
     checked_index,
@@ -32,7 +30,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.link.llvm.layout import Layout, Stride
@@ -206,14 +204,7 @@ def emit_fused(op, node, cg, inputs, outputs):
                 cg.check(b.eq(c, n), f"FusedElemwise: shape mismatch on axis {a}")
         shape.append(n)
 
-    # ---- outputs (ScalarType outputs are computed into a 0-d temporary)
-    scalar_outs = {}
-    outputs = list(outputs)
-    for i, out in enumerate(outputs):
-        if isinstance(out, ScalarOutput):
-            tmp = cg.temporary(out.dtype, [])
-            scalar_outs[i] = (out, tmp)
-            outputs[i] = ProvidedOutput(tmp)
+    # ---- outputs
     out_arrays = []
     for i, (spec, out) in enumerate(zip(outs, outputs, strict=True)):
         if isinstance(spec, Reduce):
@@ -515,7 +506,7 @@ def emit_fused(op, node, cg, inputs, outputs):
     )
     if not flat_ok:
         nest()
-        _finish(cg, outs, out_arrays, scalar_outs)
+        _finish(cg, outs, out_arrays)
         return
 
     # every operand packed in the same axis order (from the layouts, so only operands
@@ -560,7 +551,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         nest()
     else:
         b.if_else(contig, flat, nest)
-    _finish(cg, outs, out_arrays, scalar_outs)
+    _finish(cg, outs, out_arrays)
 
 
 def reduced_view(b, acc: Array, shape, axes) -> Array:
@@ -583,15 +574,13 @@ def reduced_view(b, acc: Array, shape, axes) -> Array:
     )
 
 
-def _finish(cg, outs, out_arrays, scalar_outs):
-    """Convert reductions accumulated in another dtype; set scalar outputs."""
+def _finish(cg, outs, out_arrays):
+    """Convert reductions accumulated in another dtype."""
     for i, spec in enumerate(outs):
         if isinstance(spec, Reduce):
             res, acc = out_arrays[i]
             if acc is not res:
                 copy(cg, acc, res)
-    for out, tmp in scalar_outs.values():
-        out.set(cg.b, load(cg.b, tmp.dtype, tmp.data))
 
 
 _register()

@@ -10,7 +10,7 @@ Plain data in, plain data out: nothing here touches LLVM.
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.function import OutputMode
+from pytensor.link.llvm.codegen.signature import OutputMode
 
 
 def lifetimes(resolved, kept) -> tuple[dict, dict]:

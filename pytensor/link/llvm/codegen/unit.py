@@ -20,10 +20,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
-    SlotOutput,
     c_array,
     constant,
     copy,
@@ -33,14 +33,13 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     unpack,
 )
-from pytensor.link.llvm.codegen.function import (
+from pytensor.link.llvm.codegen.interface import SlotOutput, llvm_layout
+from pytensor.link.llvm.codegen.node import (
     NodeFunction,
-    Output,
-    OutputMode,
-    Signature,
     build_node_function,
     debug_name,
 )
+from pytensor.link.llvm.codegen.signature import Output, OutputMode, Signature
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     Slot,
@@ -50,8 +49,36 @@ from pytensor.link.llvm.codegen.types import (
     repr_of,
     slot_type,
 )
-from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.layout import (
+    Layout,
+    infer_layouts,
+    itemsize_of,
+    new_memory_layout,
+    shape_of,
+)
 from pytensor.link.llvm.plan.memory import place_temporaries
+
+
+@llvm_layout.register(OpFromGraph)
+def _(op, node, in_layouts):
+    """The layouts of the inner outputs. Inlined that is what they are; a compiled unit
+    has them where new memory can (it copies an output that isn't one of its inputs'
+    memory: `new_memory_layout`); a subprogram returns an output's value or a C copy."""
+    inner = infer_layouts(op.fgraph, in_layouts)
+    outs = [inner[o] for o in op.fgraph.outputs]
+    if op.execution is Execution.COMPILED:
+        return [
+            None if lay is None else new_memory_layout(lay, o.type)
+            for lay, o in zip(outs, node.outputs, strict=True)
+        ]
+    if op.execution is Execution.INTERPRETED:
+        return [
+            None
+            if lay is None
+            else lay.join(Layout.c(o.type.ndim), shape_of(o), itemsize_of(o))
+            for lay, o in zip(outs, node.outputs, strict=True)
+        ]
+    return outs
 
 
 #: the cells of a profile (`build_unit_function`'s `profile`): profiling on (nonzero),
@@ -427,10 +454,7 @@ def emit_items(
         for j, (vid, o) in enumerate(zip(item.outputs, nsig.outputs, strict=True)):
             if o.mode is OutputMode.ABSENT:
                 continue
-            if o.mode is OutputMode.INPLACE:
-                # (no argument: the input's memory, overwritten)
-                vals[vid] = vals[present[o.aliases[0]]]
-            elif o.mode is OutputMode.PROVIDED:
+            if o.mode is OutputMode.PROVIDED:
                 if j in in_place:
                     a = in_place[j]
                     written.add(vid)

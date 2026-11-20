@@ -249,7 +249,7 @@ impl JitDump {
 
 /// Generic helpers of the code generator: their lines say little about where time
 /// goes, so a jitdump gives the line of the innermost frame outside them.
-const HELPER_FILES: [&str; 3] = ["emit.py", "num.py", "types.py"];
+const HELPER_FILES: [&str; 4] = ["emit.py", "interface.py", "num.py", "types.py"];
 
 /// Relocations of a DWARF section of a relocatable object.
 #[derive(Clone, Copy, Debug)]

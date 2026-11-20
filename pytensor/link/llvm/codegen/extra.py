@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import operator
 
-from pytensor.link.llvm.codegen.emit import Array, constant, set_output, size
-from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.emit import Array, constant, size
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import ir
 from pytensor.link.llvm.layout import split_layouts
@@ -63,7 +63,7 @@ def _(op, node, cg, inputs, outputs):
     strides = [x.strides[a] for a in range(x.ndim) if a not in (a1, a2)] + [
         b.add(x.strides[a1], x.strides[a2])
     ]
-    set_output(cg, outputs[0], x.view(b.gep_bytes(x.data, start), shape, strides))
+    outputs[0].view(x.view(b.gep_bytes(x.data, start), shape, strides))
 
 
 @llvm_layout.register(Split)
@@ -100,15 +100,13 @@ def _(op, node, cg, inputs, outputs):
         shape[axis] = n
         # an empty part may start at the end: keep the pointer inside the array
         start = b.select(b.sgt(n, 0), start, 0)
-        set_output(
-            cg,
-            out,
+        out.view(
             x.view(
                 b.gep_bytes(x.data, b.mul(start, x.strides[axis], nsw=True)),
                 shape,
                 list(x.strides),
                 lay,
-            ),
+            )
         )
 
 

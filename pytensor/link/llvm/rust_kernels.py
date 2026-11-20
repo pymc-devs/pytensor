@@ -14,7 +14,7 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.link.llvm.codegen.function import Output, OutputMode
+from pytensor.link.llvm.codegen.signature import Output, OutputMode
 from pytensor.link.llvm.codegen.types import repr_of
 from pytensor.link.llvm.layout import Layout
 from pytensor.tensor.elemwise import DimShuffle
@@ -43,7 +43,7 @@ def rust_kernel(op, node, in_layouts=None):
 
 def rust_kernel_outputs(kernel, node, in_layouts) -> list[Output]:
     """What `kernel` declares about its outputs, as the `Output`s of a signature."""
-    from pytensor.link.llvm.codegen.function import known_layouts
+    from pytensor.link.llvm.codegen.signature import known_layouts
 
     ins = [
         None if lay is None else lay.to_spec()
