@@ -888,6 +888,32 @@ class TestAdvancedIncSubtensorRemoveBroadcastableIndex:
                 np.array(7, dtype=y.dtype),
             )
 
+    def test_kept_axes_and_slice_bounds(self):
+        x = tensor("x", shape=(3, 1, 1, 4))
+        x_split = tensor("x_split", shape=(3, 1, 4, 1))
+        idx = tensor("idx", shape=(2,), dtype="int64")
+        start, stop = pt.lscalars("start", "stop")
+        y, y_split = pt.tensor3s("y", "y_split")
+        consecutive = x[start:, idx, idx, :stop].inc(y)
+        split = x_split[:, idx, start:stop, idx].set(y_split)
+
+        result = utt.RewriteTester(
+            [x, x_split, idx, start, stop, y, y_split], [consecutive, split]
+        )
+        result.assert_graph(
+            x[start:, :, :, :stop].inc(y.sum(1)[:, None, None, :]),
+            x_split[:, :, start:stop].set(y_split[-1][:, None, :, None]),
+        )
+        result.assert_eval(
+            np.arange(12, dtype=x.dtype).reshape(3, 1, 1, 4),
+            np.arange(12, dtype=x_split.dtype).reshape(3, 1, 4, 1),
+            np.array([0, -1], dtype=idx.dtype),
+            np.array(1, dtype=start.dtype),
+            np.array(3, dtype=stop.dtype),
+            np.arange(12, dtype=y.dtype).reshape(2, 2, 3) + 100,
+            np.arange(12, dtype=y_split.dtype).reshape(2, 3, 2) + 200,
+        )
+
     def test_maybe_empty_symbolic_index(self):
         x = tensor("x", shape=(1,))
         idx = pt.lvector("idx")
