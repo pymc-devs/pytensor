@@ -9,9 +9,10 @@ class LLVMLinker(JITLinker):
     program's, runs them.
     """
 
-    # llvm_units keeps ScalarType values inside compiled units: they don't cross the
-    # kernel ABI
-    required_rewrites = ("minimum_compile", "llvm_units")
+    # llvm_layouts attaches the LayoutFeature (the layouts the planner gives the
+    # values); llvm_units keeps ScalarType values inside compiled units: they don't
+    # cross the kernel ABI
+    required_rewrites = ("minimum_compile", "llvm_layouts", "llvm_units")
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",

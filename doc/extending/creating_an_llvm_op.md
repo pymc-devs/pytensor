@@ -569,9 +569,12 @@ without looking at its strides, so a wrong claim gives wrong results, not an err
 * Graph inputs are `DYNAMIC`, unless the function was compiled with
   `input_layout="c"`. Then they are C-contiguous: calls from Python copy arrays that
   aren't, and the C API rejects them.
-* Outputs of numba kernels are `DYNAMIC`.
+* Numba kernels allocate their outputs in the layout of the value they produce.
 
-`infer_layouts` shows what the backend derives for a graph:
+These layouts are binding: whatever runs a node gives its outputs the layouts its
+`llvm_layout` declares. A compiled function's graph has them,
+`f.maker.fgraph.llvm_layout(var)`, and `infer_layouts` shows what the backend derives
+for a graph:
 
 ```python
 from pytensor.graph.fg import FunctionGraph

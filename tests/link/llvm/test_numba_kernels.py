@@ -64,6 +64,16 @@ def test_numba_scalar_inputs_and_outputs():
     np.testing.assert_allclose(b, v[2:] * v[2])
 
 
+def test_numba_outputs_have_the_layout_of_their_value():
+    # i0 has no LLVM implementation; of a transposed matrix, its result is packed in
+    # the transposed order
+    x = pt.vector("x")
+    f = pytensor.function([x], pt.i0(pt.exp(x).reshape((2, 3)).T), mode=LLVM)
+    assert f.maker.linker.stats.numba == ["I0"]
+    v = rng.normal(size=6)
+    np.testing.assert_allclose(f(v), np.i0(np.exp(v).reshape(2, 3).T))
+
+
 def test_numba_exception_is_reported():
     x = pt.vector("x")
     s = pt.lvector("s")

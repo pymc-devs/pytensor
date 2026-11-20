@@ -32,7 +32,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.function import llvm_emit
+from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.link.llvm.layout import Layout, Stride
@@ -148,11 +148,21 @@ def fused_spec(op, node):
 
 
 def _register():
+    from pytensor.compile.builders import OpFromGraph
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
     @llvm_emit.register(FusedElemwise)
     def _(op, node, cg, inputs, outputs):
         emit_fused(op, node, cg, inputs, outputs)
+
+    @llvm_layout.register(FusedElemwise)
+    def _(op, node, in_layouts):
+        # generated as one loop (`plan.flatten.fusable`), else an OpFromGraph
+        try:
+            fused_spec(op, node)
+        except NotImplementedError:
+            return llvm_layout.dispatch(OpFromGraph)(op, node, in_layouts)
+        return [None] * len(node.outputs)
 
 
 def emit_fused(op, node, cg, inputs, outputs):

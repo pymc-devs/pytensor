@@ -112,22 +112,34 @@ so they come only from how a value is produced:
 * a view's layout follows from its input's, as the op's `llvm_layout` declares it
   (DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...; helpers in layout.py); a
   view nothing is declared for is DYNAMIC;
-* an output that overwrites an input (section 3) has that input's layout;
-* numba kernels and graph inputs are DYNAMIC. With `input_layout="c"` the inputs are
-  C-contiguous: Python calls copy other arrays, the C API rejects them.
+* an output that may overwrite an input (section 3) has that input's layout, where new
+  memory can have it too (packed, or implied by C-contiguous), else DYNAMIC: whether it
+  does overwrite it is decided when planning;
+* an OpFromGraph's outputs have the layouts its inner graph gives them; a compiled
+  unit's only where new memory can have them too (the unit copies an output that isn't
+  one of its inputs' memory into it), else DYNAMIC; a subprogram's are joined with
+  C-contiguous (it returns an output's value or a C copy);
+* graph inputs are DYNAMIC. With `input_layout="c"` they are C-contiguous: Python calls
+  copy other arrays, the C API rejects them.
 
-The planner is authoritative: it propagates layouts while it picks each kernel, so they
-reflect what actually runs (a numba kernel gives DYNAMIC outputs). It specializes
-every generated kernel for its inputs' layouts, and compiled units do the same for the
-values inside them. A Scan's loop body gets the layouts of what the loop passes it (rows of
-the sequences, rows of its own C buffers, the non-sequences).
+These layouts belong to the graph. Its `LayoutFeature` gives every variable's,
+`fgraph.llvm_layout(var)` (what the ops' `llvm_layout` declares, `node_outputs`), like
+the DestroyHandler does for views; the `llvm_layouts` rewrite, which the linker
+requires, attaches it before any other rewrite, so rewrites can consult it, and a
+compiled function's graph keeps it (`f.maker.fgraph.llvm_layout(var)`). Replacing a
+node's input invalidates its layouts downstream (a weaker layout can make derived facts
+wrong, not just stale).
+
+The planner takes the layouts of the graph's values from the feature (and gets those of
+the values inside inlined OpFromGraphs the same way). They are binding: what
+runs a node must give its outputs those layouts, or layouts that imply them. A Rust
+kernel that doesn't is not used; a numba kernel allocates its outputs packed in them; a
+unit returns an output as a view only where the view's layout implies the output's. The
+planner specializes every generated kernel for its inputs' layouts, and compiled units do
+the same for the values inside them. A Scan's loop body gets the layouts of what the loop
+passes it (rows of the sequences, rows of its own C buffers, the non-sequences).
 `program.dump()` shows the layouts an item's kernel is specialized for, e.g.
 `Sum{axis=0} {[P0, P1]}`.
-
-`LayoutFeature` gives the same inference on a FunctionGraph, for rewrites and
-inspection (`fgraph.llvm_layout(var)`), like the DestroyHandler does for views. It
-predicts what the planner will do; replacing a node's input invalidates everything
-downstream (a weaker layout can make derived facts wrong, not just stale).
 
 **In generated code.** An `Array` carries its `Layout` (unpacked from the signature,
 kept through views, also inside compiled units where views are read back from their

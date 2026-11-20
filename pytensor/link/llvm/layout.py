@@ -20,11 +20,13 @@ its strides. They come from how a value is produced:
 * memory the planner provides (arena, fresh outputs) and buffers that generated code,
   Rust kernels and Scan allocate are C-contiguous;
 * views get theirs from their input's (the op's `llvm_layout`, with the helpers below);
-* graph inputs and values from numba kernels are DYNAMIC unless checked.
+* numba kernels allocate their outputs packed, in the order asked for (default C);
+* graph inputs are DYNAMIC unless checked.
 
 How each output comes to be, and with which layout, is declared per op by
-`llvm_layout` (codegen/function.py); the planner and the `LayoutFeature` (for rewrites
-and inspection) both use it.
+`llvm_layout` (codegen/function.py). What it declares is binding: the `LayoutFeature`
+of the graph holds the layout of every value (`node_outputs`), and the planner makes
+whatever runs a node give its outputs those layouts.
 """
 
 from __future__ import annotations
@@ -33,6 +35,10 @@ import enum
 from dataclasses import dataclass
 
 import numpy as np
+
+from pytensor.graph.basic import Constant
+from pytensor.graph.features import AlreadyThere, Feature
+from pytensor.graph.rewriting.basic import GraphRewriter
 
 
 class StrideKind(enum.Enum):
@@ -440,46 +446,28 @@ def common_order(layouts, shape) -> list[int] | None:
 # ------------------------------------------------------------------ graph analysis
 
 
-def predict_layouts(node, in_layouts) -> list[Layout | None]:
-    """The layouts the planner will (most likely) give `node`'s outputs: what the node's
-    `llvm_layout` declares (provided memory in the layout asked for).
+def new_memory_layout(declared, t) -> Layout:
+    """`declared` if new memory can have it: packed (allocated in it), or implied by
+    C-contiguous memory; else DYNAMIC. The layout of a value that may be new memory or
+    not (an output of a compiled unit, an output that may overwrite an input)."""
+    if declared is None:
+        return Layout.dynamic(t.ndim)
+    shape = list(t.shape)
+    if declared.fully_packed(shape) or Layout.c(t.ndim).implies(
+        declared, shape, np.dtype(t.dtype).itemsize
+    ):
+        return declared
+    return Layout.dynamic(t.ndim)
 
-    The planner is authoritative (it knows which nodes fall back to numba, for one);
-    this is its prediction for graph rewrites and inspection."""
-    from pytensor.compile.builders import Execution, OpFromGraph
-    from pytensor.link.llvm.codegen.function import node_outputs
 
-    op = node.op
-    try:
-        if isinstance(op, OpFromGraph):
-            if getattr(op, "execution", None) is Execution.COMPILED:
-                return [
-                    Layout.c(o.type.ndim) if hasattr(o.type, "ndim") else None
-                    for o in node.outputs
-                ]
-            inner = infer_layouts(op.fgraph, in_layouts)
-            outs = [inner[o] for o in op.fgraph.outputs]
-            if getattr(op, "execution", None) is Execution.INTERPRETED:
-                # an allocated output of a subprogram: its value or a C copy
-                outs = [
-                    None
-                    if lay is None
-                    else lay.join(Layout.c(o.type.ndim), shape_of(o), itemsize_of(o))
-                    for lay, o in zip(outs, node.outputs, strict=True)
-                ]
-            return outs
-        return [o.layout for o in node_outputs(node, in_layouts)]
-    except NotImplementedError:
-        return [
-            Layout.dynamic(o.type.ndim) if hasattr(o.type, "ndim") else None
-            for o in node.outputs
-        ]
+def _is_tensor(var) -> bool:
+    from pytensor.link.llvm.codegen.types import is_absent
+
+    return hasattr(var.type, "ndim") and not is_absent(var.type)
 
 
 def _default_layout(var, inputs_c=False):
-    from pytensor.graph.basic import Constant
-
-    if not hasattr(var.type, "ndim"):
+    if not _is_tensor(var):
         return None
     if isinstance(var, Constant):
         return Layout.of_const(var.data)
@@ -489,51 +477,54 @@ def _default_layout(var, inputs_c=False):
 
 
 def infer_layouts(fgraph, input_layouts=None) -> dict:
-    """{variable: Layout} for every tensor variable of `fgraph` (predicted, see
-    `predict_layouts`); `input_layouts` per graph input (default: nothing known)."""
+    """{variable: Layout} for the variables of `fgraph` (`node_outputs`; None for
+    those that aren't tensors). `input_layouts`: per graph input (default: nothing
+    known)."""
+    from pytensor.link.llvm.codegen.function import node_outputs
+
     lays = {}
     for k, v in enumerate(fgraph.inputs):
         lay = input_layouts[k] if input_layouts is not None else None
         lays[v] = lay if lay is not None else _default_layout(v)
     for node in fgraph.toposort():
         ins = [lays[i] if i in lays else _default_layout(i) for i in node.inputs]
-        lays.update(zip(node.outputs, predict_layouts(node, ins), strict=True))
+        outs = node_outputs(node, ins)
+        lays.update((v, o.layout) for v, o in zip(node.outputs, outs, strict=True))
+    for o in fgraph.outputs:
+        if o not in lays:
+            lays[o] = _default_layout(o)
     return lays
 
 
-def _feature_base():
-    from pytensor.graph.features import Feature
+class LayoutFeature(Feature):
+    """The layout of every variable of a FunctionGraph, as the LLVM backend gives it:
+    `fgraph.llvm_layout(var)` (None for values that aren't tensors).
 
-    return Feature
-
-
-class LayoutFeature(_feature_base()):
-    """Keeps the (predicted) layout of every variable of a FunctionGraph, like the
-    DestroyHandler keeps its view and destroy maps: `fgraph.llvm_layout(var)`.
+    This is where the planner gets the layouts of the graph's values from: whatever
+    runs a node gives its outputs these layouts (`node_outputs`), and code is
+    generated for them. `input_layout`: what is known about the graph's inputs, "any"
+    strides or "c" (the linker's option of that name).
 
     Layouts are computed lazily and cached. Replacing an input of a node invalidates
     everything downstream: a replacement can have a weaker layout, and then facts
     derived from the old one would be wrong, not just stale.
     """
 
-    def __init__(self, inputs_c=False):
-        self.inputs_c = inputs_c
-        self.cache = {}
+    provides = ("llvm_layout",)
+
+    def __init__(self, input_layout="any"):
+        self.input_layout = input_layout
+        self.cache: dict = {}
+
+    def clone(self):
+        return type(self)(self.input_layout)
 
     def on_attach(self, fgraph):
-        if hasattr(fgraph, "llvm_layout"):
-            from pytensor.graph.features import AlreadyThere
-
+        if "llvm_layout" in fgraph._feature_methods:
             raise AlreadyThere("a LayoutFeature is already attached")
-        self.fgraph = fgraph
-        fgraph.llvm_layout = self.layout
 
     def on_detach(self, fgraph):
-        del fgraph.llvm_layout
         self.cache.clear()
-
-    def on_import(self, fgraph, node, reason):
-        pass  # computed when asked
 
     def on_prune(self, fgraph, node, reason):
         for o in node.outputs:
@@ -548,43 +539,72 @@ class LayoutFeature(_feature_base()):
             for client, _ in fgraph.clients.get(v, ()):
                 todo.extend(client.outputs)
 
-    def layout(self, var) -> Layout | None:
-        """The predicted layout of `var`."""
-        if var in self.cache:
-            return self.cache[var]
+    def set_input_layout(self, input_layout):
+        if input_layout != self.input_layout:
+            self.input_layout = input_layout
+            self.cache.clear()
+
+    def llvm_layout(self, fgraph, var) -> Layout | None:
+        """The layout of `var`."""
+        from pytensor.link.llvm.codegen.function import node_outputs
+
+        cache = self.cache
+        if var in cache:
+            return cache[var]
         stack = [var]
         while stack:
             v = stack[-1]
-            if v in self.cache:
+            if v in cache:
                 stack.pop()
                 continue
             node = v.owner
             if node is None:
-                self.cache[v] = _default_layout(
-                    v, self.inputs_c and v in self.fgraph.inputs
+                cache[v] = _default_layout(
+                    v, self.input_layout == "c" and v in fgraph.inputs
                 )
                 stack.pop()
                 continue
-            missing = [i for i in node.inputs if i not in self.cache]
+            missing = [i for i in node.inputs if i not in cache]
             if missing:
                 stack.extend(missing)
                 continue
-            outs = predict_layouts(node, [self.cache[i] for i in node.inputs])
-            for o, lay in zip(node.outputs, outs, strict=True):
-                self.cache[o] = lay
+            outs = node_outputs(node, [cache[i] for i in node.inputs])
+            cache.update((v, o.layout) for v, o in zip(node.outputs, outs, strict=True))
             stack.pop()
-        return self.cache[var]
+        return cache[var]
+
+
+def layout_feature(fgraph) -> LayoutFeature:
+    """The `LayoutFeature` of `fgraph`, attached if it has none."""
+    feature = fgraph._feature_methods.get("llvm_layout")
+    if feature is None:
+        feature = LayoutFeature()
+        fgraph.attach_feature(feature)
+    return feature
+
+
+class AttachLayoutFeature(GraphRewriter):
+    """Attaches a `LayoutFeature` to the graph, for the rewrites after it (the LLVM
+    linker requires it)."""
+
+    def add_requirements(self, fgraph):
+        layout_feature(fgraph)
+
+    def apply(self, fgraph):
+        pass
 
 
 __all__ = [
     "DYNAMIC",
     "PACKED",
+    "AttachLayoutFeature",
     "Layout",
     "LayoutFeature",
     "common_order",
     "dimshuffle_layout",
     "infer_layouts",
-    "predict_layouts",
+    "layout_feature",
+    "new_memory_layout",
     "same_layout",
     "split_layouts",
     "subtensor_layout",

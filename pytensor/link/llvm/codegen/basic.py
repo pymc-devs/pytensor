@@ -17,7 +17,7 @@ from pytensor.link.llvm.codegen.emit import (
     view_layout,
 )
 from pytensor.link.llvm.codegen.function import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.types import ir, is_float, memory_type
+from pytensor.link.llvm.codegen.types import ir, is_float
 from pytensor.link.llvm.layout import Layout, same_layout
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
@@ -187,7 +187,8 @@ def _(op, node, cg, inputs, outputs):
     cg.check(b.eq(size(b, shape), total), "cannot reshape: the total size changes")
     out = outputs[0]
     if isinstance(out, ProvidedOutput):
-        copy(cg, x, out.array)
+        # (provided C-contiguous, as declared)
+        _copy_reshaped(cg, x, out.array)
         return
     contig = is_contiguous(b, x.shape, x)
 
@@ -211,22 +212,11 @@ def _(op, node, cg, inputs, outputs):
 
 
 def _copy_reshaped(cg, src: Array, dst: Array):
-    """Copy `src` into contiguous `dst` (same size, other shape), in C order."""
-    b = cg.b
-    k = b.alloca(ir.i64)
-    b.store(b.i64(0), k)
-
-    def body(p):
-        i = b.load(ir.i64, k)
-        store(
-            b,
-            dst.dtype,
-            load(b, src.dtype, p[0]),
-            b.gep(memory_type(dst.dtype), dst.data, i),
-        )
-        b.store(b.add(i, 1), k)
-
-    for_each(b, src.shape, [src], body)
+    """Copy `src` into C-contiguous `dst` (same size, other shape), in C order: into
+    `dst`'s memory seen with `src`'s shape."""
+    shape = src.shape
+    strides = c_strides(cg.b, dst.dtype, shape)
+    copy(cg, src, c_array(dst.dtype, dst.data, shape, strides))
 
 
 @llvm_emit.register(Join)
