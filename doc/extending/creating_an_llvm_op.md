@@ -404,7 +404,7 @@ np.testing.assert_array_equal(result, [1.0, 3.0, 3.0, 5.0, 5.0])
 `f.maker.linker.ir()` is the IR of the code generated for a compiled function: one
 module per generated task, each under a comment naming the task, as in
 `program.dump()`. `ir(optimized=True)` is the IR after optimization, which shows whether
-a loop was vectorized. The modules of Scan bodies and subprograms are included. Ops
+a loop was vectorized. The modules of compiled units are included. Ops
 running Rust or numba kernels have no module. For one module at a time,
 `f.maker.linker.stats.modules` lists them with their `description`, `ir` and
 `optimized_ir()`.

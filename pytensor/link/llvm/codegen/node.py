@@ -39,16 +39,26 @@ class NodeFunction:
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
     links: LinkTable | None = None
-    #: of a unit: ({vid: offset} of its temporaries in its arena, arena bytes)
+    #: of a graph's function: the arena ({vid: offset} of the temporary values in it,
+    #: its size in bytes)
     arena: tuple = ({}, 0)
-    #: of a unit: {vid: link entry} of its array constants
+    #: of a graph's function: the vids of all its temporary values (in the arena or
+    #: on the stack)
+    temporaries: frozenset = frozenset()
+    #: of a graph's function: where its array constants are in the link table
+    #: ({vid: entry})
     constants: dict = field(default_factory=dict)
 
 
 def debug_name(node) -> str:
-    """What the function of `node` is called in debug information: the node, with its
-    inputs' names (shortened)."""
-    text = str(node)
+    """The name of the function of `node` in debug information: the node with the names
+    of its inputs (shortened). A compiled unit is named after the nodes inside it."""
+    from pytensor.compile.builders import Execution
+
+    if getattr(node.op, "execution", None) is Execution.COMPILED:
+        text = "unit: " + ", ".join(str(n) for n in node.op.fgraph.toposort())
+    else:
+        text = str(node)
     return text if len(text) <= 200 else text[:197] + "..."
 
 
@@ -63,7 +73,7 @@ def build_node_function(
     parallel=True,
     kernel=None,
     links=None,
-    body=None,
+    resolver=None,
     writable=frozenset(),
 ) -> NodeFunction:
     """The LLVM function of one node, always inlined.
@@ -71,11 +81,12 @@ def build_node_function(
     * `temporary_outputs`: allocated outputs that are temporaries of a compiled unit;
       they go into temporary memory instead of runtime buffers;
     * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
-    * `kernel`: a `CalledKernel` implementing the node (a Rust kernel, a numba kernel, a
-      subprogram): the function calls it (call.py), through an entry of `links`, the
+    * `kernel`: a `CalledKernel` implementing the node (a Rust kernel, a numba kernel):
+      the function calls it (call.py), through an entry of `links`, the
       link table that is the config of the kernel being generated. Code nested in the
       node (a Scan's loop body, a Blockwise's core) links its kernels there too;
-    * `body`: for a Scan or a Blockwise, its resolved inner graph (`plan.resolve.Body`);
+    * `resolver`: decides how the nodes of inner graphs run (a Scan's loop body, a
+      Blockwise's core: `Codegen.graph_function`);
     * `writable`: positions of the inputs the node may overwrite (`node_outputs`).
     """
     folded = folded or {}
@@ -103,7 +114,7 @@ def build_node_function(
         config,
         parallel=parallel,
         links=links,
-        body=body,
+        resolver=resolver,
         module=module,
         name=name,
     )
@@ -221,17 +232,12 @@ def _outputs(cg, node, sig, folded, temporary_outputs, params, scopes) -> list:
             outputs.append(ProvidedOutput(cg, a))
         else:
             outputs.append(
-                SlotOutput(
+                SlotOutput.for_output(
                     cg,
                     v,
-                    o.repr.dtype,
-                    o.repr.ndim,
+                    o,
                     aliases=tuple(args[i] for i in o.aliases),
                     temporary=j in temporary_outputs,
-                    # what `allocate` produces: the declared layout (a view that copies
-                    # instead, like Reshape, declares C)
-                    layout=o.layout if o.layout.fully_packed(o.repr.shape) else None,
-                    declared=o.layout if o.aliases else None,
                     alias=(f"o{j}", scopes.others(f"o{j}")),
                 )
             )

@@ -6,6 +6,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, replace
 
+from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.codegen.interface import llvm_layout
 from pytensor.link.llvm.codegen.types import (
     NoneRepr,
@@ -117,8 +118,10 @@ def known_layouts(node, in_layouts) -> list:
 
 
 def node_outputs(node, in_layouts=None, writable=frozenset()) -> list[Output]:
-    """How each output of `node` comes to be when its code is generated: from its type,
-    the op's `view_map` and `llvm_layout`.
+    """How each output of `node` comes to be when its code is generated. This follows
+    from the output's type, from `llvm_layout`, and from the inputs the output may be a
+    view of (`op_view_parents`: the op's `view_map`, or for an OpFromGraph, whatever
+    its inner graph may pass through).
 
     An output the op may write over an input (`destroyed_input`) has that input's
     layout, where new memory can have it too (`new_memory_layout`): it is the input's
@@ -127,11 +130,14 @@ def node_outputs(node, in_layouts=None, writable=frozenset()) -> list[Output]:
     op = node.op
     in_layouts = known_layouts(node, in_layouts)
     layouts = llvm_layout(op, node, in_layouts)
+    parents = op_view_parents(op, node)
     outs = []
     for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):
-        aliases = ()
+        aliases: tuple = ()
         if isinstance(repr_of(o.type), TensorRepr):
-            aliases = tuple(op.view_map.get(k, ()))
+            aliases = tuple(
+                i for i, var in enumerate(node.inputs) if var in parents[k]
+            )
             i = destroyed_input(node, k)
             if i is not None:
                 lay = new_memory_layout(in_layouts[i], o.type)

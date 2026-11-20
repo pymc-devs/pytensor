@@ -24,7 +24,8 @@ from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout
 
 if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.call import LinkTable
-    from pytensor.link.llvm.plan.resolve import Body
+    from pytensor.link.llvm.codegen.graph import GraphFunction
+    from pytensor.link.llvm.plan.resolve import Resolver
 
 
 #: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
@@ -53,6 +54,11 @@ class Array:
     base: int | None = None
     #: may code write it? Inputs may not (`store` refuses)
     writable: bool = True
+    #: Some nodes return either a view of an input or new memory, and only the run
+    #: time knows which. For such a value, `base` is the input it may be a view of, and
+    #: `base_if` is an i1 that is true when it really is one. None means it certainly
+    #: is (if `base` is set).
+    base_if: ir.Value | None = None
 
     @property
     def ndim(self):
@@ -77,6 +83,7 @@ class Array:
             unknown_layout(shape) if layout is None else layout,
             self.base,
             self.writable,
+            self.base_if,
         )
 
     # ---- elements (indices are i64 values or Python ints; nothing is bounds-checked)
@@ -437,7 +444,9 @@ def _slot_type(ndim):
 
 
 class _ScratchScope(list):
-    """The (ctx, pointer)s of the scratch memory to free when a scope ends."""
+    """The memory to give back when a `scratch_scope` ends. Each entry is either
+    (ctx, pointer, None): scratch memory to free, or (ctx, slot, ndim): an output slot
+    whose buffer (allocated by a kernel) to release."""
 
     def __init__(self, function: bool):
         super().__init__()
@@ -447,8 +456,8 @@ class _ScratchScope(list):
 @dataclass
 class Codegen:
     """The state of generating one kernel's code: the builder and the kernel's
-    parameters (`ctx`, its `config` = link table), and what nested code
-    needs (link table, module, a Scan's or Blockwise's resolved body)."""
+    parameters (`ctx`, its `config` = link table), and what nested code needs (link
+    table, module, the resolver of inner graphs)."""
 
     b: ir.Builder
     ctx: ir.Value
@@ -460,9 +469,9 @@ class Codegen:
     parallel: bool = True
     #: the link table of the kernel being generated (call.py); None: it calls nothing
     links: LinkTable | None = None
-    #: for a Scan or a Blockwise: its resolved inner graph (`plan.resolve.Body`), what
-    #: one iteration runs; None: the node can't be generated here
-    body: Body | None = None
+    #: Decides how the nodes of an inner graph run (generated code or a kernel), for
+    #: `graph_function`. None: the code generated here can't run inner graphs.
+    resolver: Resolver | None = None
     #: the module being built, and the name of the function being built in it (nested
     #: functions are named after it)
     module: ir.Module | None = None
@@ -495,6 +504,29 @@ class Codegen:
         with self.b.if_(self.b.not_(ok)):
             self.fail(message)
 
+    def graph_function(
+        self, inputs, outputs, in_layouts, name: str = "graph"
+    ) -> GraphFunction:
+        """Prepare an inner graph (a Scan's loop body, a Blockwise's core, ...) to be
+        run from the function being generated. Run it with
+        `GraphFunction.emit_call`.
+
+        The graph goes from the variables `inputs` to the variables `outputs`.
+        `in_layouts` gives the layout of each input as it will be passed (None for
+        inputs that aren't tensors); the graph's code is specialized for them.
+
+        This emits code for the graph's constants at the current point, so call it
+        before a loop that runs the graph, not inside the loop. `name` is used to name
+        the LLVM functions of its nodes.
+
+        Raises NotImplementedError if inner graphs can't be run here (no resolver)."""
+        from pytensor.link.llvm.codegen.graph import GraphFunction
+
+        if self.resolver is None or self.links is None or self.module is None:
+            raise NotImplementedError("inner graphs here")
+        body = self.resolver.graph(inputs, outputs, in_layouts)
+        return GraphFunction.bind(self, body, f"{self.name}_{name}")
+
     def temp_memory(self, nbytes, escapes: bool = False):
         """Temporary memory of `nbytes` (i64), 64-byte aligned, uninitialized.
 
@@ -512,11 +544,10 @@ class Codegen:
         Each call is a new piece of scratch: ask before a loop, not inside it."""
         b = self.b
         n = nbytes.const_int
-        if n is not None and not escapes and n <= STACK_TEMPORARY_BYTES:
-            rounded = max(64, -(-n // 64) * 64)
-            if self.stack_bytes + rounded <= STACK_BUDGET_BYTES:
-                self.stack_bytes += rounded
-                return b.alloca(ir.Type.array(ir.i8, max(n, 1)))
+        if n is not None and not escapes:
+            p = self._stack_memory(n)
+            if p is not None:
+                return p
         at_entry = n is not None and not escapes
         p = b.rt_scratch(self.ctx, nbytes, at_entry=at_entry)
         self.check(b.ne(p, b.null()), None)
@@ -526,6 +557,50 @@ class Codegen:
             self.free_later(p)
         return p
 
+    def _stack_memory(self, n: int):
+        """Stack memory for `n` bytes, or None if it shouldn't go on the stack.
+
+        This is the rule `temp_memory` follows: memory goes on the stack if it is small
+        (at most `STACK_TEMPORARY_BYTES`) and the function hasn't used up its stack
+        budget (`STACK_BUDGET_BYTES`)."""
+        if n > STACK_TEMPORARY_BYTES:
+            return None
+        rounded = max(64, -(-n // 64) * 64)
+        if self.stack_bytes + rounded > STACK_BUDGET_BYTES:
+            return None
+        self.stack_bytes += rounded
+        return self.b.alloca(ir.Type.array(ir.i8, max(n, 1)))
+
+    def temporaries(self, sizes: dict, lives: dict) -> tuple[dict, tuple[dict, int]]:
+        """Memory for several temporary values of a known size.
+
+        * `sizes`: the size in bytes of each value ({key: bytes});
+        * `lives`: when each value is needed: from item `lives[key][0]` to item
+          `lives[key][1]` (both included).
+
+        Each value gets its own stack memory if `temp_memory` would put it on the stack
+        (the values defined first get the stack first). The other values share one
+        block of scratch memory, the arena: two values can use the same place in it if
+        they are never needed at the same time (`plan.memory.first_fit`).
+
+        Returns the memory of each value ({key: pointer}), and the arena's layout
+        ({key: offset in the arena}, size of the arena in bytes)."""
+        from pytensor.link.llvm.plan.memory import first_fit
+
+        memory = {}
+        shared = []
+        for key in sorted(sizes, key=lambda k: lives[k]):
+            p = self._stack_memory(sizes[key])
+            if p is None:
+                shared.append((*lives[key], sizes[key], key))
+            else:
+                memory[key] = p
+        offsets, nbytes = first_fit(shared)
+        if offsets:
+            arena = self.temp_memory(self.b.i64(nbytes))
+            memory.update((k, self.b.gep_bytes(arena, at)) for k, at in offsets.items())
+        return memory, (offsets, nbytes)
+
     def free_later(self, p, function: bool = False):
         """Free the scratch memory `p` when the innermost `scratch_scope` ends, or with
         `function` the innermost one of the function being generated (anything else
@@ -533,7 +608,14 @@ class Codegen:
         scopes = [sc for sc in self.scratch_scopes if sc.function or not function]
         if not scopes:
             raise ValueError("scratch memory outside of a scratch_scope")
-        scopes[-1].append((self.ctx, p))
+        scopes[-1].append((self.ctx, p, None))
+
+    def release_later(self, slot, ndim: int):
+        """Release the buffer a kernel allocated into the output slot `slot`, when the
+        innermost `scratch_scope` ends."""
+        if not self.scratch_scopes:
+            raise ValueError("a buffer to release outside of a scratch_scope")
+        self.scratch_scopes[-1].append((self.ctx, slot, ndim))
 
     @contextmanager
     def scratch_scope(self, function: bool = False):
@@ -549,7 +631,11 @@ class Codegen:
             self.scratch_scopes.pop()
         if not self.b.terminated:
             b = self.b
-            for ctx, p in reversed(taken):
+            for ctx, p, ndim in reversed(taken):
+                if ndim is not None:
+                    owner = b.field_ptr(_slot_type(ndim), p, Slot.OWNER)
+                    b.rt_decref(ctx, b.load(ir.ptr, owner))
+                    continue
                 # (folds away for checked scratch, and where a view left null)
                 with b.if_(b.ne(p, b.null())):
                     b.rt_scratch_free(ctx, p)

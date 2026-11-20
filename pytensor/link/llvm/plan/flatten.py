@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-from pytensor.compile.builders import Execution, OpFromGraph
-from pytensor.link.llvm.plan.values import (
-    Item,
-    NodeItem,
-    SubprogramItem,
-    UnitItem,
-    Values,
-)
+from pytensor.compile.builders import OpFromGraph
+from pytensor.link.llvm.plan.values import NodeItem, Values
 
 
 def flatten(
     values: Values, nodes, scope, inside_unit=False, of_the_graph=False
-) -> list[Item]:
+) -> list[NodeItem]:
     """The items running `nodes` (in order). `scope` maps variables to values and is
-    filled with the nodes' outputs. OpFromGraphs are inlined, become units
-    (`Execution.COMPILED`) or subprograms (`Execution.INTERPRETED`); inside a unit every
-    OpFromGraph is inlined. `of_the_graph`: `nodes` are the graph being planned itself
-    (marks the items, see `NodeItem`)."""
-    items: list[Item] = []
+    filled with the nodes' outputs. OpFromGraphs are inlined, except those with
+    `Execution.COMPILED`, which are nodes of their own (units, generated as one
+    function) outside generated code (`inside_unit`). `of_the_graph`: `nodes` are the
+    graph being planned itself (marks the items, see `NodeItem`)."""
+    items: list[NodeItem] = []
     for node in nodes:
         op = node.op
         execution = (
@@ -41,44 +35,6 @@ def flatten(
             }
             items += flatten(values, inner.toposort(), sub, inside_unit)
             _inlined_outputs(values, inner, node, sub, scope)
-        elif isinstance(op, OpFromGraph) and execution is Execution.COMPILED:
-            inner = op.fgraph
-            sub = {
-                iv: values.of(ov, scope)
-                for iv, ov in zip(inner.inputs, node.inputs, strict=True)
-            }
-            inner_scope = dict(sub)
-            try:
-                inner_items = flatten(
-                    values, inner.toposort(), inner_scope, inside_unit=True
-                )
-            except NotImplementedError:
-                # can't be one unit (e.g. it contains an interpreted OpFromGraph):
-                # its nodes are items of their own
-                items += flatten(values, inner.toposort(), sub, inside_unit)
-                _inlined_outputs(values, inner, node, sub, scope)
-                continue
-            sub = inner_scope
-            unit_outs = []
-            for io, oo in zip(inner.outputs, node.outputs, strict=True):
-                k = values.new(oo.type)
-                scope[oo] = k
-                unit_outs.append((values.of(io, sub), k))
-            items.append(
-                UnitItem(
-                    inner_items,
-                    values.unit_inputs(inner_items),
-                    unit_outs,
-                    str(op),
-                    node,
-                    [values.of(i, scope) for i in node.inputs],
-                )
-            )
-        elif isinstance(op, OpFromGraph) and execution is Execution.INTERPRETED:
-            ins = [values.of(i, scope) for i in node.inputs]
-            outs = [values.new(o.type) for o in node.outputs]
-            scope.update(zip(node.outputs, outs, strict=True))
-            items.append(SubprogramItem(node, ins, outs))
         else:
             ins = [values.of(i, scope) for i in node.inputs]
             outs = [values.new(o.type) for o in node.outputs]

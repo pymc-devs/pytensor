@@ -211,26 +211,13 @@ def test_units_include_copies():
     assert (s.n_units, s.n_modules, s.n_rust_kernels) == (1, 1, 0)
 
 
-def test_interpreted_ofg():
-    x = pt.vector("x")
-    inner = OpFromGraph([x], [pt.exp(x).sum(), x * 2], execution=Execution.INTERPRETED)
-    out = inner(x)
-    f = compare([x], [out[0], out[1] + 1], [rng.random(6)])
-    assert any(s.startswith("program:") for s in info(f)["tasks"])
-    # the subprogram's modules are listed with the program's (and both functions)
-    stats = info(f)["stats"]
-    assert len(stats.modules) >= stats.n_modules + 2
-
-
 def test_nested_ofg_kinds():
     x = pt.vector("x")
     compiled = OpFromGraph([x], [pt.exp(x) + 1], execution=Execution.COMPILED)
     y = pt.vector("y")
-    interp = OpFromGraph(
-        [y], [compiled(y).sum() * pt.log1p(y)], execution=Execution.INTERPRETED
-    )
+    inlined = OpFromGraph([y], [compiled(y).sum() * pt.log1p(y)])
     z = pt.vector("z")
-    outer = OpFromGraph([z], [interp(z) - 1], execution=Execution.COMPILED)
+    outer = OpFromGraph([z], [inlined(z) - 1], execution=Execution.COMPILED)
     compare([z], outer(z), [rng.random(5)])
 
 
@@ -293,15 +280,11 @@ def test_repeated_calls_and_threads():
         np.testing.assert_allclose(d, v * 2)
 
 
-def test_profiling_with_subprograms():
-    import pytensor
-
-    y = pt.dvector("y")
-    inner = OpFromGraph(
-        [y], [pt.cumsum(pt.exp(y)) * 2], execution=Execution.INTERPRETED
-    )
+def test_profiling():
     x = pt.dvector("x")
-    f = pytensor.function([x], [inner(x).sum(), pt.sort(x)], mode=get_mode("LLVM"))
+    f = pytensor.function(
+        [x], [pt.cumsum(pt.exp(x)).sum(), pt.sort(x)], mode=get_mode("LLVM")
+    )
     p = f.maker.linker.program
     xv = np.ones(5)
     f(xv)
@@ -310,16 +293,13 @@ def test_profiling_with_subprograms():
     for _ in range(3):
         f(xv)
     rows = p.profile()
-    top = [r for r in rows if r[0] == 0]
-    nested = [r for r in rows if r[0] == 1]
-    assert top and nested
-    assert all(calls == 3 for _, _, calls, _ in rows)
-    assert sum(s for *_, s in top) > 0
-    assert "program:" in p.profile_report()
+    assert all(calls == 3 for _, calls, _ in rows)
+    assert sum(s for *_, s in rows) > 0
+    assert "3 calls" in p.profile_report()
     p.reset_profile()
     p.set_profiling(False)
     f(xv)
-    assert all(secs == 0 and calls == 0 for _, _, calls, secs in p.profile())
+    assert all(secs == 0 and calls == 0 for _, calls, secs in p.profile())
 
 
 def test_scalars_around_a_scan():
