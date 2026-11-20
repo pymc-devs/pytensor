@@ -32,6 +32,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
+from pytensor.scalar.math import GammaIncAndGrad, GammaIncGrad
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas.blas_c import CGemv
@@ -111,6 +112,7 @@ from pytensor.tensor.rewriting.math import (
     local_add_canonizer,
     local_careduce_of_dimshuffle,
     local_div_switch_sink,
+    local_gammainc_and_grad,
     local_grad_log_erfc_neg,
     local_greedy_distributor,
     local_log_sqrt_sqr,
@@ -5036,6 +5038,23 @@ def test_polygamma_specialization():
     assert isinstance(fn_outs[0].owner.op.scalar_op, Psi)
     assert isinstance(fn_outs[1].owner.op.scalar_op, TriGamma)
     assert isinstance(fn_outs[2].owner.op.scalar_op, PolyGamma)
+
+
+def test_local_gammainc_and_grad():
+    k, x = pt.dvectors("k", "x")
+    grad_op = GammaIncGrad(ps.float64, ps.float64)
+    outs = [pt.gammainc(k, x), pt.gammaincc(k, x), Elemwise(grad_op)(k, x)]
+
+    result = RewriteTester(
+        [k, x], outs, include=None, custom_rewrite=local_gammainc_and_grad
+    )
+    result.assert_graph(*Elemwise(GammaIncAndGrad(ps.float64, ps.float64))(k, x))
+    result.assert_eval([0.5, 5.0, 20.0], [0.3, 5.0, 30.0])
+
+    grad_only = RewriteTester(
+        [k, x], [outs[2]], include=None, custom_rewrite=local_gammainc_and_grad
+    )
+    grad_only.assert_graph(Elemwise(grad_op)(k, x))
 
 
 @pytest.mark.skipif(

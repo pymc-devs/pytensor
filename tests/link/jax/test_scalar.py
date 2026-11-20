@@ -6,6 +6,7 @@ import pytensor.scalar.basic as ps
 import pytensor.tensor as pt
 from pytensor import function
 from pytensor.configdefaults import config
+from pytensor.gradient import grad
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
 from pytensor.tensor import as_tensor
@@ -19,6 +20,8 @@ from pytensor.tensor.math import (
     erfcinv,
     erfcx,
     erfinv,
+    gammainc,
+    gammaincc,
     gammainccinv,
     gammaincinv,
     iv,
@@ -207,6 +210,17 @@ def test_betaincinv():
             np.array([0.25, 0.7]),
         ],
     )
+
+
+def test_gammainc_grad_wrt_k():
+    k = vector("k", dtype="float64")
+    x = vector("x", dtype="float64")
+    p, q = gammainc(k, x), gammaincc(k, x)
+    dp_dk, dq_dk = grad(p.sum(), k), grad(q.sum(), k)
+    test_values = [np.array([0.5, 5.0, 20.0]), np.array([0.3, 5.0, 30.0])]
+
+    compare_jax_and_py([k, x], [dp_dk, dq_dk], test_values)
+    compare_jax_and_py([k, x], [p, q, dp_dk, dq_dk], test_values, jax_mode="JAX")
 
 
 def test_gammaincinv():

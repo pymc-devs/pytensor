@@ -23,9 +23,9 @@ from pytensor.link.utils import (
 from pytensor.scalar import ScalarLoop
 from pytensor.scalar.basic import (
     Add,
+    BaseComposite,
     Cast,
     Clip,
-    Composite,
     Identity,
     Mul,
     Pow,
@@ -364,7 +364,7 @@ def numba_funcify_Clip(op, **kwargs):
     return clip, scalar_op_cache_key(op)
 
 
-@register_scalar_funcify(Composite)
+@register_scalar_funcify(BaseComposite)
 def numba_funcify_Composite(op, node, **kwargs):
     _ = kwargs.pop("storage_map", None)
 

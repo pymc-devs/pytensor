@@ -4099,7 +4099,7 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
 
             if n_outs > 1:
 
-                def _perform(*inputs, outputs=[[None]] * n_outs):
+                def _perform(*inputs, outputs=[[None] for _ in range(n_outs)]):
                     op.perform(node, inputs, outputs)
                     return tuple(o[0] for o in outputs)
 
@@ -4185,17 +4185,13 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         self.prepare_node_called = set()
 
 
-class Composite(ScalarInnerGraphOp):
+class BaseComposite(ScalarInnerGraphOp):
+    """A scalar op defined by a graph of scalar operations, evaluated as that graph.
+
+    `Composite` is the subclass that fusion builds and rebuilds. Ops that share this
+    base without being a `Composite` are left alone by those rewrites, and backends can
+    dispatch on their type.
     """
-    Composite is an Op that takes a graph of scalar operations and
-    produces c code for the whole graph. Its purpose is to implement loop
-    fusion.
-
-    Composite depends on all the Ops in its graph having C code.
-
-    """
-
-    _name = None
 
     def __init__(
         self,
@@ -4221,18 +4217,6 @@ class Composite(ScalarInnerGraphOp):
         self.nout = len(self.outputs)
         super().__init__()
 
-    def __str__(self):
-        if self._name is not None:
-            return self._name
-
-        if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
-            self._name = "Composite{...}"
-        else:
-            outputs_str = ", ".join(pprint(output) for output in self.fgraph.outputs)
-            self._name = f"Composite{{{outputs_str}}}"
-
-        return self._name
-
     def clone(self):
         return self  # Op is immutable
 
@@ -4247,39 +4231,6 @@ class Composite(ScalarInnerGraphOp):
             return inputs, tuple(out.dtype for out in node.outputs)
         return inputs, tuple(t.dtype for t in self.outputs_type)
 
-    def make_node(self, *inputs):
-        inputs = [
-            inp if isinstance(inp, ScalarVariable) else as_scalar(inp) for inp in inputs
-        ]
-
-        if self.inputs_type == tuple(inp.type for inp in inputs):
-            return super().make_node(*inputs)
-
-        if len(inputs) != self.nin:
-            raise ValueError("Number of inputs does not match expected")
-
-        # First try to coerce each input to its inner-graph input type.
-        try:
-            filtered_inputs = [
-                inner_inp.type.filter_variable(inp)
-                for inp, inner_inp in zip(inputs, self.inputs)
-            ]
-        except TypeError:
-            pass
-        else:
-            return super().make_node(*filtered_inputs)
-
-        # The new input types are incompatible with the inner graph.
-        # Try to make a new inner graph with rebuild_strict=False.
-        unfrozen_fgraph = self.fgraph.unfreeze()
-        new_inner_inputs = [i.type() for i in inputs]
-        new_outputs = clone_replace(
-            unfrozen_fgraph.outputs,
-            replace=dict(zip(unfrozen_fgraph.inputs, new_inner_inputs)),
-            rebuild_strict=False,
-        )
-        return Composite(new_inner_inputs, new_outputs).make_node(*inputs)
-
     def perform(self, node, inputs, output_storage):
         outputs = self.py_perform_fn(*inputs)
         # zip strict not specified because we are in a hot loop
@@ -4287,7 +4238,7 @@ class Composite(ScalarInnerGraphOp):
             storage[0] = out_val
 
     def pullback(self, inputs, outputs, output_grads):
-        raise NotImplementedError("grad is not implemented for Composite")
+        raise NotImplementedError(f"grad is not implemented for {type(self).__name__}")
 
     @property
     def c_code_template(self):
@@ -4369,3 +4320,61 @@ class Composite(ScalarInnerGraphOp):
 
     def c_code_cache_version_outer(self) -> tuple[int, ...]:
         return (7,)
+
+
+class Composite(BaseComposite):
+    """
+    Composite is an Op that takes a graph of scalar operations and
+    produces c code for the whole graph. Its purpose is to implement loop
+    fusion.
+
+    Composite depends on all the Ops in its graph having C code.
+
+    """
+
+    _name = None
+
+    def __str__(self):
+        if self._name is not None:
+            return self._name
+
+        if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
+            self._name = "Composite{...}"
+        else:
+            outputs_str = ", ".join(pprint(output) for output in self.fgraph.outputs)
+            self._name = f"Composite{{{outputs_str}}}"
+
+        return self._name
+
+    def make_node(self, *inputs):
+        inputs = [
+            inp if isinstance(inp, ScalarVariable) else as_scalar(inp) for inp in inputs
+        ]
+
+        if self.inputs_type == tuple(inp.type for inp in inputs):
+            return super().make_node(*inputs)
+
+        if len(inputs) != self.nin:
+            raise ValueError("Number of inputs does not match expected")
+
+        # First try to coerce each input to its inner-graph input type.
+        try:
+            filtered_inputs = [
+                inner_inp.type.filter_variable(inp)
+                for inp, inner_inp in zip(inputs, self.inputs)
+            ]
+        except TypeError:
+            pass
+        else:
+            return super().make_node(*filtered_inputs)
+
+        # The new input types are incompatible with the inner graph.
+        # Try to make a new inner graph with rebuild_strict=False.
+        unfrozen_fgraph = self.fgraph.unfreeze()
+        new_inner_inputs = [i.type() for i in inputs]
+        new_outputs = clone_replace(
+            unfrozen_fgraph.outputs,
+            replace=dict(zip(unfrozen_fgraph.inputs, new_inner_inputs)),
+            rebuild_strict=False,
+        )
+        return Composite(new_inner_inputs, new_outputs).make_node(*inputs)
