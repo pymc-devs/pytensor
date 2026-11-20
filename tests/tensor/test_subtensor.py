@@ -134,7 +134,7 @@ class TestProvablyPositive:
         [
             pytest.param(lambda: vector("v", dtype="uint8"), id="uint-dtype"),
             pytest.param(lambda: matrix("m").shape[0], id="shape-dim"),
-            pytest.param(lambda: constant(np.array([0.5])).astype("int64"), id="cast"),
+            pytest.param(lambda: vector("v", dtype="uint8").astype("int16"), id="cast"),
             pytest.param(lambda: exp(vector("v")), id="non-negative-op"),
         ],
     )
