@@ -15,7 +15,7 @@ def _function(params, ret, name="f"):
 
 
 def _compile(m, restype, *argtypes, name="f"):
-    c = m.compile(cache=False)
+    c = m.compile()
     fn = ctypes.CFUNCTYPE(restype, *argtypes)(c.address(name))
     fn._keep = c
     return fn
@@ -191,15 +191,11 @@ def test_compiled_module_keeps_its_ir():
         b.ret(b.add(b.mul(n, 3), b.mul(n, 7)))
         return m
 
-    c = build().compile(cache=False)
+    c = build().compile()
     assert "define" in c.ir and c.ir.count("mul") == 2
     # the optimized IR is what the machine code comes from: n * 3 + n * 7 is n * 10
     assert c.optimized_ir().count("mul") == 1
-    # ... and doesn't depend on where the object came from
-    again = build().compile(cache=False)
-    assert again.source == "in process"
-    assert again.optimized_ir() == c.optimized_ir()
-    assert again.optimized_ir(0).count("mul") == 2
+    assert c.optimized_ir(0).count("mul") == 2
 
 
 def test_stubs_list_the_builders_methods():
@@ -269,7 +265,7 @@ def test_ir_objects_cross_threads(monkeypatch):
         ex.submit(cycle).result()
     for k, m in enumerate(modules):
         assert _compile(m, ctypes.c_int64, ctypes.c_int64)(1) == 1 + 6 + k
-    c = shared.compile(cache=False)
+    c = shared.compile()
     for k in range(8):
         fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(c.address(f"f{k}"))
         assert fn(3) == 3 * k

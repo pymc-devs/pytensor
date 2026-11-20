@@ -7,7 +7,7 @@
 
 use super::builder::{Builder, BuilderState};
 use super::ty::{PyType, Ty};
-use crate::target::{cache_dir, init_llvm, target_cpu, target_machine, vfabi_variants};
+use crate::target::{init_llvm, target_machine, vfabi_variants};
 use llvm_sys::LLVMLinkage;
 use llvm_sys::analysis::{LLVMVerifierFailureAction, LLVMVerifyModule};
 use llvm_sys::core as c;
@@ -18,15 +18,11 @@ use llvm_sys::transforms::pass_builder as pb;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::MutexExt;
-use sha2::Digest;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-
-/// Bump when the meaning of IR changes for the same text (runtime functions, ABI).
-pub const IR_CACHE_VERSION: u32 = 1;
 
 pub fn err<T>(msg: impl Into<String>) -> PyResult<T> {
     Err(PyValueError::new_err(msg.into()))
@@ -95,7 +91,7 @@ pub struct ModuleState {
     pub debug: Option<super::debug::DebugInfo>,
     functions: RefCell<Vec<(String, LLVMValueRef, bool)>>,
     /// a readable name for the generated code in perf maps (not part of the IR, so not
-    /// of the cache key)
+    /// of the module's key)
     label: RefCell<Option<String>>,
     /// the builders of the module's functions (`Builder` holds the index)
     pub builders: RefCell<Vec<BuilderState>>,
@@ -464,11 +460,11 @@ impl Module {
         verify(&*self.m.lock(py)?)
     }
 
-    /// Verify, optimize, generate machine code and link it into the JIT. The object is
-    /// cached by a hash of the IR and the target. Afterwards the module can't change.
-    #[pyo3(signature = (opt_level = 3, cache = true))]
-    fn compile(&self, py: Python<'_>, opt_level: u32, cache: bool) -> PyResult<CompiledModule> {
-        let mut r = compile_modules(py, &[self], opt_level, cache)?;
+    /// Verify, optimize, generate machine code and link it into the JIT. Afterwards the
+    /// module can't change.
+    #[pyo3(signature = (opt_level = 3))]
+    fn compile(&self, py: Python<'_>, opt_level: u32) -> PyResult<CompiledModule> {
+        let mut r = compile_modules(py, &[self], opt_level)?;
         Ok(r.remove(0))
     }
 }
@@ -478,9 +474,9 @@ fn label_of(st: &ModuleState) -> String {
 }
 
 impl Module {
-    /// Finish the module for compilation: verify, hash, give exported functions unique
-    /// symbol names.
-    fn prepare(&self, py: Python<'_>, opt_level: u32) -> PyResult<Prepared> {
+    /// Finish the module for compilation: verify, give exported functions unique symbol
+    /// names (by the module's id).
+    fn prepare(&self, py: Python<'_>) -> PyResult<Prepared> {
         let st = self.m.lock(py)?;
         st.check_open()?;
         for (name, f, _) in st.functions.borrow().iter() {
@@ -498,10 +494,6 @@ impl Module {
         verify(&st)?;
         st.finished.set(true);
         let text = print_module(st.module);
-        let mut h = sha2::Sha256::new();
-        h.update(salt(opt_level).as_bytes());
-        h.update(text.as_bytes());
-        let key = hex::encode(&h.finalize()[..16]);
         let exported: Vec<(String, LLVMValueRef)> = st
             .functions
             .borrow()
@@ -514,14 +506,13 @@ impl Module {
         }
         let mut symbols = Vec::new();
         for (name, f) in &exported {
-            let sym = format!("pt{key}_{name}");
+            let sym = format!("pt{}_{name}", st.id);
             let s = cstring(&sym);
             // SAFETY: renaming a function of this (now immutable) module.
             unsafe { c::LLVMSetValueName2(*f, s.as_ptr(), sym.len()) };
             symbols.push((name.clone(), sym));
         }
         Ok(Prepared {
-            key,
             symbols,
             name: label_of(&st),
             ir: text,
@@ -530,7 +521,6 @@ impl Module {
 }
 
 struct Prepared {
-    key: String,
     symbols: Vec<(String, String)>,
     name: String,
     /// the IR before optimization
@@ -543,91 +533,46 @@ pub fn compile_modules(
     py: Python<'_>,
     modules: &[&Module],
     opt_level: u32,
-    cache: bool,
 ) -> PyResult<Vec<CompiledModule>> {
     use rayon::prelude::*;
     let t0 = std::time::Instant::now();
     let prepared: Vec<Prepared> = modules
         .iter()
-        .map(|m| m.prepare(py, opt_level))
+        .map(|m| m.prepare(py))
         .collect::<PyResult<_>>()?;
-    let in_process: Vec<bool> = {
-        let j = crate::jit::jit().lock().unwrap_or_else(|e| e.into_inner());
-        prepared
-            .iter()
-            .map(|p| j.has(&p.symbols[0].1).is_some())
-            .collect()
-    };
-    let dir = cache_dir();
-    if cache {
-        let _ = std::fs::create_dir_all(&dir);
-    }
-    // the same module twice (same key) is compiled once
-    let mut first_of: HashMap<&str, usize> = HashMap::new();
-    let todo: Vec<usize> = (0..prepared.len())
-        .filter(|&i| !in_process[i] && *first_of.entry(prepared[i].key.as_str()).or_insert(i) == i)
-        .collect();
     // the workers lock the modules they compile (plainly: they don't run Python code)
-    let jobs: Vec<(usize, &Shared, String)> = todo
-        .iter()
-        .map(|&i| (i, &*modules[i].m, prepared[i].key.clone()))
-        .collect();
-    let results: Vec<(usize, Result<(Vec<u8>, bool, f64), String>)> = py.detach(move || {
+    let jobs: Vec<&Shared> = modules.iter().map(|m| &*m.m).collect();
+    let results: Vec<Result<(Vec<u8>, f64), String>> = py.detach(move || {
         jobs.into_par_iter()
-            .map(|(i, m, key)| {
-                let path = dir.join(format!("ir_{key}.o"));
-                if cache {
-                    if let Ok(o) = std::fs::read(&path) {
-                        return (i, Ok((o, true, 0.0)));
-                    }
-                }
+            .map(|m| {
                 let t = std::time::Instant::now();
                 let r = match m.state.lock() {
                     Ok(st) => codegen(st.module, opt_level),
                     Err(_) => Err("an earlier panic left the module broken".to_string()),
                 };
-                let r = r.map(|obj| {
-                    if cache {
-                        let tmp = dir.join(format!("ir_{key}.{}.{i}.tmp", std::process::id()));
-                        if std::fs::write(&tmp, &obj).is_ok() {
-                            let _ = std::fs::rename(&tmp, &path);
-                        }
-                    }
-                    (obj, false, t.elapsed().as_secs_f64())
-                });
-                (i, r)
+                r.map(|obj| (obj, t.elapsed().as_secs_f64()))
             })
             .collect()
     });
-    let mut stats: Vec<CompileStats> = in_process
-        .iter()
-        .map(|&p| CompileStats {
-            in_process: p,
-            ..Default::default()
-        })
-        .collect();
     let mut j = crate::jit::jit().lock().unwrap_or_else(|e| e.into_inner());
-    for (i, r) in results {
-        let (obj, disk, secs) = r.map_err(PyRuntimeError::new_err)?;
-        stats[i].disk_cache = disk;
-        stats[i].compile_s = secs;
-        let p = &prepared[i];
+    let mut compile_s = Vec::with_capacity(prepared.len());
+    for (p, r) in prepared.iter().zip(results) {
+        let (obj, secs) = r.map_err(PyRuntimeError::new_err)?;
+        compile_s.push(secs);
         j.add_object(&p.symbols[0].1, &obj, &p.name)
             .map_err(PyRuntimeError::new_err)?;
     }
-    let total = t0.elapsed().as_secs_f64();
+    let total_s = t0.elapsed().as_secs_f64();
     let mut out = Vec::with_capacity(prepared.len());
-    for (i, p) in prepared.into_iter().enumerate() {
+    for (p, compile_s) in prepared.into_iter().zip(compile_s) {
         let mut addresses = HashMap::new();
         for (name, sym) in p.symbols {
             addresses.insert(name, j.lookup(&sym).map_err(PyRuntimeError::new_err)?);
         }
-        let mut st = stats[i].clone();
-        st.total_s = total;
         out.push(CompiledModule {
-            key: p.key,
             addresses,
-            stats: st,
+            compile_s,
+            total_s,
             ir: p.ir,
             opt_level,
         });
@@ -637,32 +582,22 @@ pub fn compile_modules(
 
 /// Compile several modules in parallel (see `Module.compile`).
 #[pyfunction]
-#[pyo3(signature = (modules, opt_level = 3, cache = true))]
+#[pyo3(signature = (modules, opt_level = 3))]
 pub fn compile_many(
     py: Python<'_>,
     modules: Vec<PyRef<'_, Module>>,
     opt_level: u32,
-    cache: bool,
 ) -> PyResult<Vec<CompiledModule>> {
     let refs: Vec<&Module> = modules.iter().map(|m| &**m).collect();
-    compile_modules(py, &refs, opt_level, cache)
-}
-
-#[derive(Clone, Default)]
-pub struct CompileStats {
-    pub in_process: bool,
-    pub disk_cache: bool,
-    pub compile_s: f64,
-    pub total_s: f64,
+    compile_modules(py, &refs, opt_level)
 }
 
 /// A compiled module: addresses of its exported functions.
 #[pyclass(module = "pytensor_llvm.ir", frozen)]
 pub struct CompiledModule {
-    #[pyo3(get)]
-    key: String,
     addresses: HashMap<String, usize>,
-    stats: CompileStats,
+    compile_s: f64,
+    total_s: f64,
     ir: String,
     opt_level: u32,
 }
@@ -683,9 +618,8 @@ impl CompiledModule {
     }
 
     /// The IR after the optimization pipeline the module was compiled with (or
-    /// `opt_level`). Computed on demand from `ir`, so it is the same whether the object
-    /// was compiled, read from the disk cache or already in the process. Exported
-    /// functions keep their plain names here (compiled, they get a unique symbol).
+    /// `opt_level`), computed on demand from `ir`. Exported functions keep their plain
+    /// names here (compiled, they get a unique symbol).
     ///
     /// `remarks`: start with LLVM's optimization remarks (of every pass: what the loop
     /// vectorizer did or why it didn't, what was inlined, unrolled...), as comments.
@@ -702,26 +636,14 @@ impl CompiledModule {
             .map_err(PyRuntimeError::new_err)
     }
 
-    /// How the object was obtained: "compiled", "disk cache" or "in process".
-    #[getter]
-    fn source(&self) -> &'static str {
-        if self.stats.in_process {
-            "in process"
-        } else if self.stats.disk_cache {
-            "disk cache"
-        } else {
-            "compiled"
-        }
-    }
-
     #[getter]
     fn compile_s(&self) -> f64 {
-        self.stats.compile_s
+        self.compile_s
     }
 
     #[getter]
     fn total_s(&self) -> f64 {
-        self.stats.total_s
+        self.total_s
     }
 }
 
@@ -807,18 +729,6 @@ fn finish_vector_decls(m: &ModuleState) {
     }
 }
 
-fn salt(opt_level: u32) -> String {
-    let (mut ma, mut mi, mut pa) = (0u32, 0u32, 0u32);
-    // SAFETY: plain out-parameters.
-    unsafe { c::LLVMGetVersion(&mut ma, &mut mi, &mut pa) };
-    let (cpu, features) = target_cpu();
-    format!(
-        "ir{IR_CACHE_VERSION}|{}|llvm{ma}.{mi}.{pa}|{cpu}|{features}|O{opt_level}|veclib{:?}|fp{}",
-        env!("CARGO_PKG_VERSION"),
-        vfabi_variants(),
-        crate::perf::enabled(),
-    )
-}
 
 /// Compilations hold this shared. Collecting optimization remarks holds it alone: that
 /// switches on LLVM's process-wide `-pass-remarks*` options, and a compilation running

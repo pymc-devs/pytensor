@@ -2,8 +2,7 @@
 //!
 //! Enabled by `PYTENSOR_LLVM_PERF=1` (read once per process). Then generated functions
 //! keep a frame pointer (`"frame-pointer"="all"`), so sampling profilers can walk the
-//! stack through them; this is part of the object cache key, so profiling and normal
-//! objects don't mix. On Linux, JIT-linked functions are also named for `perf` (a perf
+//! stack through them. On Linux, JIT-linked functions are also named for `perf` (a perf
 //! map and a jitdump, see `linux`).
 
 use std::sync::OnceLock;

@@ -666,15 +666,13 @@ class CompiledNode:
         return self.compiled.address("kernel")
 
 
-def compile_node(
-    node, *, fastmath=True, opt_level=3, cache=True, provided=None
-) -> CompiledNode:
+def compile_node(node, *, fastmath=True, opt_level=3, provided=None) -> CompiledNode:
     """Compile one node as a kernel (for tests and one-node units).
     `provided`: layouts of the memory the caller will provide (default: as declared)."""
     module = ir.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
     nf = build_node_function(module, node, "node", provided=provided)
     build_kernel_wrapper(module, nf, "kernel")
-    compiled = module.compile(opt_level=opt_level, cache=cache)
+    compiled = module.compile(opt_level=opt_level)
     return CompiledNode(compiled, nf.signature)
 
 

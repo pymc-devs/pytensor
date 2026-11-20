@@ -29,7 +29,7 @@ def run(build, *arrays):
         strides = [b.i64(s) for s in a.strides]
         wrapped.append(Array(str(a.dtype), p, shape, strides, unknown_layout(shape)))
     b.ret(build(b, *wrapped))
-    c = m.compile(cache=False)
+    c = m.compile()
     fn = ctypes.CFUNCTYPE(ctypes.c_double, *[ctypes.c_void_p] * len(arrays))(
         c.address("f")
     )

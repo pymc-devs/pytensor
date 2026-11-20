@@ -186,7 +186,7 @@ def test_layout_check_catches_a_wrong_claim():
     m = ir.Module("wrong_claim")
     nf = build_node_function(m, node, "node", in_layouts=[C(2)])
     build_kernel_wrapper(m, nf, "kernel", check_layouts=True)
-    c = m.compile(cache=False)
+    c = m.compile()
     v = rng.normal(size=(3, 4))
     (r,) = ir.call_kernel(c.address("kernel"), [v], [(np.dtype("float64"), 2)])
     np.testing.assert_allclose(r, np.exp(v))

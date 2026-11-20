@@ -69,7 +69,6 @@ def _interp():
 class Options:
     fastmath: bool = True
     opt_level: int = 3
-    cache: bool = True
     numba_fallback: bool = True
     #: what generated code may assume about the graph inputs: "any" strides, or "c"
     #: (C-contiguous: Python calls copy other arrays, the C API rejects them)
@@ -648,7 +647,6 @@ class Planner:
         compiled = ir.compile_many(
             [*(m for m, _ in self.modules), module],
             opt_level=self.opts.opt_level,
-            cache=self.opts.cache,
         )
         for (_, kernel), c in zip(self.modules, compiled[:-1], strict=True):
             kernel.address = c.address("kernel")

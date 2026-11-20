@@ -60,7 +60,7 @@ def add_square(i, total):
 b.ret(total)
 unoptimized = module.ir()
 
-compiled = module.compile(cache=False)
+compiled = module.compile()
 sum_squares = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_void_p, ctypes.c_int64)(
     compiled.address("sum_squares")
 )
@@ -111,9 +111,8 @@ The flags on `fmul` and `fadd` are the fast-math flags the backend uses by defau
 The compiled module keeps both versions of its IR: `compiled.ir` as it was generated,
 and `compiled.optimized_ir()` after the optimization pipeline (here: a vectorized
 loop), which is what the machine code is made from. The optimized IR is computed when
-asked for, so it is the same whether the object was compiled, taken from the disk
-cache or already in the process. (After `compile()` the module itself is closed and
-its `ir()` may or may not have been optimized, depending on the cache.)
+asked for. (After `compile()` the module itself is closed and its `ir()` may have been
+optimized.)
 
 ```python
 optimized = compiled.optimized_ir()
@@ -415,7 +414,7 @@ text = f.maker.linker.ir()
 ```
 
 Setting `PYTENSOR_LLVM_DUMP_IR=<directory>` instead writes the optimized IR of every
-module that is compiled there (not of those taken from the cache) to files.
+module that is compiled there to files.
 
 ### Errors
 
