@@ -1,3 +1,5 @@
+from functools import cache
+
 import mlx.core as mx
 import numpy as np
 
@@ -7,6 +9,7 @@ from pytensor.link.mlx.dispatch.scalar.helpers import (
     _metal_unary_call,
     _working_precision,
 )
+from pytensor.scalar import _gamma_tables as gamma_tables
 from pytensor.scalar.math import (
     GammaLn,
     Log1mexp,
@@ -46,27 +49,82 @@ _PSI_COEFFS_SINGLE = _PSI_COEFFS[:3]
 _PSI_SHIFTS_SINGLE = 6
 
 
+def _flat(table):
+    return tuple(float(v) for v in np.ravel(table))
+
+
+# The panels cover [1, 64), where Stirling's series takes over
+_TABLE_END = 64.0
+_STIRLING = tuple(float(c) for c in gamma_tables.STIRLING)
+_STIRLING32 = gamma_tables.STIRLING32
+_DSTIRLING32 = _STIRLING32 * np.arange(1, 2 * _STIRLING32.size, 2)
+
+
 # Both functions are a chain of elementwise ops on the vectorized path, long enough that
 # mx.compile splits it into several kernel launches. A kernel is one launch, and it can
-# branch: small positive arguments shift up rather than reflect, and the psi recurrence
-# stops once the argument is large enough for the asymptotic series. Metal's sinpi and
-# tanpi reduce the argument themselves, so the reflections need no half-angle detour.
+# branch, which lets positive arguments read the float32 Chebyshev panels of
+# pytensor.scalar._gamma_tables: a row lookup and a short Horner sum on [1, 64), with no
+# division, where the series and the recurrence above cost several. Below 1 the argument
+# shifts up by one, and from 64 Stirling's series takes over. Negative arguments reflect
+# onto the same positive kernels. Metal's sinpi and tanpi reduce the argument themselves,
+# so the reflections need no half-angle detour.
 _METAL_MATH_HEADER = (
-    _metal_constants(LG_LANCZOS=_LANCZOS_COEFFS, PSI_C=_PSI_COEFFS_SINGLE)
+    _metal_constants(
+        LG_TABLE=_flat(gamma_tables.LGAMMA32),
+        PSI_TABLE=_flat(gamma_tables.PSI32),
+        STIRLING=_flat(_STIRLING32),
+        DSTIRLING=_flat(_DSTIRLING32),
+        INV_POW2=(1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125),
+    )
     + f"""
-#define LG_LANCZOS_N      {len(_LANCZOS_COEFFS)}
-#define LG_LANCZOS_T      {_LANCZOS_G + 0.5}f
-#define LG_LOG_SQRT_2PI   {float(0.5 * np.log(2.0 * np.pi))!r}f
+#define LG_WIDTH          {gamma_tables.LGAMMA32.shape[1]}
+#define PSI_WIDTH         {gamma_tables.PSI32.shape[1]}
+#define STIRLING_C        {float(gamma_tables.STIRLING_C)!r}f
+#define X0_HI             {float(gamma_tables.X0_HI32)!r}f
+#define X0_LO             {float(gamma_tables.X0_LO32)!r}f
 #define LG_LOG_PI         {float(np.log(np.pi))!r}f
-#define PSI_TERMS         {len(_PSI_COEFFS_SINGLE)}
-#define PSI_MIN           {float(_PSI_SHIFTS_SINGLE)}f
+#define TABLE_END         {_TABLE_END}f
 
-// log Gamma(w + 1) for w >= -0.5
-static inline float lg_lgamma1p(float w) {{
-    float series = LG_LANCZOS[0];
-    for (int i = 1; i < LG_LANCZOS_N; ++i) series += LG_LANCZOS[i] / (w + (float)i);
-    float t = w + LG_LANCZOS_T;
-    return LG_LOG_SQRT_2PI + (w + 0.5f) * log(t) - t + log(series);
+// The series of panel m of octave e of y in [1, 64), 32 panels an octave. Scaling by
+// a power of two and subtracting one are exact, so the panel index cannot leave [0, 32)
+static inline float panel_series(constant float* table, int width, float y) {{
+    int e = int(y >= 2.0f) + int(y >= 4.0f) + int(y >= 8.0f) + int(y >= 16.0f)
+            + int(y >= 32.0f);
+    float u = (y * INV_POW2[e] - 1.0f) * 32.0f;
+    int m = int(u);
+    float s = 2.0f * (u - float(m)) - 1.0f;
+    constant float* row = table + (32 * e + m) * width;
+    float p = row[width - 1];
+    for (int k = width - 2; k >= 0; --k) p = p * s + row[k];
+    return p;
+}}
+
+// lgamma(x) for finite x > 0
+static inline float lgamma_positive(float x) {{
+    if (x >= TABLE_END) {{
+        float inv = 1.0f / x;
+        float series = inv * (STIRLING[0] + STIRLING[1] * inv * inv);
+        return (x - 0.5f) * (log(x) - 1.0f) + STIRLING_C + series;
+    }}
+    // the table holds lgamma(y) / ((y - 1) (y - 2)) on [1, 4)
+    float f = panel_series(LG_TABLE, LG_WIDTH, x >= 1.0f ? x : x + 1.0f);
+    if (x >= 4.0f) return f;
+    if (x >= 1.0f) return (x - 1.0f) * (x - 2.0f) * f;
+    return x * (x - 1.0f) * f - log(x);
+}}
+
+// digamma(x) for x >= 0 or +inf, -inf at 0
+static inline float psi_positive(float x) {{
+    if (x >= TABLE_END) {{
+        float inv = 1.0f / x;
+        float p = inv * inv;
+        return log(x) - 0.5f * inv - p * (DSTIRLING[0] + DSTIRLING[1] * p);
+    }}
+    float y = x >= 1.0f ? x : x + 1.0f;
+    float r = panel_series(PSI_TABLE, PSI_WIDTH, y);
+    // the table holds digamma(y) / (y - x0) on [1, 2), and y - X0_HI is exact
+    if (y < 2.0f) r = r * (y - X0_HI) - r * X0_LO;
+    return x >= 1.0f ? r : r - 1.0f / x;
 }}
 """
 )
@@ -76,17 +134,17 @@ _METAL_GAMMALN_SOURCE = """
     uint i = thread_position_in_grid.x;
     float z = (float)x[i];
     float res;
-    if (isinf(z)) {
-        // the series forms inf - inf at either end, where both limits are +inf
+    if (isnan(z)) {
+        res = z;
+    } else if (isinf(z)) {
+        // both limits are +inf
         res = INFINITY;
-    } else if (z >= 0.5f) {
-        res = lg_lgamma1p(z - 1.0f);
     } else if (z > 0.0f) {
-        res = lg_lgamma1p(z) - log(z);
+        res = lgamma_positive(z);
     } else {
         // log|sin(pi z)| is -inf at the poles, which makes the result +inf there
         float log_sin = log(fabs(sinpi(z)));
-        res = LG_LOG_PI - log_sin - lg_lgamma1p(-z);
+        res = LG_LOG_PI - log_sin - lgamma_positive(1.0f - z);
     }
     out[i] = (T)res;
 """
@@ -95,19 +153,14 @@ _METAL_GAMMALN_SOURCE = """
 _METAL_PSI_SOURCE = """
     uint i = thread_position_in_grid.x;
     float z = (float)x[i];
-    float y = (z < 0.0f) ? 1.0f - z : z;
-    float res = 0.0f;
-    while (y < PSI_MIN) {
-        res -= 1.0f / y;
-        y += 1.0f;
-    }
-    float r2 = 1.0f / (y * y);
-    float series = PSI_C[PSI_TERMS - 1];
-    for (int k = PSI_TERMS - 2; k >= 0; --k) series = PSI_C[k] + series * r2;
-    res += log(y) - 0.5f / y - series * r2;
-    if (z < 0.0f) {
+    float res;
+    if (isnan(z)) {
+        res = z;
+    } else if (z >= 0.0f) {
+        res = psi_positive(z);
+    } else {
         // the tangent lands on a true zero at every pole, so those come back infinite
-        res -= M_PI_F / tanpi(z - rint(z));
+        res = psi_positive(1.0f - z) - M_PI_F / tanpi(z - rint(z));
     }
     out[i] = (T)res;
 """
@@ -136,6 +189,117 @@ def _lanczos_log_gamma(w, const):
         - t
         + mx.log(series)
     )
+
+
+def _log_abs_sin_pi(z, const):
+    """``log|sin(pi z)|``, ``-inf`` at the integers.
+
+    Reducing by the nearest integer is exact, where subtracting floor(z) rounds once z
+    is small and negative, and it keeps the result accurate at large |z|. Taking the
+    sine from the tangent by the half-angle identity keeps it off mx.sin, which is a
+    float32 kernel at any dtype where mx.tan is not.
+    """
+    tan_half = mx.tan(const(0.5 * np.pi) * (z - mx.round(z)))
+    # |tan_half| <= 1, so 1 + tan_half**2 is in [1, 2] and costs nothing to form
+    return mx.log(const(2.0) * mx.abs(tan_half) / (const(1.0) + tan_half * tan_half))
+
+
+def _pi_cot_pi(z, const):
+    """``pi * cot(pi z)``, infinite at the integers.
+
+    The cotangent is a reciprocal tangent: mx.tan is genuine at float64 where mx.cos
+    and mx.sin are float32 kernels whatever they are handed. Reducing by the nearest
+    integer is exact and puts the tangent on a true zero at every pole.
+    """
+    return const(np.pi) / mx.tan(const(np.pi) * (z - mx.round(z)))
+
+
+@cache
+def _lgamma_table():
+    return mx.array(gamma_tables.LGAMMA, dtype=mx.float64)
+
+
+def _horner(coeffs, t, const):
+    out = const(coeffs[-1])
+    for coeff in reversed(coeffs[:-1]):
+        out = out * t + const(coeff)
+    return out
+
+
+# A float64 y in [1, 64) has biased exponent 1023 + e for its octave e, and the top
+# five bits of its mantissa are its panel within the octave. So y's bits shifted right
+# by 47 are 32 * (1023 + e) + panel, and the 47 bits below are its position in the
+# panel. Reading them directly needs no float-to-int cast, which would be
+# indistinguishable in the compiled graph from MLX copying the dispatch's input, the
+# thing test_dispatch_does_not_copy_its_input guards against.
+_PANEL_SHIFT = 47
+_ROW_OFFSET = 1023 << 5
+_POSITION_MASK = (1 << _PANEL_SHIFT) - 1
+_ONE_BITS = 1023 << 52
+
+
+def _int64(value):
+    return mx.array(value, dtype=mx.int64)
+
+
+def _panel_series(table, y, const):
+    """The series of the panel of ``table`` holding each ``y``, all in ``[1, 64)``."""
+    y_bits = mx.view(y, mx.int64)
+    row = mx.right_shift(y_bits, _int64(_PANEL_SHIFT)) - _int64(_ROW_OFFSET)
+    # The position in the panel moved to the top of the mantissa of 1.0 is exactly
+    # 1 + t for t in [0, 1), so s = 2 t - 1 = 2 (1 + t) - 3 is exact
+    position = mx.left_shift(
+        mx.bitwise_and(y_bits, _int64(_POSITION_MASK)), _int64(52 - _PANEL_SHIFT)
+    )
+    one_plus_t = mx.view(mx.bitwise_or(position, _int64(_ONE_BITS)), mx.float64)
+    s = const(2.0) * one_plus_t - const(3.0)
+    rows = mx.take(table, row, axis=0)
+
+    width = table.shape[1]
+    out = rows[..., width - 1]
+    for k in range(width - 2, -1, -1):
+        out = out * s + rows[..., k]
+    return out
+
+
+def _lgamma_positive_double(x, const):
+    """``lgamma(x)`` in float64 for ``x > 0``, from the panels on ``[1, 64)``."""
+    one, two, table_end = const(1.0), const(2.0), const(_TABLE_END)
+
+    # Below 1 the argument shifts up by one, lgamma(x) = lgamma(x + 1) - log(x). The
+    # table holds lgamma(y) / ((y - 1) (y - 2)) on [1, 4), so the zeros at 1 and 2 keep
+    # their relative accuracy
+    small = x < one
+    y = mx.where(small, x + one, x)
+    f = _panel_series(_lgamma_table(), mx.where(y < table_end, y, one), const)
+    zeros = mx.where(small, x * (x - one), (x - one) * (x - two))
+    table_value = mx.where(
+        x >= const(4.0),
+        f,
+        zeros * f - mx.where(small, mx.log(x), const(0.0)),
+    )
+
+    # clamped so that the branch the where discards stays finite
+    big = mx.where(x >= table_end, x, table_end)
+    inv = one / big
+    stirling = (
+        (big - const(0.5)) * (mx.log(big) - one)
+        + const(gamma_tables.STIRLING_C)
+        + inv * _horner(_STIRLING, inv * inv, const)
+    )
+    return mx.where(x >= table_end, stirling, table_value)
+
+
+def _gammaln_double(z, const):
+    reflect = z <= const(0.0)
+    positive = _lgamma_positive_double(mx.where(reflect, const(1.0) - z, z), const)
+    out = mx.where(
+        reflect,
+        const(np.log(np.pi)) - _log_abs_sin_pi(z, const) - positive,
+        positive,
+    )
+    # both limits are +inf, which the reflection turns into NaN at -inf
+    return mx.where(mx.isinf(z), const(np.inf), out)
 
 
 @mlx_funcify.register(Sigmoid)
@@ -185,34 +349,22 @@ def mlx_funcify_GammaLn(op, node, **kwargs):
         fast = _metal_math_call("gammaln", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
+        if z.dtype == mx.float64:
+            return _gammaln_double(z, const).astype(out_dtype)
 
-        double = z.dtype == mx.float64
         half = const(0.5)
         one = const(1.0)
-
-        # In double precision, small positive arguments go up by one via
-        # lgamma(x) = lgamma(x + 1) - log(x) rather than through the reflection formula
-        # below. Both are exact as mathematics, but reflection would route them through
-        # mx.sin, which is only float32-accurate whatever the input dtype. Single
-        # precision has nothing to protect, and the extra log costs a pass
-        shift_up = (z > const(0.0)) & (z < half) if double else None
-        y = mx.where(shift_up, z + one, z) if double else z
-        reflect = y < half
+        reflect = z < half
 
         # Evaluating the series on the reflected argument means one polynomial
         # covers both branches, and neither can produce a NaN the other must mask
-        w = mx.where(reflect, one - y, y) - one
+        w = mx.where(reflect, one - z, z) - one
         lanczos = _lanczos_log_gamma(w, const)
-
-        # Reducing by the nearest integer is exact, where subtracting floor(y) rounds
-        # once y is small and negative, and it keeps log|sin(pi x)| accurate at large
-        # |x|. Taking the sine from the tangent by the half-angle identity keeps it off
-        # mx.sin, which is a float32 kernel at any dtype where mx.tan is not
-        tan_half = mx.tan(const(0.5 * np.pi) * (y - mx.round(y)))
-        log_sin = mx.log(const(2.0) * mx.abs(tan_half)) - mx.log1p(tan_half * tan_half)
-        out = mx.where(reflect, const(np.log(np.pi)) - log_sin - lanczos, lanczos)
-        if double:
-            out = mx.where(shift_up, out - mx.log(z), out)
+        out = mx.where(
+            reflect,
+            const(np.log(np.pi)) - _log_abs_sin_pi(z, const) - lanczos,
+            lanczos,
+        )
 
         # The series returns NaN at +/-inf, where both limits are +inf
         out = mx.where(mx.isinf(z), const(np.inf), out)
@@ -244,7 +396,10 @@ def mlx_funcify_Psi(op, node, **kwargs):
 
         # psi(y) = psi(y + n) - sum 1/(y + i), which holds for every y, so the shift
         # is applied unconditionally. Testing whether each element still needs it
-        # would cost a comparison and a select per iteration and buy nothing
+        # would cost a comparison and a select per iteration and buy nothing. The
+        # Chebyshev panels the Metal kernel reads would be more accurate next to the
+        # zero at 1.4616, but on the vectorized path their gather costs more than the
+        # divisions here
         one = const(1.0)
         shift = -one / y
         for i in range(1, n_shifts):
@@ -252,19 +407,8 @@ def mlx_funcify_Psi(op, node, **kwargs):
         y = y + const(float(n_shifts))
 
         r2 = one / (y * y)
-        series = const(coeffs[-1])
-        for coeff in reversed(coeffs[:-1]):
-            series = const(coeff) + series * r2
-        out = shift + mx.log(y) - const(0.5) / y - series * r2
-
-        # psi(x) = psi(1 - x) - pi * cot(pi x), with the cotangent taken as a reciprocal
-        # tangent rather than a ratio of cosine to sine: mx.tan is genuine at float64
-        # where both of the others are float32 kernels whatever they are handed.
-        # Reducing by the nearest integer is exact and costs the period nothing, and it
-        # puts the tangent on a true zero at every pole rather than near one, so those
-        # come back infinite instead of large and finite
-        cot_arg = const(np.pi) * (z - mx.round(z))
-        out = mx.where(reflect, out - const(np.pi) / mx.tan(cot_arg), out)
+        out = shift + mx.log(y) - const(0.5) / y - _horner(coeffs, r2, const) * r2
+        out = mx.where(reflect, out - _pi_cot_pi(z, const), out)
 
         return out.astype(out_dtype)
 

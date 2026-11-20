@@ -56,8 +56,17 @@ def test_gammaln_edge_cases(dtype):
     x = vector("x", dtype=dtype)
     # Poles at the non-positive integers, plus inf and nan propagation. The finite
     # entries keep the test from passing on an implementation that returns inf for
-    # everything
-    x_test_value = np.array([0.0, -1.0, -2.0, np.inf, np.nan, 0.5, 4.0], dtype=dtype)
+    # everything. The powers of two and the floats just below them bound the octaves
+    # that pick a table row, and 64 is where the table hands over to Stirling's series.
+    # The edge at 2 is a zero, covered by the relative-accuracy tests around it
+    octave_edges = 2.0 ** np.arange(2, 7)
+    x_test_value = np.concatenate(
+        [
+            [0.0, -1.0, -2.0, np.inf, np.nan, 0.5],
+            octave_edges,
+            np.nextafter(octave_edges.astype(dtype), 0),
+        ]
+    ).astype(dtype)
 
     compare_mlx_and_py([x], [pt.gammaln(x)], [x_test_value])
 
@@ -66,15 +75,15 @@ def test_gammaln_edge_cases(dtype):
     "low, high",
     [
         (0.5, 20.0),
-        # Below 0.5 the argument must be shifted up by the recurrence rather than
-        # reflected: reflection would route it through mx.sin, which is float32-accurate
-        # whatever the input dtype, and that alone costs seven orders of magnitude
+        # Small positive arguments must be shifted up by the recurrence rather than
+        # reflected: reflection would route them through mx.sin, which is
+        # float32-accurate whatever the input dtype
         (1e-3, 0.5),
     ],
     ids=["above-half", "below-half"],
 )
 def test_gammaln_float64_precision(low, high):
-    # MLX weak-types Python floats to float32, which would silently pin the Lanczos
+    # MLX weak-types Python floats to float32, which would silently pin the series
     # coefficients (and so the whole result) to float32 accuracy. float64 lives on
     # the CPU stream, so the dispatch is exercised directly rather than through a
     # compiled function.
@@ -87,6 +96,35 @@ def test_gammaln_float64_precision(low, high):
     np.testing.assert_allclose(
         res, scipy.special.gammaln(x_test_value), rtol=1e-13, atol=1e-14
     )
+
+
+# scipy's gammaln and psi are only absolutely accurate next to their zeros, so the
+# references there are Taylor series, accurate to rounding within 1e-2 of the zero
+def _lgamma_near_one(x):
+    e = x - 1.0
+    terms = [(-1) ** k * scipy.special.zeta(k) / k * e**k for k in range(2, 20)]
+    return -np.euler_gamma * e + np.sum(terms, axis=0)
+
+
+def _lgamma_near_two(x):
+    # lgamma(x) = lgamma(x - 1) + log(x - 1)
+    return _lgamma_near_one(x - 1.0) + np.log1p(x - 2.0)
+
+
+@pytest.mark.parametrize(
+    "zero, reference",
+    [(1.0, _lgamma_near_one), (2.0, _lgamma_near_two)],
+    ids=["one", "two"],
+)
+def test_gammaln_float64_relative_accuracy_near_zeros(zero, reference):
+    offsets = np.geomspace(1e-12, 1e-2, 50)
+    x_test_value = zero + np.concatenate([-offsets, offsets])
+
+    with mlx.stream(mlx.cpu):
+        gammaln = funcify_from_graph(pt.gammaln, "float64")
+        res = np.asarray(gammaln(mlx.array(x_test_value, dtype=mlx.float64)))
+
+    np.testing.assert_allclose(res, reference(x_test_value), rtol=1e-14, atol=0.0)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)
@@ -285,12 +323,49 @@ def test_gammaln_psi_paths_agree(name, dtype, tolerance):
         vectorized_scalar = as_result(fallback(as_input(scalar_value)))
 
     # Both compute in float32 and round once to the dtype. At float32 they disagree by
-    # 1.6e-6 at worst, and at half precision by at most one unit in the last place, so
+    # 1.4e-6 at worst, and at half precision by at most one unit in the last place, so
     # each bound sits a little above that spread. The absolute term carries the zeros
     np.testing.assert_allclose(metal, vectorized, rtol=tolerance, atol=tolerance)
     np.testing.assert_allclose(metal_edges, vectorized_edges, rtol=tolerance)
     assert metal_scalar.shape == ()
     np.testing.assert_allclose(metal_scalar, vectorized_scalar, rtol=tolerance)
+
+
+_PSI_ZERO = 1.4616321449683623
+
+
+def _psi_near_zero(x):
+    d = x - _PSI_ZERO
+    terms = [
+        scipy.special.polygamma(k, _PSI_ZERO) / scipy.special.factorial(k) * d**k
+        for k in range(1, 12)
+    ]
+    return np.sum(terms, axis=0)
+
+
+@pytest.mark.skipif(
+    not mlx.metal.is_available() or os.environ.get("PYTENSOR_MLX_SKIP_GPU") == "1",
+    reason="needs a GPU that can run kernels; set PYTENSOR_MLX_SKIP_GPU=1 where it cannot",
+)
+@pytest.mark.parametrize(
+    "name, zero, reference",
+    [
+        ("gammaln", 1.0, _lgamma_near_one),
+        ("gammaln", 2.0, _lgamma_near_two),
+        ("psi", _PSI_ZERO, _psi_near_zero),
+    ],
+    ids=["gammaln-one", "gammaln-two", "psi"],
+)
+def test_metal_relative_accuracy_near_zeros(name, zero, reference):
+    offsets = np.geomspace(1e-6, 1e-2, 50)
+    x_test_value = (zero + np.concatenate([-offsets, offsets])).astype("float32")
+
+    with mlx.stream(mlx.gpu):
+        res = np.asarray(_metal_math_call(name, mlx.array(x_test_value)))
+
+    # float32 values are exact in float64, so the reference sees what the kernel sees
+    expected = reference(x_test_value.astype("float64"))
+    np.testing.assert_allclose(res, expected, rtol=2e-6, atol=0.0)
 
 
 @pytest.mark.skipif(
