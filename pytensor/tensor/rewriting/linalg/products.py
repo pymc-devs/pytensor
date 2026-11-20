@@ -31,7 +31,7 @@ from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.blockwise import blockwise_of, broadcast_like_blockwise
 from pytensor.tensor.rewriting.linalg.utils import (
     permutation_indices_to_det_sign,
     strip_left_expand_dims_and_transpose,
@@ -251,9 +251,8 @@ def orthogonal_dot_transpose_to_eye(fgraph, node):
 
     [out] = node.outputs
     result = pt.eye(size, dtype=out.type.dtype)
-    if X.type.ndim > 2:
-        result = pt.broadcast_to(result, (*X.shape[:-2], size, size))
-    result = atleast_Nd(result, n=out.type.ndim)
+    if isinstance(node.op, Blockwise):
+        return broadcast_like_blockwise([result], node, fgraph=fgraph)
     copy_stack_trace(out, result)
     return [result]
 

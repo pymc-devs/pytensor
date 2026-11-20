@@ -13,6 +13,7 @@ from pytensor.gradient import grad
 from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.scan.op import Scan
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -725,17 +726,23 @@ class TestDiagonalSolveToDivision:
         assert_equal_computations([rewritten], [expected])
 
     @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
-    def test_solve_triangular_unit_diag(self, b_ndim):
-        d = pt.dvector("d")
+    @pytest.mark.parametrize("batch_shape", [(), (2,)], ids=["unbatched", "batched"])
+    def test_solve_triangular_unit_diag(self, b_ndim, batch_shape):
+        d = pt.tensor("d", shape=(*batch_shape, None), dtype="float64")
         b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
-        D = pt.diag(d)
+        D = alloc_diag(d, axis1=-2, axis2=-1)
         out = solve_triangular(D, b, lower=True, unit_diagonal=True, b_ndim=b_ndim)
 
         rewritten = rewrite_graph(
             out, include=("canonicalize", "stabilize", "specialize")
         )
 
-        assert_equal_computations([rewritten], [b])
+        expected = b
+        if batch_shape:
+            expected = pt.broadcast_to(
+                b[None], (np.int64(batch_shape[0]), *b.type.shape)
+            )
+        assert_equal_computations([rewritten], [expected])
 
     @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
     def test_cho_solve_diag(self, b_ndim):

@@ -941,6 +941,22 @@ def test_qz_of_diag(make_diag, return_eigenvalues):
     assert_equal_computations(rewritten, expected)
 
 
+def test_qz_of_diag_broadcast_batch():
+    a = pt.tensor("a", shape=(1, 1, 1))
+    b = pt.tensor("b", shape=(2, 1, 1))
+    outputs = qz(a, b)
+
+    result = RewriteTester([a, b], outputs, include=("ShapeOpt", "canonicalize"))
+
+    broadcast_a = pt.broadcast_to(a, b.type.shape)
+    identity = pt.broadcast_to(pt.constant([[1.0]], dtype=a.dtype), b.type.shape)
+    result.assert_graph(broadcast_a, b, identity, identity)
+    result.assert_eval(
+        np.full(a.type.shape, 2.0, dtype=a.dtype),
+        np.array([3.0, 4.0], dtype=b.dtype).reshape(b.type.shape),
+    )
+
+
 @pytest.mark.parametrize(
     "sort, return_eigenvalues",
     [
