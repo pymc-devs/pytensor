@@ -4,9 +4,9 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.scalar.basic import (
+    BaseComposite,
     Cast,
     Clip,
-    Composite,
     Identity,
     Mod,
     ScalarOp,
@@ -122,6 +122,6 @@ def mlx_funcify_Second(op, **kwargs):
     return second
 
 
-@mlx_funcify.register(Composite)
+@mlx_funcify.register(BaseComposite)
 def mlx_funcify_Composite(op, node=None, **kwargs):
     return mlx_funcify(op.fgraph, squeeze_output=True)
