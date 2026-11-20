@@ -21,7 +21,7 @@
 //! The caller fills `ndim`, `dtype` and the `shape` and `strides` pointers of every
 //! argument, outputs included; kernels never write these. They are what a kernel can
 //! check its arguments against: generated kernels know their types and ignore them,
-//! Rust kernels check them (`crate::kernel`).
+//! Rust kernels check them (`crate::kernels`).
 //!
 //! Each output of a kernel has a mode (`OutputMode`), fixed in the kernel's config:
 //! * provided: the caller passes memory (`data` is not NULL), shape and strides; the
@@ -182,7 +182,7 @@ pub type KernelFn = unsafe extern "C" fn(
 ) -> i32;
 
 /// How an output comes to be.
-#[pyclass(module = "pytensor_llvm.interp", eq, eq_int, frozen, from_py_object)]
+#[pyclass(module = "pytensor_llvm.runtime", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputMode {
     /// the caller provides the memory; the kernel writes the elements

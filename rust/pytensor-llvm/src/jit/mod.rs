@@ -4,7 +4,10 @@
 //! (in parallel, one LLVM context per kernel) and only the finished objects are linked
 //! here.
 
-use crate::math;
+pub mod perf;
+pub mod target;
+
+use crate::runtime::math;
 use llvm_sys::error::*;
 use llvm_sys::orc2::lljit::*;
 use llvm_sys::orc2::*;
@@ -50,7 +53,7 @@ pub fn jit() -> &'static Mutex<Jit> {
 
 impl Jit {
     pub(crate) fn new() -> Result<Self, String> {
-        crate::target::init_llvm();
+        crate::jit::target::init_llvm();
         // SAFETY: LLVM C API calls on handles created right here; every error is
         // checked before a handle is used.
         unsafe {
@@ -178,7 +181,7 @@ impl Jit {
                 "lookup",
             )?;
             self.symbols.insert(name.to_string(), addr as usize);
-            crate::perf::register_object(obj, name, addr as usize, label);
+            crate::jit::perf::register_object(obj, name, addr as usize, label);
             Ok(addr as usize)
         }
     }

@@ -49,12 +49,12 @@ rewrite groups small nodes into units.
   (each followed by its config) and of its array constants (section 2a).
 * **session**: everything one caller (e.g. one sampler chain) needs to run a program:
   its context (C: `PtSession`).
-* **function** (`interp/function.rs`, Python `pytensor_llvm.interp.Function`, C
+* **function** (`function/`, Python `pytensor_llvm.runtime.Function`, C
   `PtFunction`): a program's function with the types of its arguments, where calls from
   Python and C come in, together with the objects that keep its machine code alive.
 * **context** (`PtCtx`): a session's errors, scratch memory and random state; everything
   a call runs uses it.
-* **runtime** (`runtime.rs`): the process-wide part: the runtime functions (`ctx->rt`,
+* **runtime** (`runtime/`): the process-wide part: the runtime functions (`ctx->rt`,
   `ptl_rt_*`), the JIT, the thread pool.
 
 *Memory*
@@ -532,7 +532,7 @@ builds for a call of the program, from the types it was made with). Buffers are
 reference each, released when dropped); raw `PtBuffer*`s only exist in `PtArray`s and
 at the C and numpy boundaries.
 
-**Rust kernels** are written with `src/kernel.rs`: a kernel is a type holding its
+**Rust kernels** are written with `src/kernels/mod.rs`: a kernel is a type holding its
 parameters that implements `Kernel` (`arity`, `output_layouts`, and `run(ctx, args)`),
 and `entry::<K>` is its function with the ABI above, with a `K` as its config. Writing
 one needs no `unsafe`. A kernel is made for the layouts of its inputs (and the number
@@ -547,9 +547,9 @@ layout; `entry` checks the number of arguments. A kernel
 called with other arguments than it was made for fails with an error, and a panic is
 caught and reported as one: kernels are called from generated code, whose frames
 can't be unwound. One kernel keeps raw pointers of its own: the hand-vectorized
-matrix-vector loop in `linalg.rs`.
+matrix-vector loop in `kernels/linalg.rs`.
 
-**The function** (`interp/function.rs`) calls a program: it checks the inputs against
+**The function** (`src/function/`) calls a program: it checks the inputs against
 their types, provides memory for the outputs the program writes (the caller's, if it
 is C-contiguous, else new memory that is copied where the caller wants it), calls the
 program's function and takes over the buffers of the outputs it hands over (copying
@@ -681,7 +681,7 @@ iteration whose until flag is set and returns the flag as its last output.
 ## 9. Calling from C
 
 `program.c_function()` returns a new `PtFunction*` reference and
-`pytensor_llvm.interp.c_api_table()` (also `program.c_api_table()`) the matching
+`pytensor_llvm.runtime.c_api_table()` (also `program.c_api_table()`) the matching
 `PtFunctionApi`; the header is `pytensor_llvm.c_header()` (a `PtSession` per caller, provided or runtime-allocated
 outputs, `last_error`, no GIL; `seed(session, n)` since API version 2). The handle holds the function and the objects that own
 its machine code, so it outlives the Python function. Memory provided for an output is

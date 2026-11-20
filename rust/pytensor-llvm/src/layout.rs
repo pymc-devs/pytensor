@@ -1,7 +1,7 @@
 //! What is known about the strides of an array (the Python side, `analysis/layout.py`,
 //! has the full story): an axis order (outermost first) and per axis a packed, static or
 //! dynamic stride. Kernels get the layouts of their inputs, and declare the layouts of
-//! their outputs, as these. (The exchange with Python is in `interp::layout`.)
+//! their outputs, as these. (The exchange with Python is in `python::layout`.)
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stride {

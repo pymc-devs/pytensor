@@ -1,6 +1,6 @@
 //! The C API (`include/pytensor_llvm.h`) for compiled programs.
 //!
-//! Get the table with `pytensor_llvm.interp.c_api_table()` (or `program.c_api_table()`), and
+//! Get the table with `pytensor_llvm.runtime.c_api_table()` (or `program.c_api_table()`), and
 //! a function with `program.c_function()`.
 //!
 //! A `PtFunction*` is `Arc::into_raw` of a [`Function`]: the compiled function plus the
@@ -8,7 +8,7 @@
 //! outlives the Python object it came from. A `PtSession*` owns a clone of that Arc and
 //! a context. Every entry point catches panics so they never unwind into C.
 
-use super::function::{Destination, Function as Compiled};
+use super::{Destination, Function as Compiled};
 use crate::abi::{ABI_VERSION, OwnedBuf, PtArray, PtBuffer, overlaps};
 use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;

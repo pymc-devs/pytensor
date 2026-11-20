@@ -1,7 +1,7 @@
 """Types of `pytensor_llvm`, the Rust extension of PyTensor's LLVM backend."""
 
-from . import interp as interp
 from . import ir as ir
+from . import runtime as runtime
 
 ABI_VERSION: int
 

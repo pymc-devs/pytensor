@@ -20,7 +20,7 @@ LLVM = get_mode("LLVM")
 
 
 def _table():
-    return pytensor_llvm.interp.c_api_table()
+    return pytensor_llvm.runtime.c_api_table()
 
 
 class PtArray(ctypes.Structure):

@@ -43,10 +43,10 @@ if TYPE_CHECKING:
     from pytensor_llvm.ir import CompiledModule
 
 
-def _interp():
-    from pytensor_llvm import interp
+def _runtime():
+    from pytensor_llvm import runtime
 
-    return interp
+    return runtime
 
 
 @dataclass
@@ -62,8 +62,8 @@ class Options:
     parallel: bool = True
     #: may Dot and the linear algebra kernels use faer's parallelism, on the runtime's
     #: thread pool (for large enough inputs, when the session allows parallelism; see
-    #: `faer_kernels!` in linalg.rs). Results can differ from the sequential ones in the
-    #: last bits.
+    #: `faer_kernels!` in kernels/linalg.rs). Results can differ from the sequential
+    #: ones in the last bits.
     linalg_parallel: bool = False
     #: generated code verifies the layouts its signatures claim (for testing; also
     #: turned on by PYTENSOR_LLVM_CHECK_LAYOUTS=1)
@@ -255,7 +255,7 @@ class Program:
         def shape(k):
             return [None if n is None else int(n) for n in types[k].shape]
 
-        self.function = _interp().Function(
+        self.function = _runtime().Function(
             self.address,
             self.config,
             [
@@ -305,7 +305,7 @@ class Program:
 
     @staticmethod
     def c_api_table() -> int:
-        return _interp().c_api_table()
+        return _runtime().c_api_table()
 
     # ------------------------------------------------------------ profiling
 

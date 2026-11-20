@@ -60,7 +60,7 @@ from pytensor.link.llvm.dispatch.blockwise import (
     blockwise_core,
     blockwise_core_layouts,
 )
-from pytensor.link.llvm.kernels.rust import interp, rust_kernel, rust_kernel_outputs
+from pytensor.link.llvm.kernels.rust import runtime, rust_kernel, rust_kernel_outputs
 from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
 from pytensor.tensor.basic import TensorFromScalar
@@ -668,7 +668,7 @@ class Planner:
         ]
         destroyed = getattr(node.op, "destroy_map", None) or {}
         return Kernel(
-            interp().numba_entry(),
+            runtime().numba_entry(),
             kernel.address,
             outs,
             f"numba: {node.op}",

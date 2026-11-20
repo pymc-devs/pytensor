@@ -6,7 +6,7 @@
 //! allocate.
 
 use crate::abi::OutputMode;
-use crate::kernel::{Args, Array, ArrayMut, Element, Kernel, scratch};
+use crate::kernels::{Args, Array, ArrayMut, Element, Kernel, scratch};
 use crate::layout::Layout;
 use crate::runtime::{PtCtx, runtime};
 use faer::Par;

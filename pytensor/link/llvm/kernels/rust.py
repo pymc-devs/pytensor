@@ -1,7 +1,7 @@
 """Precompiled Rust kernels: what generated code calls for nodes it doesn't generate.
 
 `rust_kernel(op, node, in_layouts, linalg_parallel)` returns a
-`pytensor_llvm.interp.RustKernel` (function address + config) or None when the node has
+`pytensor_llvm.runtime.RustKernel` (function address + config) or None when the node has
 no Rust kernel; `in_layouts` are the inputs' layouts (analysis/layout.py; None where
 unknown). Each kernel is made for its inputs' layouts and the number of axes of its
 outputs (`made_for`), and chooses the layouts of its outputs then
@@ -22,10 +22,10 @@ from pytensor.link.llvm.codegen.types import repr_of
 from pytensor.tensor.math import Dot
 
 
-def interp():
-    from pytensor_llvm import interp
+def runtime():
+    from pytensor_llvm import runtime
 
-    return interp
+    return runtime
 
 
 def made_for(node, in_layouts) -> tuple[list, list[int]]:
@@ -43,7 +43,7 @@ def made_for(node, in_layouts) -> tuple[list, list[int]]:
 
 def fresh_mode(out):
     """New memory for `out`: provided for a static shape, else allocated by the kernel."""
-    m = interp().OutputMode
+    m = runtime().OutputMode
     return m.Provided if all(s is not None for s in out.type.shape) else m.Allocated
 
 
@@ -80,7 +80,7 @@ def _(op, node, in_layouts=None, linalg_parallel=False):
     if not (a.type.dtype == b.type.dtype == out.type.dtype in ("float64", "float32")):
         return None
     dt = np.dtype(out.type.dtype)
-    return interp().Dot(
+    return runtime().Dot(
         fresh_mode(out),
         dt,
         linalg_parallel,
@@ -137,7 +137,7 @@ def _register_more():
         if x.type.ndim == 0 or x.type.dtype not in ("float64", "float32", "int64"):
             return None
         axis = int(op.axis) % x.type.ndim
-        return interp().Sort(
+        return runtime().Sort(
             fresh_mode(node.outputs[0]),
             np.dtype(x.type.dtype),
             axis,
@@ -150,7 +150,7 @@ def _register_more():
         dt = _float_dtype(node)
         if dt is None or node.inputs[0].type.ndim != 2:
             return None
-        return interp().Cholesky(
+        return runtime().Cholesky(
             fresh_mode(node.outputs[0]),
             dt,
             bool(op.lower),
@@ -167,7 +167,7 @@ def _register_more():
             or node.inputs[1].type.ndim not in (1, 2)
         ):
             return None
-        return interp().SolveTriangular(
+        return runtime().SolveTriangular(
             fresh_mode(node.outputs[0]),
             dt,
             bool(op.lower),
@@ -185,7 +185,7 @@ def _register_more():
         dt = _linalg_dtype(node)
         if dt is None or assume_a is None:
             return None
-        return interp().Solve(
+        return runtime().Solve(
             fresh_mode(node.outputs[0]),
             dt,
             assume_a,
@@ -199,7 +199,7 @@ def _register_more():
         dt = _linalg_dtype(node)
         if dt is None:
             return None
-        return interp().CholeskySolve(
+        return runtime().CholeskySolve(
             fresh_mode(node.outputs[0]),
             dt,
             bool(op.lower),
@@ -213,7 +213,7 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().MatrixInverse(
+            else runtime().MatrixInverse(
                 fresh_mode(node.outputs[0]),
                 dt,
                 linalg_parallel,
@@ -227,7 +227,7 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().Det(
+            else runtime().Det(
                 fresh_mode(node.outputs[0]),
                 dt,
                 linalg_parallel,
@@ -241,7 +241,7 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().SLogDet(
+            else runtime().SLogDet(
                 fresh_modes(node),
                 dt,
                 linalg_parallel,
@@ -255,7 +255,7 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().LUFactor(
+            else runtime().LUFactor(
                 fresh_modes(node),
                 dt,
                 linalg_parallel,
@@ -275,7 +275,7 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().LU(
+            else runtime().LU(
                 fresh_modes(node),
                 dt,
                 form,
@@ -289,7 +289,7 @@ def _register_more():
         dt = node.inputs[0].type.dtype
         if dt not in ("int32", "int64") or node.outputs[0].type.dtype != "int64":
             return None
-        return interp().PivotToPermutations(
+        return runtime().PivotToPermutations(
             fresh_mode(node.outputs[0]),
             np.dtype(dt),
             bool(op.inverse),
@@ -302,7 +302,7 @@ def _register_more():
         dt = _linalg_dtype(node)
         if dt is None or len(node.inputs) != 1:
             return None  # the generalized problem (b): numba
-        return interp().Eigh(
+        return runtime().Eigh(
             fresh_modes(node),
             dt,
             bool(op.lower),
@@ -316,7 +316,7 @@ def _register_more():
         dt = _linalg_dtype(node)
         if dt is None:
             return None
-        return interp().SVD(
+        return runtime().SVD(
             fresh_modes(node),
             dt,
             bool(op.full_matrices),
@@ -330,7 +330,7 @@ def _register_more():
         dt = _linalg_dtype(node)
         if dt is None or op.pivoting or op.mode not in ("full", "economic", "r"):
             return None
-        return interp().QR(
+        return runtime().QR(
             fresh_modes(node), dt, op.mode, linalg_parallel, *made_for(node, in_layouts)
         )
 
@@ -339,7 +339,7 @@ def _register_more():
         dt = _linalg_dtype(node)
         if dt is None:
             return None
-        return interp().MatrixPinv(
+        return runtime().MatrixPinv(
             fresh_mode(node.outputs[0]),
             dt,
             bool(op.hermitian),

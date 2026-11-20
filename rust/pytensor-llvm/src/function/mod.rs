@@ -12,6 +12,8 @@
 //! memory it provides (written directly when the kernel can, else copied there) or in
 //! new buffers.
 
+pub mod capi;
+
 use crate::abi::{KernelFn, OwnedBuf, PtArray, c_strides, checked_nbytes};
 use crate::array::{OwnedArray, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;

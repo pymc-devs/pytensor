@@ -36,6 +36,9 @@
 //! the contract of the call, which `entry` takes on (see there); it is the one place
 //! that turns the raw arguments into `Args`.
 
+pub mod linalg;
+pub mod sort;
+
 use crate::abi::{OutputMode, PtArray};
 use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;

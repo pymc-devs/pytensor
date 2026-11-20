@@ -9,7 +9,7 @@
 
 use crate::abi::{OutputMode, OwnedBuf, PtArray};
 use crate::dtype::DType;
-use crate::kernel::{Element, Kernel, entry};
+use crate::kernels::{Element, Kernel, entry};
 use crate::runtime::PtCtx;
 
 /// Bytes before and after the memory of a provided output, which must stay untouched.

@@ -225,7 +225,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install wheel/*.whl -e ".[numba]" pytest pytest-mock pytest-benchmark
           # the tests importorskip pytensor_llvm: a broken wheel must fail here instead
-          python -c "import pytensor_llvm, pytensor_llvm.ir, pytensor_llvm.interp"
+          python -c "import pytensor_llvm, pytensor_llvm.ir, pytensor_llvm.runtime"
 
       - name: Run tests
         run: python -m pytest tests/link/llvm -r A --durations=20
