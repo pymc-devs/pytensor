@@ -1005,6 +1005,28 @@ def test_qz_of_diag_sort(sort, return_eigenvalues):
     np.testing.assert_allclose(Q_val @ BB_val @ Z_val.T, np.diag(b_val), atol=1e-12)
 
 
+def test_decomposition_of_batched_static_unit_matrix():
+    x = pt.tensor("x", shape=(3, 1, 1))
+    outs = [
+        *lu(x),
+        *lu(x, p_indices=True),
+        *lu_factor(x),
+        *qr(x, mode="raw", pivoting=True),
+        *schur(x),
+        *schur(x, sort="lhp"),
+        *qz(x, x**2),
+        *qz(x, x**2, sort="ouc"),
+    ]
+
+    result = RewriteTester(
+        [x], outs, include=("ShapeOpt", "canonicalize", "specialize")
+    )
+    assert not any(
+        isinstance(node.op, Blockwise) for node in result.rewr_fg.apply_nodes
+    )
+    result.assert_eval(np.array([-2.0, 0.5, 3.0], dtype=x.dtype).reshape(3, 1, 1))
+
+
 def test_eig_to_eigh():
     x = pt.dmatrix("x", shape=(5, 5))
     x_sym = assume(x, symmetric=True)
