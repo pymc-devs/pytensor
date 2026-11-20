@@ -7,7 +7,7 @@
 
 use super::builder::{Builder, BuilderState};
 use super::ty::{PyType, Ty};
-use crate::target::{init_llvm, target_machine, vfabi_variants};
+use crate::jit::target::{init_llvm, target_machine, vfabi_variants};
 use llvm_sys::LLVMLinkage;
 use llvm_sys::analysis::{LLVMVerifierFailureAction, LLVMVerifyModule};
 use llvm_sys::core as c;
@@ -486,7 +486,7 @@ impl Module {
             }
         }
         finish_vector_decls(&st);
-        if crate::perf::enabled() {
+        if crate::jit::perf::enabled() {
             for (_, f, _) in st.functions.borrow().iter() {
                 add_fn_string_attr(&st, *f, "frame-pointer", "all");
             }
@@ -728,7 +728,6 @@ fn finish_vector_decls(m: &ModuleState) {
         c::LLVMSetInitializer(g, arr);
     }
 }
-
 
 /// Compilations hold this shared. Collecting optimization remarks holds it alone: that
 /// switches on LLVM's process-wide `-pass-remarks*` options, and a compilation running

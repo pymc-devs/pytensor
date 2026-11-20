@@ -1,7 +1,7 @@
 //! Sort along an axis, NaNs last.
 
 use crate::abi::OutputMode;
-use crate::kernel::{Args, Element, Kernel, zip_lanes};
+use crate::kernels::{Args, Element, Kernel, zip_lanes};
 use crate::layout::Layout;
 use crate::runtime::PtCtx;
 use std::cmp::Ordering;
@@ -88,7 +88,7 @@ impl<T: Sortable> Kernel for Sort<T> {
 mod tests {
     use super::*;
     use crate::abi::PtArray;
-    use crate::kernel::entry;
+    use crate::kernels::entry;
 
     fn array(data: &mut [f64], shape: &mut [i64], strides: &mut [i64]) -> PtArray {
         PtArray {

@@ -7,7 +7,7 @@
  *     api = program.c_api_table()                  # address of the matching PtFunctionApi
  *
  * where `program` is `f.maker.linker.program` of a function compiled with mode
- * "LLVM" (the table is also `pytensor_llvm.interp.c_api_table()`).
+ * "LLVM" (the table is also `pytensor_llvm.runtime.c_api_table()`).
  *
  * Everything else goes through the function table, so nothing has to link against the
  * extension. Typical use from one sampler thread:

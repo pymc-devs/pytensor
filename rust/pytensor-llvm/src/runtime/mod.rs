@@ -32,6 +32,10 @@
 //! its temporaries, so LLVM sees where they end); whatever isn't freed goes at the next
 //! release of an earlier mark.
 
+pub mod math;
+pub mod parallel;
+pub mod random;
+
 use crate::abi::{ABI_VERSION, OwnedBuf, PtBuffer};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::{CStr, c_char};
@@ -74,19 +78,19 @@ runtime_functions! {
     /// The current scratch position; `scratch_release` frees what was taken since.
     scratch_mark: fn(*mut PtCtx) -> i64 = rt_scratch_mark;
     scratch_release: fn(*mut PtCtx, i64) = rt_scratch_release;
-    /// Random numbers from the context's random state (`crate::random`).
-    rng_u64: fn(*mut PtCtx) -> u64 = crate::random::rng_u64;
-    rng_uniform: fn(*mut PtCtx) -> f64 = crate::random::rng_uniform;
-    rng_normal: fn(*mut PtCtx) -> f64 = crate::random::rng_normal;
-    rng_fill_uniform: fn(*mut PtCtx, *mut f64, i64) = crate::random::rng_fill_uniform;
-    rng_fill_normal: fn(*mut PtCtx, *mut f64, i64) = crate::random::rng_fill_normal;
-    rng_gamma: fn(*mut PtCtx, f64) -> f64 = crate::random::rng_gamma;
-    rng_beta: fn(*mut PtCtx, f64, f64) -> f64 = crate::random::rng_beta;
-    rng_poisson: fn(*mut PtCtx, f64) -> i64 = crate::random::rng_poisson;
-    rng_binomial: fn(*mut PtCtx, i64, f64) -> i64 = crate::random::rng_binomial;
+    /// Random numbers from the context's random state (`crate::runtime::random`).
+    rng_u64: fn(*mut PtCtx) -> u64 = crate::runtime::random::rng_u64;
+    rng_uniform: fn(*mut PtCtx) -> f64 = crate::runtime::random::rng_uniform;
+    rng_normal: fn(*mut PtCtx) -> f64 = crate::runtime::random::rng_normal;
+    rng_fill_uniform: fn(*mut PtCtx, *mut f64, i64) = crate::runtime::random::rng_fill_uniform;
+    rng_fill_normal: fn(*mut PtCtx, *mut f64, i64) = crate::runtime::random::rng_fill_normal;
+    rng_gamma: fn(*mut PtCtx, f64) -> f64 = crate::runtime::random::rng_gamma;
+    rng_beta: fn(*mut PtCtx, f64, f64) -> f64 = crate::runtime::random::rng_beta;
+    rng_poisson: fn(*mut PtCtx, f64) -> i64 = crate::runtime::random::rng_poisson;
+    rng_binomial: fn(*mut PtCtx, i64, f64) -> i64 = crate::runtime::random::rng_binomial;
     /// `parallel_for(ctx, n, grain, body, captures)`: chunks of `0..n` on the runtime's
-    /// thread pool (`crate::parallel`).
-    parallel_for: fn(*mut PtCtx, i64, i64, crate::parallel::BodyFn, *const u8) -> i32 = crate::parallel::rt_parallel_for;
+    /// thread pool (`crate::runtime::parallel`).
+    parallel_for: fn(*mut PtCtx, i64, i64, crate::runtime::parallel::BodyFn, *const u8) -> i32 = crate::runtime::parallel::rt_parallel_for;
     /// Give up the scratch memory `p` (a result of `scratch`). Anything else, null and
     /// memory already released are ignored. The memory is reused once everything
     /// taken after it is freed too (or released).
@@ -453,7 +457,10 @@ unsafe extern "C" fn rt_error_context(ctx: *mut PtCtx, prefix: *const c_char) {
 
 unsafe extern "C" fn rt_clock_ns() -> u64 {
     static START: OnceLock<std::time::Instant> = OnceLock::new();
-    START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_nanos() as u64
 }
 
 unsafe extern "C" fn rt_counter_add(counter: *mut u64, n: u64) {
@@ -492,7 +499,7 @@ impl PtCtx {
 
     /// Mark the scratch position; `scratch_release(token)` frees everything handed out
     /// since (and releases later marks). Generated code marks around every kernel it
-    /// calls, and around a call of a compiled function (`interp::function`).
+    /// calls, and around a call of a compiled function (`function`).
     pub fn scratch_mark(&mut self) -> i64 {
         self.marks.push(self.scratch.mark());
         (self.marks.len() - 1) as i64

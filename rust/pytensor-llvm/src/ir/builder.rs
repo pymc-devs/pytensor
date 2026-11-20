@@ -164,7 +164,7 @@ impl Intrinsic {
 }
 
 /// Random numbers from the call context (the runtime functions `ptl_rt_rng_*`,
-/// `crate::random`).
+/// `crate::runtime::random`).
 #[pyclass(module = "pytensor_llvm.ir", eq, eq_int, frozen, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Rng {
@@ -1682,7 +1682,7 @@ impl Cx<'_> {
             for (isa, lanes64) in variants {
                 let lanes = if f32 { lanes64 * 2 } else { lanes64 };
                 let vname = format!("_ZGV{isa}N{lanes}{vparams}_{name}");
-                if !crate::target::has_symbol(&vname) {
+                if !crate::jit::target::has_symbol(&vname) {
                     continue;
                 }
                 names.push(format!("{vname}({vname})"));

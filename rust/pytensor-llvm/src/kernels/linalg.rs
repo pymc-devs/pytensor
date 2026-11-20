@@ -6,7 +6,7 @@
 //! allocate.
 
 use crate::abi::OutputMode;
-use crate::kernel::{Args, Array, ArrayMut, Element, Kernel, scratch};
+use crate::kernels::{Args, Array, ArrayMut, Element, Kernel, scratch};
 use crate::layout::Layout;
 use crate::runtime::{PtCtx, runtime};
 use faer::Par;
@@ -121,7 +121,10 @@ macro_rules! faer_kernels {
 /// faer matrices, which take any strides, but faer computes in column-major order.)
 pub fn faer_layouts(out_ndims: &[usize], in_layouts: &[Option<Layout>]) -> Vec<Layout> {
     let _ = in_layouts;
-    out_ndims.iter().map(|&ndim| Layout::column_major(ndim)).collect()
+    out_ndims
+        .iter()
+        .map(|&ndim| Layout::column_major(ndim))
+        .collect()
 }
 
 faer_kernels!(

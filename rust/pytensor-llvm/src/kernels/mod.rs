@@ -36,6 +36,9 @@
 //! the contract of the call, which `entry` takes on (see there); it is the one place
 //! that turns the raw arguments into `Args`.
 
+pub mod linalg;
+pub mod sort;
+
 use crate::abi::{OutputMode, PtArray};
 use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
@@ -96,19 +99,21 @@ pub unsafe extern "C" fn entry<K: Kernel>(
     let (kernel, ctx) = unsafe { (&*(config as *const K), &mut *ctx) };
     let run = |ctx: &mut PtCtx| {
         // SAFETY: the function's contract.
-        unsafe { Args::from_raw(args, n_inputs, n_outputs, kernel.output_layouts()) }.and_then(|args| {
-            let arity = (args.inputs.len(), args.outputs.len());
-            if arity != kernel.arity() {
-                return Err(format!(
-                    "the kernel takes {} inputs and {} outputs, but was called with {} and {}",
-                    kernel.arity().0,
-                    kernel.arity().1,
-                    arity.0,
-                    arity.1
-                ));
-            }
-            kernel.run(ctx, args)
-        })
+        unsafe { Args::from_raw(args, n_inputs, n_outputs, kernel.output_layouts()) }.and_then(
+            |args| {
+                let arity = (args.inputs.len(), args.outputs.len());
+                if arity != kernel.arity() {
+                    return Err(format!(
+                        "the kernel takes {} inputs and {} outputs, but was called with {} and {}",
+                        kernel.arity().0,
+                        kernel.arity().1,
+                        arity.0,
+                        arity.1
+                    ));
+                }
+                kernel.run(ctx, args)
+            },
+        )
     };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(ctx)))
         .unwrap_or_else(|p| {
@@ -116,7 +121,10 @@ pub unsafe extern "C" fn entry<K: Kernel>(
                 .downcast_ref::<String>()
                 .cloned()
                 .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
-            Err(format!("internal error (panic): {}", msg.unwrap_or_default()))
+            Err(format!(
+                "internal error (panic): {}",
+                msg.unwrap_or_default()
+            ))
         });
     match result {
         Ok(()) => 0,
@@ -392,7 +400,15 @@ impl<'s> Output<'s> {
         shape: &[i64],
     ) -> Result<ArrayMut<'s, T>, String> {
         Ok(ArrayMut {
-            raw: produce(self.slot, self.index, ctx, mode, self.layout, T::DTYPE, shape)?,
+            raw: produce(
+                self.slot,
+                self.index,
+                ctx,
+                mode,
+                self.layout,
+                T::DTYPE,
+                shape,
+            )?,
             _t: PhantomData,
         })
     }

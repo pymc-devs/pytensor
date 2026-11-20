@@ -12,6 +12,8 @@
 //! memory it provides (written directly when the kernel can, else copied there) or in
 //! new buffers.
 
+pub mod capi;
+
 use crate::abi::{KernelFn, OwnedBuf, PtArray, c_strides, checked_nbytes};
 use crate::array::{OwnedArray, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
@@ -38,7 +40,10 @@ impl ArgType {
 
     /// Static lengths, -1 where only known at run time.
     pub fn shape_or_unknown(&self) -> Vec<i64> {
-        self.shape.iter().map(|s| s.map_or(-1, |n| n as i64)).collect()
+        self.shape
+            .iter()
+            .map(|s| s.map_or(-1, |n| n as i64))
+            .collect()
     }
 
     fn check(&self, shape: &[i64]) -> R<()> {
@@ -110,7 +115,9 @@ impl Function {
         if contiguous_inputs.len() != inputs.len() || provided.len() != outputs.len() {
             return Err("one flag per argument".into());
         }
-        if let Some(o) = (0..outputs.len()).find(|&o| provided[o] && outputs[o].static_shape().is_none()) {
+        if let Some(o) =
+            (0..outputs.len()).find(|&o| provided[o] && outputs[o].static_shape().is_none())
+        {
             return Err(format!("output {o}: provided, but its shape isn't static"));
         }
         Ok(Function {
@@ -273,7 +280,8 @@ impl Function {
             .map(|o| {
                 let owner = args[n_in + o].owner;
                 // SAFETY: a returned output's owner is one reference handed to us.
-                (!self.provided[o] && !owner.is_null()).then(|| unsafe { OwnedBuf::from_raw(owner) })
+                (!self.provided[o] && !owner.is_null())
+                    .then(|| unsafe { OwnedBuf::from_raw(owner) })
             })
             .collect();
         if rc != 0 {

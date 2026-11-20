@@ -99,4 +99,3 @@ pub fn target_machine(opt: u32) -> Result<TargetMachine, String> {
         .create_target_machine(&triple, &cpu, &features, level, RelocMode::PIC, code_model)
         .ok_or_else(|| "could not create target machine".to_string())
 }
-

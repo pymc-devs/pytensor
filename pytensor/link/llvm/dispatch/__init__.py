@@ -17,7 +17,7 @@ see codegen/interface.py). Importing this package registers them all.
 """
 
 # (the Rust kernels say the layouts of what they compute: `llvm_layout` of their ops)
-import pytensor.link.llvm.kernels.rust  # noqa: F401
+import pytensor.link.llvm.kernels.rust
 from pytensor.link.llvm.dispatch import (
     advanced,
     basic,

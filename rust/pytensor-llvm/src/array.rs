@@ -942,13 +942,19 @@ mod tests {
             unsafe { OutSlot::from_raw(header) }.unwrap()
         }
         assert!(slot(&mut header).provided().is_err());
-        assert!(slot(&mut header).alloc(&mut ctx, &[2, 3, 4], &Layout::c(3)).is_err());
+        assert!(
+            slot(&mut header)
+                .alloc(&mut ctx, &[2, 3, 4], &Layout::c(3))
+                .is_err()
+        );
         let wrong = OwnedArray::zeros(DType::Float64, vec![2, 3]).unwrap();
         let error = slot(&mut header).set(wrong).unwrap_err();
         assert!(error.contains("float32"), "{error}");
         assert!(header.data.is_null() && header.owner.is_null());
 
-        let mut array = slot(&mut header).alloc(&mut ctx, &[2, 3], &Layout::c(2)).unwrap();
+        let mut array = slot(&mut header)
+            .alloc(&mut ctx, &[2, 3], &Layout::c(2))
+            .unwrap();
         array.zero();
         assert_eq!(
             (array.shape(), array.strides()),
@@ -956,7 +962,11 @@ mod tests {
         );
         assert!(!header.owner.is_null());
         // now the memory is there: the slot can't be produced again
-        assert!(slot(&mut header).alloc(&mut ctx, &[2, 3], &Layout::c(2)).is_err());
+        assert!(
+            slot(&mut header)
+                .alloc(&mut ctx, &[2, 3], &Layout::c(2))
+                .is_err()
+        );
         // SAFETY: the reference `alloc` put in the header.
         drop(unsafe { OwnedBuf::from_raw(header.owner) });
     }

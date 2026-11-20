@@ -1,9 +1,8 @@
 """Scan as generated code: the loop, its buffers and its body in one function.
 
-The conventions are PyTensor's (and the Rust kernel's, interp/scan.rs). Every traced
-state (mit-mot, mit-sot, sit-sot) has a buffer whose first `lookback` rows hold the
-initial values; iteration `i` reads tap `t` at row `(i + lookback + t) % len` and writes
-its output taps the same way. nit-sot outputs go to row `i % len`. After the loop,
+The conventions are PyTensor's. Every traced state (mit-mot, mit-sot, sit-sot) has a
+buffer whose first `lookback` rows hold the initial values; iteration `i` reads tap `t`
+at row `(i + lookback + t) % len` and writes its output taps the same way. nit-sot outputs go to row `i % len`. After the loop,
 buffers shorter than the trace are rotated (in place) so the last value is at the end,
 while-loops are truncated to the iterations run, and unused rows of regular loops are
 zeroed. nit-sot buffers whose rows have no static shape are allocated by the first

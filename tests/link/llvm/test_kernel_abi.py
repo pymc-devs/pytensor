@@ -9,7 +9,7 @@ import pytensor.tensor as pt
 
 
 ir = pytest.importorskip("pytensor_llvm.ir")
-interp = pytest.importorskip("pytensor_llvm.interp")
+runtime = pytest.importorskip("pytensor_llvm.runtime")
 
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
 from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
@@ -24,24 +24,24 @@ def call(kernel, inputs, outputs):
 
 def sort(mode, input_layout=None):
     """A kernel sorting the rows of a matrix, made for an input with `input_layout`."""
-    return interp.Sort(mode, f64, 1, True, [input_layout], [2])
+    return runtime.Sort(mode, f64, 1, True, [input_layout], [2])
 
 
 def test_rust_kernels_run_as_they_were_made():
     values = np.array([[3.0, 1.0, 2.0], [0.0, -1.0, 5.0]])
-    (result,) = call(sort(interp.OutputMode.Allocated), [values], [(f64, 2)])
+    (result,) = call(sort(runtime.OutputMode.Allocated), [values], [(f64, 2)])
     np.testing.assert_array_equal(result, np.sort(values, axis=1))
     assert result.flags.c_contiguous
     # made for an input in column-major order: so is what it allocates
     column_major = ([1, 0], ["P", "P"])
     (result,) = call(
-        sort(interp.OutputMode.Allocated, column_major), [values], [(f64, 2)]
+        sort(runtime.OutputMode.Allocated, column_major), [values], [(f64, 2)]
     )
     np.testing.assert_array_equal(result, np.sort(values, axis=1))
     assert result.flags.f_contiguous
     # into memory the caller provides, with strides of its own
     memory = np.empty((3, 2)).T
-    call(sort(interp.OutputMode.Provided), [values], [memory])
+    call(sort(runtime.OutputMode.Provided), [values], [memory])
     np.testing.assert_array_equal(memory, np.sort(values, axis=1))
 
 
@@ -64,12 +64,12 @@ def test_rust_kernels_run_as_they_were_made():
 )
 def test_rust_kernels_reject_other_arguments(inputs, outputs, message):
     with pytest.raises(RuntimeError, match=message):
-        call(sort(interp.OutputMode.Allocated), inputs, outputs)
+        call(sort(runtime.OutputMode.Allocated), inputs, outputs)
 
 
 def test_rust_kernels_reject_missing_or_other_memory():
     values = np.zeros((2, 3))
-    provided = sort(interp.OutputMode.Provided)
+    provided = sort(runtime.OutputMode.Provided)
     # (no memory, and a shape that is still all zeros: not the array it writes)
     with pytest.raises(RuntimeError, match=r"expected \[2, 3\]"):
         call(provided, [values], [(f64, 2)])
