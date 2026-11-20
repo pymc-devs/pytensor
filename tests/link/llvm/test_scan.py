@@ -21,10 +21,10 @@ def scan(*args, **kwargs):
     return pytensor.scan(*args, return_updates=False, **kwargs)
 
 
-def scan_tasks(f):
+def scan_steps(f):
     """The program's items that run a Scan."""
     dump = f.maker.linker.program.dump()
-    return [line for line in dump.split("items:")[1].splitlines() if "Scan" in line]
+    return [line for line in dump.split("steps:")[1].splitlines() if "Scan" in line]
 
 
 def compare(inputs, outputs, values, modes=(GEN,)):
@@ -47,7 +47,7 @@ def compare(inputs, outputs, values, modes=(GEN,)):
                 e.dtype,
             )
             np.testing.assert_allclose(r, e, rtol=1e-12, atol=1e-14)
-        assert scan_tasks(f), "no Scan task"
+        assert scan_steps(f), "no Scan step"
         fs.append(f)
     return fs
 

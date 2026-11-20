@@ -21,7 +21,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import GraphRewriter
 from pytensor.graph.traversal import toposort_with_orderings
-from pytensor.link.llvm.layout import AttachLayoutFeature
+from pytensor.link.llvm.analysis.layout import AttachLayoutFeature
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Alloc,

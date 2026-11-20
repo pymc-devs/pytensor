@@ -258,7 +258,7 @@ def _register():
     @llvm_work.register(Blockwise)
     def _(op, node):
         # the core's work times the batch
-        from pytensor.link.llvm.codegen.blockwise import blockwise_core
+        from pytensor.link.llvm.dispatch.blockwise import blockwise_core
 
         core = blockwise_core(node)[1][0].owner
         w = llvm_work(core.op, core)

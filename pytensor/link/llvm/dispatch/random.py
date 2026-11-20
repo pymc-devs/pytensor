@@ -13,6 +13,7 @@ element.
 
 from __future__ import annotations
 
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     c_strides,
@@ -25,7 +26,6 @@ from pytensor.link.llvm.codegen.emit import (
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize
-from pytensor.link.llvm.layout import Layout
 
 
 def _register():

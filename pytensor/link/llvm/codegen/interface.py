@@ -37,6 +37,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import singledispatch
 
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
@@ -47,7 +48,6 @@ from pytensor.link.llvm.codegen.emit import (
     size,
 )
 from pytensor.link.llvm.codegen.types import Slot, ir, itemsize, slot_type
-from pytensor.link.llvm.layout import Layout
 
 
 @singledispatch
@@ -59,8 +59,8 @@ def llvm_emit(op, node, cg: Codegen, inputs: list, outputs: list) -> None:
 
 @singledispatch
 def llvm_layout(op, node, in_layouts) -> list:
-    """The layout (layout.py) of each output of `node`, given the inputs' layouts (None
-    for inputs that aren't tensors). None for an output: the default.
+    """The layout (analysis/layout.py) of each output of `node`, given the inputs'
+    layouts (None for inputs that aren't tensors). None for an output: the default.
 
     The default is C-contiguous for an output in new memory, and nothing known
     (DYNAMIC) for one that may be a view. Ops register their own to say what a view's
@@ -149,7 +149,7 @@ class SlotOutput(NodeOutput):
     aliases: tuple = ()
     #: allocate in temporary memory instead of a runtime buffer (a temporary inside a
     #: compiled unit): the slot's owner is then the scratch memory, which the unit
-    #: frees (`emit_items`; null for a view)
+    #: frees (`emit_steps`; null for a view)
     temporary: bool = False
     #: the (packed) layout `allocate` produces; default C-contiguous
     layout: Layout | None = None
@@ -224,6 +224,7 @@ class SlotOutput(NodeOutput):
         if a.base_if is None:
             self.set_view(a)
             return a
+
         # Only the run time knows whether `a` really lies in the input's memory: if it
         # does, pass it on as a view, else copy it into new memory.
         def copied():

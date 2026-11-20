@@ -57,16 +57,16 @@ def compare(
     return f
 
 
-def tasks(f):
-    return f.maker.linker.program.tasks
+def steps(f):
+    return f.maker.linker.program.steps
 
 
-def test_dump_lists_values_and_tasks():
+def test_dump_lists_values_and_steps():
     x = pt.matrix("x")
     f = compare([x], pt.exp(x).sum(axis=1) + x[:, 0], [rng.random((3, 4))])
     text = f.maker.linker.program.dump()
     assert text.startswith("program: 1 inputs, 1 outputs")
-    assert "input 0" in text and "items:" in text and "outputs:" in text
+    assert "input 0" in text and "steps:" in text and "outputs:" in text
 
 
 @pytest.mark.parametrize(
@@ -440,7 +440,7 @@ def test_fused_elemwise_patterns():
         outs,
         [rng.random(10), rng.random(30), rng.integers(0, 10, 30), rng.random((5, 7))],
     )
-    assert any(s.startswith("FusedElemwise") for s in tasks(f))
+    assert any(s.startswith("FusedElemwise") for s in steps(f))
 
 
 def test_fused_elemwise_indexed_increments():
@@ -460,7 +460,7 @@ def test_fused_elemwise_indexed_increments():
         [rng.random(5), rng.random(10), np.array([4, 4, 2, 0, 0, 0, 4, -2, 3, 3])],
     )
     # (in a unit with the scalar it reads, y[0])
-    assert any("FusedElemwise" in s for s in tasks(f))
+    assert any("FusedElemwise" in s for s in steps(f))
     # several chunks (fused.CHUNK), the last one partial, with runs across their ends
     n = 600
     long_values = [rng.random(5), rng.random(n), np.sort(rng.integers(-5, 5, n))]

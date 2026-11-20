@@ -88,7 +88,7 @@ def test_units_with_static_temporaries(n):
     xo = pt.vector("xo", shape=(n,))
     unit = OpFromGraph([x], [out], execution=Execution.COMPILED, inline=False)
     f = pytensor.function([xo], unit(xo), mode=STRICT)
-    assert len(f.maker.linker.program.tasks) == 1
+    assert len(f.maker.linker.program.steps) == 1
 
     def reference(v):
         y = np.cumsum(np.exp(v))

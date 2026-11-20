@@ -7,6 +7,7 @@ import enum
 from dataclasses import dataclass, replace
 
 from pytensor.graph.features import op_view_parents
+from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
 from pytensor.link.llvm.codegen.interface import llvm_layout
 from pytensor.link.llvm.codegen.types import (
     NoneRepr,
@@ -16,7 +17,6 @@ from pytensor.link.llvm.codegen.types import (
     is_absent,
     repr_of,
 )
-from pytensor.link.llvm.layout import Layout, new_memory_layout
 
 
 class OutputMode(enum.Enum):
@@ -135,9 +135,7 @@ def node_outputs(node, in_layouts=None, writable=frozenset()) -> list[Output]:
     for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):
         aliases: tuple = ()
         if isinstance(repr_of(o.type), TensorRepr):
-            aliases = tuple(
-                i for i, var in enumerate(node.inputs) if var in parents[k]
-            )
+            aliases = tuple(i for i, var in enumerate(node.inputs) if var in parents[k])
             i = destroyed_input(node, k)
             if i is not None:
                 lay = new_memory_layout(in_layouts[i], o.type)

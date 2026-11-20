@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 import pytensor.scalar.basic as ps
+from pytensor.link.llvm.analysis.layout import PACKED, Layout, common_order
+from pytensor.link.llvm.analysis.work import scalar_cost
 from pytensor.link.llvm.codegen.emit import (
     Array,
     _strided,
@@ -23,10 +25,8 @@ from pytensor.link.llvm.codegen.emit import (
     view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
-from pytensor.link.llvm.layout import PACKED, Layout, common_order
-from pytensor.link.llvm.work import scalar_cost
+from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.elemwise import CAReduce, Elemwise
 
 

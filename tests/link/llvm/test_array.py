@@ -8,13 +8,13 @@ import pytest
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
+from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 from pytensor.link.llvm.codegen.emit import (  # noqa: E402
     Array,
     unknown_layout,
     view_layout,
 )
 from pytensor.link.llvm.codegen.num import Num  # noqa: E402
-from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
 
 def run(build, *arrays):

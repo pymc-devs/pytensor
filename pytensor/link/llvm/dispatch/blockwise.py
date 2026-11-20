@@ -20,12 +20,12 @@ import weakref
 from dataclasses import dataclass
 
 from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.link.llvm.analysis.layout import itemsize_of, remove_axis, shape_of
+from pytensor.link.llvm.analysis.work import llvm_work
 from pytensor.link.llvm.codegen.emit import Array, Codegen, size
 from pytensor.link.llvm.codegen.interface import NodeOutput, llvm_emit
 from pytensor.link.llvm.codegen.signature import known_layouts
 from pytensor.link.llvm.codegen.types import repr_of
-from pytensor.link.llvm.layout import itemsize_of, remove_axis, shape_of
-from pytensor.link.llvm.work import llvm_work
 from pytensor.tensor.basic import constant
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import tensor
@@ -44,7 +44,7 @@ def blockwise_core(node) -> tuple[list, list]:
     nodes of its own (e.g. a `ScalarFromTensor`), so the result is a graph, not a single
     node. A constant input that isn't batched stays a constant (its core part).
 
-    Every call for the same node returns the same variables: the resolver caches the
+    Every call for the same node returns the same variables: the planner caches the
     graphs it resolves by their variables."""
     if node not in _cores:
         _cores[node] = _make_core(node)

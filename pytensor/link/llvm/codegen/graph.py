@@ -2,7 +2,7 @@
 
 Some nodes contain a graph of their own: a Scan has its loop body, a Blockwise has its
 core, a compiled unit (an OpFromGraph) has its inner graph. The program itself is also
-just a graph of items. All of them are run the same way:
+just a graph of steps. All of them are run the same way:
 
 1. `cg.graph_function(inputs, outputs, in_layouts)` decides how every node of the graph
    runs (generated code, or a call of a kernel) and returns a `GraphFunction`.
@@ -12,8 +12,6 @@ just a graph of items. All of them are run the same way:
    memory comes from.
 
 `build_graph_function` wraps this into a function of its own: the program's top level.
-A compiled unit's emitter (an OpFromGraph with `execution=COMPILED`) is here too: its
-code runs its inner graph.
 """
 
 from __future__ import annotations
@@ -21,29 +19,38 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from pytensor.compile.builders import Execution, OpFromGraph
-from pytensor.link.llvm.codegen.emit import Array, Codegen, copy, unpack
-from pytensor.link.llvm.codegen.interface import (
-    ProvidedOutput,
-    SlotOutput,
-    llvm_emit,
-    llvm_layout,
+import numpy as np
+
+from pytensor.link.llvm.analysis.layout import Layout
+from pytensor.link.llvm.analysis.liveness import temporary_lives
+from pytensor.link.llvm.codegen.emit import (
+    Array,
+    Codegen,
+    c_array,
+    constant,
+    copy,
+    pack,
+    packed_array,
+    read_slot,
+    store,
+    unpack,
 )
-from pytensor.link.llvm.codegen.node import NodeFunction
-from pytensor.link.llvm.codegen.signature import OutputMode, Signature
-from pytensor.link.llvm.codegen.types import ScalarRepr, ir, repr_of
-from pytensor.link.llvm.layout import infer_layouts, new_memory_layout
-from pytensor.link.llvm.codegen.items import (
-    Destination,
-    bind_constants,
-    emit_items,
-    temporaries_of,
+from pytensor.link.llvm.codegen.interface import ProvidedOutput, SlotOutput
+from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
+from pytensor.link.llvm.codegen.signature import Output, OutputMode, Signature
+from pytensor.link.llvm.codegen.types import (
+    ScalarRepr,
+    Slot,
+    ir,
+    itemsize,
+    repr_of,
+    slot_type,
 )
 
 
 if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.interface import NodeOutput
-    from pytensor.link.llvm.plan.resolve import Body
+    from pytensor.link.llvm.planner import PlannedGraph
 
 
 @dataclass
@@ -53,8 +60,8 @@ class GraphFunction:
     Get one from `Codegen.graph_function`, then call `emit_call` to emit the code that
     runs it."""
 
-    #: the graph, with the decision for each of its nodes (`plan.resolve.Body`)
-    body: Body
+    #: the graph, with the decision for each of its nodes (`planner.PlannedGraph`)
+    planned: PlannedGraph
     #: prefix for the names of the LLVM functions made for its nodes
     name: str
     #: the values of the graph's constants (vid -> Array or IR value)
@@ -66,24 +73,24 @@ class GraphFunction:
     _calls: int = 0
 
     @classmethod
-    def bind(cls, cg, body: Body, name: str) -> GraphFunction:
-        """Prepare the graph `body` to be run from the function `cg` is building.
+    def bind(cls, cg, planned: PlannedGraph, name: str) -> GraphFunction:
+        """Prepare the graph `planned` to be run from the function `cg` is building.
 
         This emits code for the graph's constants at the current point, so call it
         before a loop that runs the graph, not inside the loop."""
         constants: dict = {}
-        entries = bind_constants(cg, body.constants, constants)
+        entries = bind_constants(cg, planned.constants, constants)
         produced_by = {
             vid: o
-            for r in body.items
-            for vid, o in zip(r.item.outputs, r.signature.outputs, strict=True)
+            for r in planned.steps
+            for vid, o in zip(r.outputs, r.signature.outputs, strict=True)
         }
-        return cls(body, name, constants, produced_by, entries)
+        return cls(planned, name, constants, produced_by, entries)
 
     @property
     def nodes(self) -> list:
         """The nodes of the graph, in the order they run."""
-        return [r.item.node for r in self.body.items]
+        return [r.node for r in self.planned.steps]
 
     def emit_call(
         self, cg, inputs: list, outputs: list[NodeOutput | None], profile=None
@@ -120,39 +127,39 @@ class GraphFunction:
 
         Returns where the graph's temporary values went: the vids of all of them, and
         the arena that holds those not on the stack ({vid: offset}, size in bytes)."""
-        body = self.body
+        planned = self.planned
         b = cg.b
         vals = dict(self.constants)
-        for vid, v in zip(body.in_ids, inputs, strict=True):
+        for vid, v in zip(planned.in_ids, inputs, strict=True):
             if v is not None and vid not in vals:
                 vals[vid] = v
 
         allocated: dict[int, Array] = {}
-        slots: dict[int, Destination] = {}
+        slots: dict[int, Target] = {}
         targets: dict = {}
-        for k, (vid, out) in enumerate(zip(body.out_ids, outputs, strict=True)):
+        for k, (vid, out) in enumerate(zip(planned.out_ids, outputs, strict=True)):
             o = self.produced_by.get(vid)
             if out is None or o is None:
                 continue
             if o.mode is OutputMode.PROVIDED:
                 a = out.allocate([b.i64(n) for n in o.repr.shape])
                 allocated[k] = a
-                targets.setdefault(vid, Destination(array=a, layout=a.layout))
+                targets.setdefault(vid, Target(array=a, layout=a.layout))
             elif o.mode is OutputMode.RETURNED and not o.aliases:
                 offered = out.offer_slot()
                 if offered is not None:
-                    slots[k] = Destination(slot=offered[0], layout=offered[1])
+                    slots[k] = Target(slot=offered[0], layout=offered[1])
                     targets.setdefault(vid, slots[k])
 
-        memory, arena = temporaries_of(cg, body.items, targets, body.out_ids)
+        memory, arena = temporaries_of(cg, planned.steps, targets, planned.out_ids)
 
         name = self.name if self._calls == 0 else f"{self.name}{self._calls}"
         self._calls += 1
-        written, owned = emit_items(
+        written, owned = emit_steps(
             cg,
             cg.module,
             name,
-            body.items,
+            planned.steps,
             vals,
             targets,
             memory=memory,
@@ -161,7 +168,7 @@ class GraphFunction:
         for slot, ndim in owned:
             cg.release_later(slot, ndim)
 
-        for k, (vid, out) in enumerate(zip(body.out_ids, outputs, strict=True)):
+        for k, (vid, out) in enumerate(zip(planned.out_ids, outputs, strict=True)):
             if out is None:
                 continue
             v = vals[vid]
@@ -183,16 +190,16 @@ class GraphFunction:
 def build_graph_function(
     module,
     name: str,
-    body: Body,
+    planned: PlannedGraph,
     in_types: list,
     in_layouts: list,
     outputs: list,
     parallel: bool = True,
     links=None,
     profile=None,
-    resolver=None,
+    planner=None,
 ) -> NodeFunction:
-    """Build an LLVM function that runs the graph `body` (the program's top level).
+    """Build an LLVM function that runs the graph `planned` (the program's top level).
 
     The function has the same kind of signature as a node's function, but is not
     inlined: the program's kernel wrapper calls it.
@@ -203,9 +210,9 @@ def build_graph_function(
       (PROVIDED), or new memory the function returns (RETURNED);
     * `links`: the function's link table; the kernels it calls and its array
       constants are added to it;
-    * `profile`: if given, an array of counters (`PROFILE_ITEMS + len(body.items)`
-      uint64 values) that the code adds the time of each item to;
-    * `resolver`: decides how the nodes of inner graphs run (a Scan's body, ...).
+    * `profile`: if given, an array of counters (`PROFILE_ITEMS + len(planned.steps)`
+      uint64 values) that the code adds the time of each step to;
+    * `planner`: decides how the nodes of inner graphs run (a Scan's body, ...).
 
     The returned `NodeFunction` also says where the temporary values went (`arena`,
     `temporaries`) and where the array constants are in the link table
@@ -228,7 +235,7 @@ def build_graph_function(
         config,
         parallel=parallel,
         links=links,
-        resolver=resolver,
+        planner=planner,
         module=module,
         name=name,
     )
@@ -245,7 +252,7 @@ def build_graph_function(
     ]
     # (temporaries are freed before the function returns)
     with cg.scratch_scope(function=True):
-        graph = GraphFunction.bind(cg, body, name)
+        graph = GraphFunction.bind(cg, planned, name)
         cells = None if profile is None else links.link_array(profile, share=False)
         temporaries, arena = graph.emit_call(cg, inputs, outs, profile=cells)
     b.ret(0)
@@ -259,31 +266,323 @@ def build_graph_function(
     )
 
 
-# ------------------------------------------------------------------ compiled units
+# ------------------------------------------------------------------ emitting the steps
+#
+# The machinery `GraphFunction.emit_call` uses: it emits the steps of a graph one after
+# the other (`emit_steps`). For each step it calls the step's function, which is
+# inlined: either the node's generated code, or a call of the step's kernel. Where the
+# steps' results go:
+#
+# * a result the step writes into memory it is given goes into memory the caller asked
+#   for (`targets`, e.g. a row of a Scan's buffer), else into a temporary
+#   (`temporaries_of`: on the stack, or in an arena shared by values that are never
+#   needed at the same time);
+# * a result the step allocates itself goes straight into an output slot of the caller
+#   if it asked for that (`targets`), else into memory that is released afterwards;
+# * views and scalars are read back from the step's output slots;
+# * 0-d constants are written into the code.
 
 
-@llvm_layout.register(OpFromGraph)
-def _(op, node, in_layouts):
-    """The layouts of the inner outputs. Inlined that is what they are; a compiled unit
-    has them where new memory can (it copies an output that isn't one of its inputs'
-    memory: `new_memory_layout`)."""
-    inner = infer_layouts(op.fgraph, in_layouts)
-    outs = [inner[o] for o in op.fgraph.outputs]
-    if op.execution is Execution.COMPILED:
-        return [
-            None if lay is None else new_memory_layout(lay, o.type)
-            for lay, o in zip(outs, node.outputs, strict=True)
-        ]
-    return outs
+#: the cells of a profile (`emit_steps`'s `profile`): profiling on (nonzero),
+#: number of calls, then nanoseconds per step
+PROFILE_ON, PROFILE_CALLS, PROFILE_ITEMS = 0, 1, 2
 
 
-@llvm_emit.register(OpFromGraph)
-def _(op, node, cg, inputs, outputs):
-    """A compiled unit (an OpFromGraph with `execution=COMPILED`): its code runs its
-    inner graph. (Other OpFromGraphs never get here: they are inlined.)"""
-    layouts = [a.layout if isinstance(a, Array) else None for a in inputs]
-    graph = cg.graph_function(op.fgraph.inputs, op.fgraph.outputs, layouts, "unit")
-    graph.emit_call(cg, inputs, outputs)
+@dataclass
+class Target:
+    """Where a value may be produced directly: memory (`array`, in `layout`), or an
+    output slot (`slot`) for a value allocated in new memory (in `layout`)."""
+
+    array: Array | None = None
+    layout: Layout | None = None
+    slot: object = None
 
 
-__all__ = ["GraphFunction", "build_graph_function"]
+def fits(t: Target | None, o: Output) -> bool:
+    """Can a step produce its output `o` straight in `t`? Provided memory whose layout
+    implies the declared one, or a slot for new memory in a layout implying the
+    slot's."""
+    if t is None or t.layout is None:
+        return False
+    shape, size = o.repr.shape, itemsize(o.repr.dtype)
+    if o.mode is OutputMode.PROVIDED:
+        return t.array is not None and t.layout.implies(o.layout, shape, size)
+    return (
+        o.mode is OutputMode.RETURNED
+        and not o.aliases
+        and t.slot is not None
+        and o.layout.implies(t.layout, shape, size)
+    )
+
+
+def temporaries_of(cg, steps, targets, kept) -> tuple[dict, tuple[dict, int]]:
+    """Memory for the temporary values of the steps `steps` (`Codegen.temporaries`).
+
+    A temporary is a result a step writes into memory it is given, when that memory
+    isn't one the caller asked for (`targets`, vid -> `Target`). `kept`: the values
+    still needed after the last step (the outputs). Returns what `Codegen.temporaries`
+    returns."""
+    sizes = {
+        vid: int(np.prod(o.repr.shape, dtype=np.int64)) * itemsize(o.repr.dtype)
+        for r in steps
+        for vid, o in zip(r.outputs, r.signature.outputs, strict=True)
+        if o.mode is OutputMode.PROVIDED
+        and o.repr.static
+        and not fits(targets.get(vid), o)
+    }
+    return cg.temporaries(sizes, temporary_lives(steps, sizes, kept))
+
+
+def release(cg, owned):
+    """Give up the buffers kernels allocated into `owned` slots ([(slot, ndim)])."""
+    for slot, nd in owned:
+        cg.b.rt_decref(
+            cg.ctx, cg.b.load(ir.ptr, cg.b.field_ptr(slot_type(nd), slot, Slot.OWNER))
+        )
+
+
+def bind_constants(cg, constants, vals) -> dict:
+    """Values of `constants` ({vid: (type, ndarray)}): 0-d ones folded into the code,
+    arrays from the links, in their memory order (`Layout.of_const`; equal ones share
+    their memory). Returns {vid: link entry} of the arrays."""
+    b = cg.b
+    entries = {}
+    for vid, (t, data) in constants.items():
+        r = repr_of(t)
+        data = np.asarray(data, dtype=t.dtype)
+        if isinstance(r, ScalarRepr) or data.ndim == 0:
+            value = constant(b, t.dtype, data.item())
+            if isinstance(r, ScalarRepr):
+                vals[vid] = value
+            else:
+                slot = b.alloca(_mem_type(t.dtype))
+                store(b, t.dtype, value, slot)
+                vals[vid] = c_array(t.dtype, slot, [], [])
+        else:
+            if cg.links is None:
+                raise NotImplementedError("array constants need a links")
+            from pytensor.link.llvm.codegen.call import linked
+
+            layout = Layout.of_const(data)
+            order = list(layout.order)
+            memory = np.ascontiguousarray(data.transpose(order))
+            arr = memory.transpose(np.argsort(order))
+            entries[vid] = cg.links.link_array(memory)
+            vals[vid] = Array(
+                t.dtype,
+                linked(cg, entries[vid]),
+                [b.i64(n) for n in arr.shape],
+                [b.i64(st) for st in arr.strides],
+                layout,
+            )
+    return entries
+
+
+def emit_steps(
+    cg,
+    module,
+    name,
+    steps,
+    vals,
+    targets=None,
+    memory=None,
+    profile=None,
+):
+    """Emit the steps `steps` (`planner.Step`, in order) into the function
+    being built in `cg`: each node's function is called (and inlined), or its kernel.
+
+    * `vals`: vid -> Array (tensors) or value (scalars); must hold every value the
+      steps read but don't produce, with the layouts they were planned for; filled
+      with what they produce;
+    * `targets`: vid -> `Target`: where a value may be produced directly (PROVIDED
+      outputs whose declared layout the target's implies; returned new C-contiguous
+      memory into a slot); other values go into temporary memory or kernel buffers;
+    * `memory`: {vid: pointer}: where the provided outputs that aren't produced in their
+      targets go (`temporaries_of`); others get temporary memory of their own;
+    * `profile`: the link entry of the profile cells (`PROFILE_*`): while profiling is
+      on, each step's wall time is added to its cell.
+
+    Returns (written, owned): the vids produced in their targets, and the slots of
+    buffers kernels allocated for other values, for the caller to `release` when they
+    are no longer used (on failure, they are released here)."""
+    from pytensor.link.llvm.codegen.call import build_call_function, linked
+
+    b = cg.b
+    ctx, config = cg.ctx, cg.config
+    targets = targets or {}
+    written = set()
+    owned = []  # (slot, ndim): buffers kernels allocated
+    lays = {}  # vid -> Layout of what the steps produced
+    if profile is not None:
+        cells = linked(cg, profile)
+        profiling = b.ne(b.load(ir.i64, cells), b.i64(0))
+        with b.if_(profiling):
+            b.rt_counter_add(b.gep(ir.i64, cells, PROFILE_CALLS), b.i64(1))
+        start = b.alloca(ir.i64)
+    for n, step in enumerate(steps):
+        node, kernel, nsig = step.node, step.kernel, step.signature
+        present = step.arguments
+        # provided outputs: their target if its layout implies the declared one; else a
+        # temporary in the declared layout (copied by the caller if needed)
+        in_place = {
+            j: targets[vid].array
+            for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True))
+            if o.mode is OutputMode.PROVIDED
+            and vid not in written
+            and fits(targets.get(vid), o)
+        }
+        for vid, o in zip(step.outputs, nsig.outputs, strict=True):
+            if o.layout is not None:
+                lays[vid] = o.layout
+
+        def into_slot(vid, o):
+            # an allocated value with a slot target: allocated straight into it if the
+            # node allocates it in a layout the slot takes
+            return (
+                o.mode is OutputMode.RETURNED
+                and vid not in written
+                and fits(targets.get(vid), o)
+            )
+
+        temporaries = {
+            j
+            for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True))
+            if o.mode is OutputMode.RETURNED and not into_slot(vid, o)
+        }
+        if node is None:
+            nf = build_call_function(module, f"{name}_n{n}", nsig, kernel, cg.links)
+        else:
+            nf = build_node_function(
+                module,
+                node,
+                f"{name}_n{n}",
+                temporary_outputs=frozenset(temporaries),
+                in_layouts=step.in_layouts,
+                parallel=cg.parallel,
+                kernel=kernel,
+                links=cg.links,
+                planner=cg.planner,
+            )
+        args = [ctx, config]
+        for vid, rep in zip(present, nsig.inputs, strict=True):
+            if vid not in vals:
+                raise ValueError(
+                    f"{name}: {step.description} reads a value that isn't computed yet"
+                )
+            v = vals[vid]
+            if isinstance(rep, ScalarRepr):
+                args.append(v)
+                continue
+            if not v.layout.implies(rep.layout, rep.shape, itemsize(rep.dtype)):
+                raise AssertionError(
+                    f"{name}: {step.description} was planned for an input with layout "
+                    f"{rep.layout}, got {v.layout}"
+                )
+            args.append(pack(b, rep, v))
+        reads = []  # (vid, slot, how)
+        for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True)):
+            if o.mode is OutputMode.ABSENT:
+                continue
+            if o.mode is OutputMode.PROVIDED:
+                if j in in_place:
+                    a = in_place[j]
+                    written.add(vid)
+                else:
+                    lay = (
+                        o.layout if o.layout.fully_packed(o.repr.shape) else None
+                    )  # (C implies any)
+                    shape = list(o.repr.shape)
+                    if memory is not None and vid in memory:
+                        dims = [b.i64(m) for m in shape]
+                        a = packed_array(b, o.repr.dtype, memory[vid], dims, lay)
+                    else:
+                        a = cg.temporary(o.repr.dtype, shape, lay)
+                vals[vid] = a
+                args.append(pack(b, o.repr, a))
+            elif o.mode is OutputMode.SCALAR:
+                slot = b.alloca(o.repr.ir_type)
+                args.append(slot)
+                reads.append((vid, slot, "scalar", o))
+            else:
+                if into_slot(vid, o):
+                    slot = targets[vid].slot
+                    written.add(vid)
+                else:
+                    slot = b.alloca(slot_type(o.repr.ndim))
+                    b.store(b.zero(slot_type(o.repr.ndim)), slot)
+                    if kernel is not None:
+                        owned.append((slot, o.repr.ndim))
+                args.append(slot)
+                # a temporary of a generated node is scratch memory it took (or a view)
+                how = "scratch" if kernel is None and j in temporaries else "array"
+                reads.append((vid, slot, how, o))
+        if profile is not None:
+            with b.if_(profiling):
+                b.store(b.rt_clock_ns(), start)
+        rc = b.call(nf.function, args)
+        if profile is not None:
+            with b.if_(profiling):
+                b.rt_counter_add(
+                    b.gep(ir.i64, cells, PROFILE_ITEMS + n),
+                    b.sub(b.rt_clock_ns(), b.load(ir.i64, start)),
+                )
+        failed = b.ne(rc, 0)
+        with b.if_(failed):
+            b.rt_error_context(ctx, " ".join(step.description.split())[:200])
+            release(cg, owned)
+            b.ret(rc)
+        for vid, slot, how, o in reads:
+            if how == "scalar":
+                vals[vid] = b.load(o.repr.ir_type, slot)
+            else:
+                vals[vid] = read_slot(
+                    b, slot, o.repr.dtype, list(o.repr.shape), lays.get(vid)
+                )
+                if o.aliases:
+                    sources = [vals[present[a]] for a in o.aliases]
+                    _maybe_view(b, vals[vid], sources, slot, o.repr.ndim)
+                if how == "scratch":
+                    # (`SlotOutput.temporary`: the owner is the scratch memory)
+                    cg.free_later(
+                        b.load(
+                            ir.ptr,
+                            b.field_ptr(slot_type(o.repr.ndim), slot, Slot.OWNER),
+                        )
+                    )
+    return written, owned
+
+
+def _maybe_view(b, a: Array, sources: list, slot, ndim: int) -> None:
+    """Remember that `a` may be a view of an input of the graph.
+
+    `a` was returned through `slot` by a node that may return a view of `sources`
+    (some of its inputs). If all of `sources` lie in the memory of the same graph input,
+    `a` may too: `a.base` is set to that input. Whether it really is a view is only
+    known at run time: when the slot has no owner (a view has none, new memory does).
+    `a.base_if` is set to that condition."""
+    bases = {s.base if isinstance(s, Array) else None for s in sources}
+    if len(bases) != 1 or None in bases:
+        return
+    owner = b.load(ir.ptr, b.field_ptr(slot_type(ndim), slot, Slot.OWNER))
+    really = b.eq(owner, b.null())
+    for s in sources:
+        if s.base_if is not None:
+            really = b.and_(really, s.base_if)
+    a.base, a.writable, a.base_if = bases.pop(), False, really
+
+
+def _mem_type(dtype):
+    from pytensor.link.llvm.codegen.types import memory_type
+
+    return memory_type(dtype)
+
+
+__all__ = [
+    "PROFILE_CALLS",
+    "PROFILE_ITEMS",
+    "PROFILE_ON",
+    "GraphFunction",
+    "Target",
+    "build_graph_function",
+    "emit_steps",
+]

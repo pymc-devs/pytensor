@@ -31,7 +31,7 @@ from pytensor.link.llvm.codegen.types import (
 
 
 @dataclass
-class CalledKernel:
+class Kernel:
     """A kernel that generated code calls for a node: a Rust kernel, a numba kernel, or
     code compiled on its own."""
 
@@ -61,7 +61,7 @@ class LinkTable:
     #: contents -> entry of the arrays linked (equal ones share one)
     _arrays: dict = field(default_factory=dict)
 
-    def link_kernel(self, kernel: CalledKernel) -> int:
+    def link_kernel(self, kernel: Kernel) -> int:
         """The entry of `kernel`'s address (its config is in the next entry)."""
         self.entries += [kernel.address, kernel.config]
         self._keep.append(kernel)
@@ -117,9 +117,7 @@ def linked(cg, index: int):
     return b.load(ir.ptr, b.gep_bytes(cg.config, 8 * index))
 
 
-def call_kernel(
-    cg, kernel: CalledKernel, index: int, inputs: list, outputs: list
-) -> None:
+def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> None:
     """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, dtype) pairs) and
     `outputs` (`ProvidedOutput`, `SlotOutput`, or None).
@@ -230,9 +228,9 @@ def call_kernel(
         b.ret(rc)
 
 
-def call_destroying(cg, kernel: CalledKernel, index: int, inputs: list, outputs: list):
+def call_destroying(cg, kernel: Kernel, index: int, inputs: list, outputs: list):
     """`call_kernel`, with copies of the inputs the kernel overwrites
-    (`CalledKernel.destroys`, positions in `inputs`): it may only write its outputs."""
+    (`Kernel.destroys`, positions in `inputs`): it may only write its outputs."""
     from pytensor.link.llvm.codegen.emit import Array, copy
 
     ins = []
@@ -246,7 +244,7 @@ def call_destroying(cg, kernel: CalledKernel, index: int, inputs: list, outputs:
 
 
 def build_call_function(
-    module, name: str, signature, kernel: CalledKernel, links: LinkTable, index=None
+    module, name: str, signature, kernel: Kernel, links: LinkTable, index=None
 ):
     """A function (always inlined) with `signature` that calls `kernel`: how generated
     code runs a kernel that isn't a node's (a compiled unit, a separately compiled
@@ -290,7 +288,7 @@ def build_call_function(
 
 
 __all__ = [
-    "CalledKernel",
+    "Kernel",
     "LinkTable",
     "build_call_function",
     "call_destroying",

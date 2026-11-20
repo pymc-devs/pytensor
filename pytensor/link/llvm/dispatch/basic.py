@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pytensor.link.llvm.analysis.layout import Layout, same_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     c_array,
@@ -17,7 +18,6 @@ from pytensor.link.llvm.codegen.emit import (
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import ir, is_float
-from pytensor.link.llvm.layout import Layout, same_layout
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
 from pytensor.tensor.shape import Reshape, Shape, Shape_i

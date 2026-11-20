@@ -24,7 +24,7 @@ from pytensor.link.llvm.codegen.emit import (
     view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, overwrite_or_copy
-from pytensor.link.llvm.codegen.scalar import emit_scalar
+from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,

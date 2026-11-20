@@ -2,10 +2,10 @@
 
 `rust_kernel(op, node, in_layouts, linalg_parallel)` returns a
 `pytensor_llvm.interp.RustKernel` (function address + config) or None when the node has
-no Rust kernel; `in_layouts` are the inputs' layouts (layout.py; None where unknown). A
-kernel declares how it produces its outputs and in which layouts (`Kernel.outputs`, in
-Rust next to the kernel; the counterpart of `node_outputs` for generated code):
-`rust_kernel_outputs` reads that.
+no Rust kernel; `in_layouts` are the inputs' layouts (analysis/layout.py; None where
+unknown). A kernel declares how it produces its outputs and in which layouts
+(`Kernel.outputs`, in Rust next to the kernel; the counterpart of `node_outputs` for
+generated code): `rust_kernel_outputs` reads that.
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.signature import Output, OutputMode
 from pytensor.link.llvm.codegen.types import repr_of
-from pytensor.link.llvm.layout import Layout
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import SpecifyShape

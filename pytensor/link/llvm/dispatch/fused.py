@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pytensor.link.llvm.codegen.elemwise import identity_value
+from pytensor.link.llvm.analysis.layout import Layout, Stride
 from pytensor.link.llvm.codegen.emit import (
     Array,
     advance,
@@ -31,9 +31,9 @@ from pytensor.link.llvm.codegen.emit import (
     store,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.scalar import emit_scalar
 from pytensor.link.llvm.codegen.types import check_dtype
-from pytensor.link.llvm.layout import Layout, Stride
+from pytensor.link.llvm.dispatch.elemwise import identity_value
+from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import ScalarType, add
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor
@@ -155,7 +155,7 @@ def _register():
 
     @llvm_layout.register(FusedElemwise)
     def _(op, node, in_layouts):
-        # generated as one loop (`plan.flatten.fusable`), else an OpFromGraph
+        # generated as one loop (`planner.fusable`), else an OpFromGraph
         try:
             fused_spec(op, node)
         except NotImplementedError:

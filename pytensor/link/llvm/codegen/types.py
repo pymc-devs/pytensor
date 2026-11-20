@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.type import TensorType
 

@@ -36,8 +36,8 @@ def compare(inputs, outputs, values, mode=LLVM, rtol=1e-10, atol=1e-12):
 def info(f):
     p = f.maker.linker.program
     return {
-        "tasks": p.tasks,
-        "n_tasks": p.n_tasks,
+        "steps": p.steps,
+        "n_steps": p.n_steps,
         "arena_bytes": p.arena_bytes,
         "stats": f.maker.linker.stats,
     }
@@ -72,8 +72,8 @@ def test_small_static_graph_is_one_unit():
     w = pt.join(0, x[1:], y[None]).T.sum(axis=0)
     f = compare([x, y], w, [rng.random((3, 4)), rng.random(4)])
     i = info(f)
-    assert i["n_tasks"] == 1
-    assert i["tasks"][0].startswith("unit[")
+    assert i["n_steps"] == 1
+    assert i["steps"][0].startswith("unit[")
 
 
 def test_arena_reuses_temporaries():
@@ -88,7 +88,7 @@ def test_arena_reuses_temporaries():
     e = pt.sqrt(d)
     f = compare([x], pt.sort(e), [rng.normal(size=n)])
     i = info(f)
-    temporaries = len(i["tasks"]) - 1
+    temporaries = len(i["steps"]) - 1
     assert temporaries >= 4
     assert n * 8 <= i["arena_bytes"] < temporaries * n * 8
 
@@ -101,9 +101,9 @@ def test_compiled_ofg_calls_kernels():
     )
     out = inner(A, v)
     f = compare([A, v], out, [rng.random((4, 3)), rng.random(3)])
-    tasks = info(f)["tasks"]
-    # Dot can't be generated yet, so the unit runs its nodes as separate tasks
-    assert any("Dot" in s for s in tasks)
+    steps = info(f)["steps"]
+    # Dot can't be generated yet, so the unit runs its nodes as separate steps
+    assert any("Dot" in s for s in steps)
 
 
 def test_ir_of_the_generated_code():

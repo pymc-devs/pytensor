@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import operator
 
+from pytensor.link.llvm.analysis.layout import split_layouts
 from pytensor.link.llvm.codegen.emit import Array, constant, size
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import ir
-from pytensor.link.llvm.layout import split_layouts
 from pytensor.tensor.basic import ExtractDiag, Nonzero, Split
 from pytensor.tensor.extra_ops import CumOp
 from pytensor.tensor.math import Argmax
