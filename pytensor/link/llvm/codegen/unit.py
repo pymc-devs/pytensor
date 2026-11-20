@@ -46,7 +46,6 @@ from pytensor.link.llvm.codegen.types import (
     Slot,
     TensorRepr,
     ir,
-    is_absent,
     itemsize,
     repr_of,
     slot_type,
@@ -81,8 +80,9 @@ def build_unit_function(
     * `input_layouts`: a `Layout` per input (None: nothing known), the ones the items
       were resolved for (`unit_input_layouts`);
     * `outputs`: [(vid, PyTensor type, OutputMode)] with modes PROVIDED or RETURNED;
-    * `output_layouts`: the layout of the memory provided for each PROVIDED output
-      (None: any strides), and of the result of a RETURNED one that may be a view;
+    * `output_layouts`: the layout of each output (None: any strides): of the memory
+      provided for a PROVIDED one, of the result of a RETURNED one (new memory is
+      allocated in it if it is packed, else C-contiguous);
     * `output_aliases`: per output, the positions of the inputs it may be a view of
       (RETURNED only): it is returned as a view when it lies in one of their memory,
       else as a copy in its layout;
@@ -113,7 +113,7 @@ def build_unit_function(
     if output_aliases is None:
         output_aliases = [()] * len(outputs)
     outs = [
-        Output(repr_of(t, lay if mode is OutputMode.PROVIDED or al else None), mode, al)
+        Output(repr_of(t, lay), mode, al)
         for (_, t, mode), lay, al in zip(
             outputs, output_layouts, output_aliases, strict=True
         )
@@ -197,12 +197,8 @@ def build_unit_function(
                 t.ndim,
                 aliases=o.aliases,
                 # a copy is in the declared layout if packed, else C-contiguous (which
-                # implies it, see `program._view_layout`)
-                layout=(
-                    o.layout
-                    if o.aliases and o.layout.fully_packed(o.repr.shape)
-                    else None
-                ),
+                # implies it, see `layout.new_memory_layout`)
+                layout=(o.layout if o.layout.fully_packed(o.repr.shape) else None),
             )
             if not o.aliases:
                 copy(cg, src, out.allocate(src.shape))

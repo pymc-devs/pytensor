@@ -109,11 +109,13 @@ def scalar_input(index: int, dtype: np.dtype):
     return load
 
 
-def allocated_output(index: int, ndim: int, dtype: np.dtype):
-    """Intrinsic: allocate args[index] through ctx->rt->alloc with the given shape, fill
-    the PtArray (data, owner, shape, C strides) and return a C-contiguous numba view."""
+def allocated_output(index: int, ndim: int, dtype: np.dtype, order=None):
+    """Intrinsic: allocate args[index] through ctx->rt->alloc with the given shape,
+    packed in axis `order` (outermost first; default C), fill the PtArray (data, owner,
+    shape, strides) and return a numba view of it."""
     nbdt = numba.from_dtype(dtype)
-    arrty = types.Array(nbdt, ndim, "C")
+    order = tuple(range(ndim)) if order is None else tuple(order)
+    arrty = types.Array(nbdt, ndim, "C" if order == tuple(range(ndim)) else "A")
     itemsize = np.dtype(dtype).itemsize
 
     @intrinsic
@@ -160,7 +162,7 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype):
             strd = builder.inttoptr(builder.load(slot(2, _i64)), _i64p)
             strides = [None] * ndim
             acc = ir.Constant(_i64, itemsize)
-            for d in reversed(range(ndim)):
+            for d in reversed(order):
                 strides[d] = acc
                 acc = builder.mul(acc, dims[d])
             for d in range(ndim):
@@ -206,11 +208,13 @@ class _CFunc(CFunc):
 
 
 # bump when the generated wrapper changes
-CACHE_VERSION = 6
+CACHE_VERSION = 7
 
 
-def numba_kernel(node):
-    """Compile a cfunc kernel for `node`; returns the numba cfunc object (keep it alive)."""
+def numba_kernel(node, orders=None):
+    """Compile a cfunc kernel for `node`; returns the numba cfunc object (keep it
+    alive). `orders`: per output, the axis order (outermost first) it is allocated
+    packed in (None: C)."""
     from pytensor import config
     from pytensor.link.numba.cache import compile_numba_function_src
     from pytensor.link.numba.dispatch.basic import numba_funcify_ensure_cache
@@ -237,7 +241,8 @@ def numba_kernel(node):
         if not isinstance(t, ScalarType | TensorType):
             raise NotImplementedError(f"numba kernel: output type {t}")
         ndim = 0 if isinstance(t, ScalarType) else t.ndim
-        env[f"out{k}"] = allocated_output(n_in + k, ndim, np.dtype(t.dtype))
+        order = None if orders is None else orders[k]
+        env[f"out{k}"] = allocated_output(n_in + k, ndim, np.dtype(t.dtype), order)
         val = "r" if len(node.outputs) == 1 else f"r[{k}]"
         lines.append(f"    v{k} = np.asarray({val})")
         lines.append(f"    o{k} = out{k}(ctx, args, v{k}.shape)")
@@ -251,6 +256,7 @@ def numba_kernel(node):
     cache_key = None
     if op_key is not None and config.numba__cache:
         types_sig = ",".join(str(v.type) for v in (*node.inputs, *node.outputs))
+        types_sig += f"|orders{orders}"
         # hashed: the key ends up in a file name
         digest = hashlib.sha256(
             f"{op_key}|{types_sig}|fastmath{int(config.numba__fastmath)}".encode()

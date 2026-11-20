@@ -21,6 +21,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import GraphRewriter
 from pytensor.graph.traversal import toposort_with_orderings
+from pytensor.link.llvm.layout import AttachLayoutFeature
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Alloc,
@@ -309,5 +310,6 @@ class GroupIntoUnits(GraphRewriter):
                     fgraph.change_node_input(c, k, back, reason="llvm_units")
 
 
-# opt-in by name (the LLVM mode includes it)
+# opt-in by name (the LLVM linker requires them)
+optdb.register("llvm_layouts", AttachLayoutFeature(), position=-0.5)
 optdb.register("llvm_units", GroupIntoUnits(), position=200)

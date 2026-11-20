@@ -9,8 +9,9 @@ them:
    inside units, and a scalar input arrives as a 0-d array.
 2. Each item is resolved (`Planner.resolve_item`; `plan/resolve.py`): a Rust kernel, a
    numba kernel, a subprogram, or code generated for it, compiled on its own (a node,
-   a unit): each is called by the program's function. The layouts of its outputs are
-   noted for the items after it.
+   a unit): each is called by the program's function. The layouts of the values are
+   not decided here: the graph's `LayoutFeature` has them (`layout.py`), and what runs
+   an item must give its outputs those layouts.
 3. The program's function is generated like a unit's (`codegen/unit.py`): it calls the
    items in order, its temporaries in one arena laid out by liveness
    (`plan/memory.py`).
@@ -36,6 +37,7 @@ from pytensor.link.llvm.codegen.function import (
     build_kernel_wrapper,
     build_node_function,
     inplace_outputs,
+    node_outputs,
     node_signature,
     skipped_inputs,
 )
@@ -47,9 +49,18 @@ from pytensor.link.llvm.codegen.unit import (
     build_unit_function,
     unit_input_layouts,
 )
-from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.layout import (
+    Layout,
+    infer_layouts,
+    layout_feature,
+)
 from pytensor.link.llvm.plan.flatten import flatten
-from pytensor.link.llvm.plan.resolve import Call, Resolved, Resolver
+from pytensor.link.llvm.plan.resolve import (
+    Call,
+    Resolved,
+    Resolver,
+    check_conforms,
+)
 from pytensor.link.llvm.plan.values import NodeItem, SubprogramItem, UnitItem, Values
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import TensorFromScalar
@@ -250,7 +261,10 @@ class Planner:
         self.stats = Stats()
         self.values = Values()
         self.resolver = Resolver(options, self.stats, self.values)
-        self.layouts = {}  # vid -> Layout of tensor values (see layout.py)
+        #: vid -> Layout of tensor values: of the graph's variables, what its
+        #: LayoutFeature says; of others (inside inlined OpFromGraphs), what
+        #: `node_outputs` gives them, as the feature does
+        self.layouts = {}
         #: modules generated for items, to compile with the program's function
         self.modules = []  # (module, CalledKernel whose address is its "kernel")
         #: layouts of the program's outputs (after `plan`)
@@ -276,10 +290,14 @@ class Planner:
             return Layout.of_const(self.values.consts[k])
         return self.layouts.get(k)
 
-    def set_layouts(self, vids, outputs):
-        for k, o in zip(vids, outputs, strict=True):
-            if o.layout is not None:
-                self.layouts[k] = o.layout
+    def binding(self, node, vids, in_layouts) -> list:
+        """The layouts of the values `vids`, the outputs of an item running `node` with
+        inputs in `in_layouts`: those its outputs must have."""
+        if any(k not in self.layouts for k in vids):
+            for k, o in zip(vids, node_outputs(node, in_layouts), strict=True):
+                if o.layout is not None:
+                    self.layouts.setdefault(k, o.layout)
+        return [self.lay(k) for k in vids]
 
     # ------------------------------------------------------------ items
 
@@ -340,6 +358,7 @@ class Planner:
         if isinstance(it, SubprogramItem):
             return self.kernel_item(it, self.resolver.subprogram(it.node, in_layouts))
         node = it.node
+        binding = self.binding(node, it.outputs, in_layouts)
         types = self.values.types
         # constant scalar inputs are folded into the code
         folded = {
@@ -359,7 +378,7 @@ class Planner:
         nested = self.resolver.has_body(node)
         inplace = self.grant_inplace(it, folded)
         if not folded and not nested and not inplace:
-            kernel = self.resolver.rust(node, in_layouts)
+            kernel = self.resolver.rust(node, in_layouts, binding)
             if kernel is not None:
                 return self.kernel_item(it, kernel)
         try:
@@ -368,12 +387,12 @@ class Planner:
             # (a kernel doesn't overwrite its inputs: it can stand in for an in-place
             # node too)
             if nested or inplace:
-                kernel = self.resolver.rust(node, in_layouts)
+                kernel = self.resolver.rust(node, in_layouts, binding)
                 if kernel is not None:
                     return self.kernel_item(it, kernel)
             if not self.opts.numba_fallback:
                 raise
-        kernel = self.resolver.numba(node)
+        kernel = self.resolver.numba(node, binding)
         # it overwrites the inputs its op destroys: that is what the graph asks for;
         # where nothing else may see the memory (as in `grant_inplace`). Else it gets
         # copies.
@@ -384,7 +403,9 @@ class Planner:
         """A node run by a kernel (Rust, numba, a subprogram)."""
         in_layouts = [self.lay(k) for k in it.inputs]
         sig = node_signature(it.node, in_layouts=in_layouts, declared=kernel.outputs)
-        self.set_layouts(it.outputs, sig.outputs)
+        check_conforms(
+            it.node, sig.outputs, self.binding(it.node, it.outputs, in_layouts)
+        )
         return Resolved(it, in_layouts, kernel, sig)
 
     def compiled(self, module, nf, description) -> CalledKernel:
@@ -436,7 +457,9 @@ class Planner:
             [r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0]
         )
         kernel = self.compiled(module, nf, desc)
-        self.set_layouts(it.outputs, nf.signature.outputs)
+        check_conforms(
+            node, nf.signature.outputs, self.binding(node, it.outputs, in_layouts)
+        )
         return Resolved(
             Call(args, list(it.outputs), desc),
             [self.lay(k) for k in args],
@@ -448,6 +471,8 @@ class Planner:
         """The items of a unit, generated as one function, compiled on its own."""
         types = self.values.types
         out_types = [types[o] for _, o in it.outputs]
+        outs = [o for _, o in it.outputs]
+        binding = self.binding(it.node, outs, [self.lay(k) for k in it.node_inputs])
         in_layouts = unit_input_layouts(
             [types[k] for k in it.inputs], [self.lay(k) for k in it.inputs]
         )
@@ -457,21 +482,21 @@ class Planner:
             if lay is not None
         }
         resolved = self.resolver.resolve_items(it.items, inner_layouts)
-        # outputs that may be views of the unit's inputs are returned as such (in the
-        # layout their node declared); the others are provided memory when static, else
-        # allocated, C-contiguous
+        # outputs that may be views of the unit's inputs are returned as such, where
+        # their layout implies the binding one; the others are provided memory when
+        # static, else allocated, in the binding layout
         views = _unit_views(it, resolved)
-        modes, out_layouts, aliases = [], [], []
-        for (inner, _), t in zip(it.outputs, out_types, strict=True):
-            if views.get(inner):
+        modes, aliases = [], []
+        for (inner, _), t, lay in zip(it.outputs, out_types, binding, strict=True):
+            if views.get(inner) and inner_layouts[inner].implies(
+                lay, list(t.shape), np.dtype(t.dtype).itemsize
+            ):
                 modes.append(OutputMode.RETURNED)
-                out_layouts.append(_view_layout(inner_layouts.get(inner), t))
                 aliases.append(tuple(sorted(views[inner])))
             else:
                 modes.append(
                     OutputMode.PROVIDED if repr_of(t).static else OutputMode.RETURNED
                 )
-                out_layouts.append(Layout.c(t.ndim))
                 aliases.append(())
         module = ir.Module(
             f"unit_{len(it.items)}",
@@ -495,7 +520,7 @@ class Planner:
                 if self.values.folded(k)
             },
             input_layouts=in_layouts,
-            output_layouts=out_layouts,
+            output_layouts=binding,
             output_aliases=aliases,
             parallel=self.opts.parallel,
         )
@@ -503,14 +528,17 @@ class Planner:
         names = ", ".join(str(s.node.op) for s in it.items if isinstance(s, NodeItem))
         desc = f"unit[{len(it.items)}]: {names[:120]}"
         kernel = self.compiled(module, nf, desc)
-        outs = [o for _, o in it.outputs]
-        self.set_layouts(outs, nf.signature.outputs)
-        return Resolved(Call(list(it.inputs), outs, desc), in_layouts, kernel, nf.signature)
+        return Resolved(
+            Call(list(it.inputs), outs, desc), in_layouts, kernel, nf.signature
+        )
 
     def copy_item(self, src, dst) -> Resolved:
         """A copy of value `src` into value `dst`."""
         node = _copy_node(self.values.types[dst])
-        kernel = self.resolver.rust(node, [self.lay(src)])
+        in_layouts = [self.lay(src)]
+        kernel = self.resolver.fallback(
+            node, in_layouts, self.binding(node, [dst], in_layouts)
+        )
         kernel.description = "copy"
         return self.kernel_item(NodeItem(node, [src], [dst]), kernel)
 
@@ -535,10 +563,17 @@ class Planner:
     def _plan(self, fgraph, output_modes, input_layouts):
         t0 = time.perf_counter()
         values = self.values
+        if input_layouts is None:
+            feature = layout_feature(fgraph)
+            feature.set_input_layout(self.opts.input_layout)
+            layout_of = fgraph.llvm_layout
+        else:
+            # (a subprogram: its graph is an OpFromGraph's, shared by all its nodes)
+            layout_of = infer_layouts(fgraph, input_layouts).get
         scope = {}
         in_ids = []
         boxed = {}  # scalar input -> the 0-d array it arrives in
-        for pos, v in enumerate(fgraph.inputs):
+        for v in fgraph.inputs:
             if isinstance(v.type, ScalarType):
                 # scalars don't cross the kernel ABI: the input is a 0-d array, which is
                 # what `TensorFromScalar` of it is (the units rewrite reads scalar inputs
@@ -554,15 +589,6 @@ class Planner:
             k = values.new(v.type)
             scope[v] = k
             in_ids.append(k)
-            if hasattr(v.type, "ndim"):
-                lay = input_layouts[pos] if input_layouts is not None else None
-                if lay is None:
-                    lay = (
-                        Layout.c(v.type.ndim)
-                        if self.opts.input_layout == "c"
-                        else Layout.dynamic(v.type.ndim)
-                    )
-                self.layouts[k] = lay
         contiguous = [
             input_layouts is None
             and self.opts.input_layout == "c"
@@ -584,6 +610,10 @@ class Planner:
             self.hidden = self.views.undeclared_view_roots(fgraph)
         items = flatten(values, nodes, scope, of_the_graph=True)
         out_ids = [values.of(o, scope) for o in fgraph.outputs]
+        for v, k in scope.items():
+            lay = layout_of(v)
+            if lay is not None and k not in values.consts:
+                self.layouts.setdefault(k, lay)
 
         # 2. how each item runs
         resolved = self.resolve(items)
@@ -658,7 +688,15 @@ class Planner:
         self.stats.codegen_s = t1 - t0
         self.stats.compile_s = time.perf_counter() - t1
         return Program(
-            self, nf, compiled[-1], profile, resolved, in_ids, contiguous, out_ids, modes
+            self,
+            nf,
+            compiled[-1],
+            profile,
+            resolved,
+            in_ids,
+            contiguous,
+            out_ids,
+            modes,
         )
 
 
@@ -689,7 +727,16 @@ class Program:
     other generated code (`address`, `config`: a subprogram)."""
 
     def __init__(
-        self, planner, nf, compiled, profile, resolved, in_ids, contiguous, out_ids, modes
+        self,
+        planner,
+        nf,
+        compiled,
+        profile,
+        resolved,
+        in_ids,
+        contiguous,
+        out_ids,
+        modes,
     ):
         types = planner.values.types
         self.descriptions = [r.description for r in resolved]
@@ -910,20 +957,6 @@ def _unit_views(it: UnitItem, resolved) -> dict:
     for k in it.inputs:
         del views[k]
     return views
-
-
-def _view_layout(declared, t) -> Layout:
-    """The layout of a unit output that may be a view: the one its node declared. The
-    unit copies it when it isn't one of its inputs' memory after all: in that layout if
-    it is packed, else C-contiguous, which must then imply it."""
-    if declared is None:
-        return Layout.dynamic(t.ndim)
-    shape = list(t.shape)
-    if declared.fully_packed(shape) or Layout.c(t.ndim).implies(
-        declared, shape, np.dtype(t.dtype).itemsize
-    ):
-        return declared
-    return Layout.dynamic(t.ndim)
 
 
 def _layouts_note(reprs):

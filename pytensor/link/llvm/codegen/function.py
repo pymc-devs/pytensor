@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from functools import singledispatch
 from typing import TYPE_CHECKING
 
+from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.link.llvm.codegen.emit import (
     Codegen,
     InplaceOutput,
@@ -29,7 +30,13 @@ from pytensor.link.llvm.codegen.types import (
     ptarray_type,
     repr_of,
 )
-from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.layout import (
+    Layout,
+    infer_layouts,
+    itemsize_of,
+    new_memory_layout,
+    shape_of,
+)
 
 
 if TYPE_CHECKING:
@@ -117,6 +124,28 @@ def llvm_layout(op, node, in_layouts) -> list:
     return [None] * len(node.outputs)
 
 
+@llvm_layout.register(OpFromGraph)
+def _(op, node, in_layouts):
+    """The layouts of the inner outputs. Inlined that is what they are; a compiled unit
+    has them where new memory can (it copies an output that isn't one of its inputs'
+    memory: `new_memory_layout`); a subprogram returns an output's value or a C copy."""
+    inner = infer_layouts(op.fgraph, in_layouts)
+    outs = [inner[o] for o in op.fgraph.outputs]
+    if op.execution is Execution.COMPILED:
+        return [
+            None if lay is None else new_memory_layout(lay, o.type)
+            for lay, o in zip(outs, node.outputs, strict=True)
+        ]
+    if op.execution is Execution.INTERPRETED:
+        return [
+            None
+            if lay is None
+            else lay.join(Layout.c(o.type.ndim), shape_of(o), itemsize_of(o))
+            for lay, o in zip(outs, node.outputs, strict=True)
+        ]
+    return outs
+
+
 def output_aliases(op, k: int) -> tuple:
     """The inputs output `k` of `op` may be a view of: what its `view_map` lists."""
     view_map = getattr(op, "view_map", None) or {}
@@ -193,10 +222,13 @@ def node_outputs(node, in_layouts=None, inplace=None) -> list[Output]:
 
     `inplace`: {output: input} for the outputs that are to overwrite an input
     (`inplace_outputs`, if the caller grants it). Without it, an op that may destroy
-    an input writes new memory."""
+    an input writes new memory. An output that may overwrite an input has the input's
+    layout either way, where new memory can have it (`new_memory_layout`)."""
     op = node.op
     in_layouts = known_layouts(node, in_layouts)
-    layouts = llvm_layout(op, node, in_layouts)
+    layouts = list(llvm_layout(op, node, in_layouts))
+    for k, i in inplace_outputs(node).items():
+        layouts[k] = new_memory_layout(in_layouts[i], node.outputs[k].type)
     inplace = inplace or {}
     outs = []
     for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):

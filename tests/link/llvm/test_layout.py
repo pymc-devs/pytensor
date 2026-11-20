@@ -8,6 +8,7 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.mode import get_mode
+from pytensor.tensor.elemwise import DimShuffle
 
 
 ir = pytest.importorskip("pytensor_llvm.ir")
@@ -220,7 +221,7 @@ def test_feature_predicts_and_invalidates():
     y = pt.exp(t[1:])
     z = y.T[:, :2]
     fg = FunctionGraph([x], [z], clone=False)
-    fg.attach_feature(LayoutFeature(inputs_c=True))
+    fg.attach_feature(LayoutFeature(input_layout="c"))
     assert fg.llvm_layout(x) == C(2)
     assert str(fg.llvm_layout(t)) == "[P0, P1]"
     assert str(fg.llvm_layout(t[1:].owner.outputs[0])) == "[P0, ?]"
@@ -233,6 +234,22 @@ def test_feature_predicts_and_invalidates():
     fg.add_input(u)
     fg.replace(y, u.T, import_missing=True)
     assert str(fg.llvm_layout(fg.outputs[0])) == "[?, P0]"
+
+
+def test_compiled_graph_has_the_layouts_of_its_values():
+    x = pt.vector("x")
+    # static and dynamic lengths: reshapes into provided and allocated memory
+    outs = [x.reshape((2, 3)).T.reshape((6,)), x.reshape((2, -1)).T.reshape((-1,))]
+    f = pytensor.function([x], outs, mode=LLVM.excluding("llvm_units"))
+    fg = f.maker.fgraph
+    for n in fg.apply_nodes:
+        if isinstance(n.op, DimShuffle):
+            assert str(fg.llvm_layout(n.outputs[0])) == "[P0, P1]"
+    # the reshapes were generated for that layout: they copy
+    assert f.maker.linker.program.descriptions.count("Reshape{1} {[P0, P1], C}") == 2
+    expected = np.arange(6.0).reshape(2, 3).T.ravel()
+    for r in f(np.arange(6.0)):
+        np.testing.assert_array_equal(r, expected)
 
 
 # ------------------------------------------------------------------ code follows the layout

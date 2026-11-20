@@ -66,7 +66,12 @@ def flatten(
                 unit_outs.append((values.of(io, sub), k))
             items.append(
                 UnitItem(
-                    inner_items, values.unit_inputs(inner_items), unit_outs, str(op)
+                    inner_items,
+                    values.unit_inputs(inner_items),
+                    unit_outs,
+                    str(op),
+                    node,
+                    [values.of(i, scope) for i in node.inputs],
                 )
             )
         elif isinstance(op, OpFromGraph) and execution is Execution.INTERPRETED:

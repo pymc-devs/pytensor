@@ -26,12 +26,16 @@ class NodeItem:
 
 @dataclass
 class UnitItem:
-    """Several items compiled as one function."""
+    """Several items compiled as one function: an OpFromGraph with
+    `execution=COMPILED`."""
 
     items: list[Item]
     inputs: list[int]  # vids read from outside
     outputs: list[tuple[int, int]]  # (inner vid, outer vid)
     description: str
+    #: the OpFromGraph's node, and the vids of its inputs
+    node: Apply
+    node_inputs: list[int]
 
 
 @dataclass
