@@ -45,7 +45,7 @@ def compile_binary(dtype, fn, out=None):
     r = fn(x, y)
     assert r.dtype == out
     b.ret(r.value)
-    c = m.compile(cache=False)
+    c = m.compile()
     cf = ctypes.CFUNCTYPE(CTYPES[out], CTYPES[dtype], CTYPES[dtype])(c.address("f"))
     cf._keep = c
     return cf

@@ -4,7 +4,7 @@
 The graph stays in PyTensor. Code is generated from Python: a dispatch function per Op
 emits LLVM IR through a small wrapper around LLVM (`pytensor_llvm.ir`), using the real
 node — its types, constants, `view_map`/`destroy_map`, `infer_shape`. Rust provides the
-wrapper, the compiler (optimization, machine code, JIT, object cache), the runtime
+wrapper, the compiler (optimization, machine code, JIT), the runtime
 (memory, buffers, the C API) and Rust kernels for the hard ops. A compiled graph is one
 generated function, which calls the code of its parts.
 
@@ -187,8 +187,7 @@ called kernel's
 scratch is released after the call; an error returns its code (the kernel set the
 message).
 
-Addresses aren't part of the IR, which must not depend on the process (the compile
-cache is keyed on it). A generated kernel's **link table** (`LinkTable`) holds them as
+Addresses aren't part of the IR. A generated kernel's **link table** (`LinkTable`) holds them as
 pointer-sized entries: two per called kernel (its address, then its config), one per
 array constant (the address of its contents, packed in its memory order and kept alive
 with the table; equal ones share an entry). The IR loads entry `k` from `config`; the
@@ -554,8 +553,7 @@ A small LLVM wrapper (`rust/pytensor-llvm/src/ir`) on top of `llvm-sys`:
 * `value.named("n")` names a value in the IR text, for reading dumps.
 * Things that need care are Rust methods: libm calls with vector variants,
   intrinsics, runtime calls.
-* `Module.compile()` verifies, optimizes, generates machine code and adds it to the JIT;
-  objects are cached by a hash of the IR text and the target.
+* `Module.compile()` verifies, optimizes, generates machine code and adds it to the JIT.
 * The wheel ships type stubs (`pytensor_llvm-stubs`), so editors and type checkers know
   the builder.
 
@@ -649,12 +647,11 @@ slowest first; `reset_profile()` clears the counters. The counters are an array 
 program's link table, added to atomically (`ptl_rt_counter_add`), so calls from
 several threads (or through the C API) add up.
 
-With `PYTENSOR_LLVM_PERF=1` generated functions keep frame pointers (part of the cache
-key) and every linked object is written to `/tmp/perf-<pid>.map`. The planner labels
+With `PYTENSOR_LLVM_PERF=1` generated functions keep frame pointers and every linked object is written to `/tmp/perf-<pid>.map`. The planner labels
 each module with its item (`ptl:<item description>`, the program's function
-`ptl:program[<items>]`), and functions appear as `ptl:<item>::<function> [<hash
-prefix>]`, e.g.
-`ptl:FusedElemwise{Exp, reduce[add@(0,)]}::kernel [39ddfa22]`.
+`ptl:program[<items>]`), and functions appear as `ptl:<item>::<function> [<module
+id>]`, e.g.
+`ptl:FusedElemwise{Exp, reduce[add@(0,)]}::kernel [42]`.
 
 The same functions, with their machine code, go to a jitdump, `jit-<pid>.dump` in
 `PYTENSOR_LLVM_JITDUMP_DIR` (default `/tmp`), for `perf annotate`. With debug
@@ -687,7 +684,7 @@ perf report -i perf.jit.data        # perf annotate -i perf.jit.data: the Python
   the LLVM function. Node functions are inlined, and LLVM keeps the chain, so in the
   optimized code every instruction still knows its Python code and its node.
   `locations=True` prints that as a comment above the instructions (`with_locations`);
-  the remarks show it too. It is part of the IR, so of the cache key.
+  the remarks show it too. It is part of the IR.
 
 ## 11. History
 

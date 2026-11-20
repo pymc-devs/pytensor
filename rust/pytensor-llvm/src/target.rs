@@ -3,7 +3,6 @@
 
 use inkwell::OptimizationLevel;
 use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
-use std::path::PathBuf;
 use std::sync::{Once, OnceLock};
 
 static INIT: Once = Once::new();
@@ -101,23 +100,3 @@ pub fn target_machine(opt: u32) -> Result<TargetMachine, String> {
         .ok_or_else(|| "could not create target machine".to_string())
 }
 
-/// `PYTENSOR_LLVM_CACHE_DIR`, else the platform's per-user cache directory.
-pub fn cache_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("PYTENSOR_LLVM_CACHE_DIR") {
-        return PathBuf::from(d);
-    }
-    let var = |k| {
-        std::env::var_os(k)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    let base = if cfg!(windows) {
-        var("LOCALAPPDATA")
-    } else if cfg!(target_os = "macos") {
-        var("HOME").map(|h| h.join("Library").join("Caches"))
-    } else {
-        var("HOME").map(|h| h.join(".cache"))
-    };
-    base.unwrap_or_else(std::env::temp_dir)
-        .join("pytensor-llvm")
-}

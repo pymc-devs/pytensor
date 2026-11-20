@@ -119,7 +119,6 @@ def test_numba_object_mode_from_the_cache(tmp_path):
     env = dict(
         os.environ,
         PYTENSOR_FLAGS=f"compiledir={tmp_path / 'compiledir'}",
-        PYTENSOR_LLVM_CACHE_DIR=str(tmp_path / "llvm"),
     )
     for _ in range(2):
         out = subprocess.run(

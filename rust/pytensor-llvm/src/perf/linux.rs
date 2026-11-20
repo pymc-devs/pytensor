@@ -368,19 +368,19 @@ impl LineTables {
     }
 }
 
-/// Readable perf-map names. Code from `pytensor_llvm.ir` has symbols `pt<hash>_<fn>`:
-/// shown as `<label>::<fn> [<hash prefix>]`. Other code shows the entry point with its
+/// Readable perf-map names. Code from `pytensor_llvm.ir` has symbols `pt<module id>_<fn>`:
+/// shown as `<label>::<fn> [<module id>]`. Other code shows the entry point with its
 /// label, helpers as `<entry>::<helper>`.
 fn pretty_name(entry: &str, sym: &str, label: &str) -> String {
     let label: String = label
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
-    if let Some((hash, func)) = split_ir_symbol(sym) {
-        return format!("{label}::{func} [{}]", &hash[..8]);
+    if let Some((id, func)) = split_ir_symbol(sym) {
+        return format!("{label}::{func} [{id}]");
     }
-    if let Some((hash, _)) = split_ir_symbol(entry) {
-        return format!("{label}::{sym} [{}]", &hash[..8]);
+    if let Some((id, _)) = split_ir_symbol(entry) {
+        return format!("{label}::{sym} [{id}]");
     }
     if sym == entry {
         format!("{entry} [{label}]")
@@ -389,11 +389,8 @@ fn pretty_name(entry: &str, sym: &str, label: &str) -> String {
     }
 }
 
-/// `pt<32 hex>_<fn>` -> (hash, fn)
+/// `pt<module id>_<fn>` -> (module id, fn)
 fn split_ir_symbol(sym: &str) -> Option<(&str, &str)> {
-    let rest = sym.strip_prefix("pt")?;
-    let (hash, func) = (rest.get(..32)?, rest.get(32..)?.strip_prefix('_')?);
-    hash.bytes()
-        .all(|b| b.is_ascii_hexdigit())
-        .then_some((hash, func))
+    let (id, func) = sym.strip_prefix("pt")?.split_once('_')?;
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())).then_some((id, func))
 }

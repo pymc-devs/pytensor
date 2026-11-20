@@ -9,9 +9,8 @@ kernel=...)`), so units, programs and generated loops can contain it; what isn't
 (a compiled unit called by a program) gets one from its signature
 (`build_call_function`).
 
-The addresses (of the kernel and of its config) aren't part of the IR, which must not
-depend on the process (the compile cache is keyed on it): they are entries of the
-calling kernel's link table, which is its config.
+The addresses (of the kernel and of its config) aren't part of the IR: they are entries
+of the calling kernel's link table, which is its config.
 """
 
 from __future__ import annotations

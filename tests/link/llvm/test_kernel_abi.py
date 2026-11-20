@@ -83,7 +83,7 @@ def test_generated_kernels_check_their_arguments_when_asked():
     module = ir.Module("argument_check")
     nf = build_node_function(module, pt.exp(x).owner, "node")
     build_kernel_wrapper(module, nf, "kernel", check_layouts=True)
-    kernel = module.compile(cache=False).address("kernel")
+    kernel = module.compile().address("kernel")
     values = np.ones((2, 3))
     (result,) = ir.call_kernel(kernel, [values], [(f64, 2)])
     np.testing.assert_allclose(result, np.exp(values))

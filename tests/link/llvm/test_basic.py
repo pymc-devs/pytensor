@@ -155,7 +155,7 @@ def test_optimization_remarks(capfd):
     k = next(k for k, line in enumerate(lines) if "vectorized loop" in line)
     about = next(line for line in reversed(lines[:k]) if line.startswith("; @"))
     assert re.match(r"; @[\w.]+ %[\w.]+: br ", about)
-    pytensor.function([x], x * 3, mode=LLVM.clone(link_kwargs={"cache": False}))
+    pytensor.function([x], x * 3, mode=LLVM)
     assert "remark" not in capfd.readouterr().err
 
 

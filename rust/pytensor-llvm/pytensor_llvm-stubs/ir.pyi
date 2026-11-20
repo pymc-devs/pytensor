@@ -151,17 +151,12 @@ class Function:
 class CompiledModule:
     def address(self, name: str) -> int: ...
     @property
-    def key(self) -> str: ...
-    @property
     def ir(self) -> str:
         """The module's LLVM IR as compiled, before optimization."""
     def optimized_ir(self, opt_level: int | None = None, remarks: bool = False) -> str:
         """The IR after optimization (by default at the level the module was compiled
-        with), computed on demand from `ir`: the same whether the object was compiled,
-        read from the disk cache or already in the process. `remarks`: start with
-        LLVM's optimization remarks, as comments."""
-    @property
-    def source(self) -> str: ...
+        with), computed on demand from `ir`. `remarks`: start with LLVM's optimization
+        remarks, as comments."""
     @property
     def compile_s(self) -> float: ...
     @property
@@ -186,10 +181,10 @@ class Module:
     def ir(self) -> str:
         """The module as LLVM IR text."""
     def verify(self) -> None: ...
-    def compile(self, opt_level: int = 3, cache: bool = True) -> CompiledModule: ...
+    def compile(self, opt_level: int = 3) -> CompiledModule: ...
 
 def compile_many(
-    modules: Sequence[Module], opt_level: int = 3, cache: bool = True
+    modules: Sequence[Module], opt_level: int = 3
 ) -> list[CompiledModule]: ...
 def call_kernel(
     address: int, inputs: Sequence[np.ndarray], outputs: Sequence[Any], config: int = 0

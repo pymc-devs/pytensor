@@ -1,7 +1,7 @@
 //! Scalar functions generated code calls (`b.rust_math`).
 //!
 //! They are registered in the JIT as absolute symbols (`ptl_<name>_f64`, `_f32`) so
-//! generated code can call them by name; cached object files stay position independent.
+//! generated code can call them by name; object files stay position independent.
 // (the erfc coefficients are written with every digit of their source)
 #![allow(clippy::excessive_precision)]
 

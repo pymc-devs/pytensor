@@ -42,7 +42,7 @@ def test_region_captures_and_results():
             )
     ok = b.icmp(ir.ICmp.EQ, r.result, b.const_int(ir.i32, 0))
     b.ret(b.zext(b.xor(ok, b.const_bool(True)), ir.i32))
-    c = m.compile(cache=False)
+    c = m.compile()
     xv = np.arange(100.0)
     (res,) = ir.call_kernel(c.address("f"), [xv], [np.empty(100)])
     np.testing.assert_allclose(res, 3.0 * xv + 1.0)

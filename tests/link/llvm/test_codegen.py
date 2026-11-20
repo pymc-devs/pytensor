@@ -59,26 +59,6 @@ def check(out, inputs, values, rtol=1e-12, atol=1e-14):
 # ------------------------------------------------------------------ the ir wrapper
 
 
-def test_ir_fold_libm_and_compile_cache():
-    def build():
-        m = ir.Module("sumsq")
-        f = m.function("sumsq", [ir.ptr, ir.i64], ir.f64, exported=True)
-        b = f.builder()
-        x, n = f.params
-
-        def body(i, a):
-            v = b.load(ir.f64, b.gep(ir.f64, x, i))
-            return [b.fadd(a, b.fmul(v, v))]
-
-        (acc,) = b.fold(n, [b.const_float(ir.f64, 0.0)], body)
-        b.ret(b.libm(ir.Libm.Log1p, [acc]))
-        return m.compile()
-
-    c1, c2 = build(), build()
-    assert c1.address("sumsq") == c2.address("sumsq")
-    assert c2.source == "in process"
-
-
 @pytest.mark.parametrize(
     "bad",
     [

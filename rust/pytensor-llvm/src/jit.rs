@@ -2,8 +2,7 @@
 //!
 //! We never hand LLVM IR to the JIT. Kernels are compiled to relocatable object files
 //! (in parallel, one LLVM context per kernel) and only the finished objects are linked
-//! here. That's what makes the disk cache trivial: a cache hit skips LLVM codegen
-//! entirely, and the JIT only links.
+//! here.
 
 use crate::math;
 use llvm_sys::error::*;
@@ -140,10 +139,6 @@ impl Jit {
         }
     }
 
-    pub fn has(&self, name: &str) -> Option<usize> {
-        self.symbols.get(name).copied()
-    }
-
     /// Address of a symbol of an object added earlier.
     pub fn lookup(&mut self, name: &str) -> Result<usize, String> {
         if let Some(a) = self.symbols.get(name) {
@@ -164,9 +159,6 @@ impl Jit {
 
     /// Link an object file and return the address of `name`.
     pub fn add_object(&mut self, name: &str, obj: &[u8], label: &str) -> Result<usize, String> {
-        if let Some(a) = self.symbols.get(name) {
-            return Ok(*a);
-        }
         // SAFETY: `self.jit`/`self.jd` are the live LLJIT handles (we hold &mut via the
         // Mutex); the object bytes are copied into an LLVM-owned buffer the JIT takes.
         unsafe {

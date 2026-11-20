@@ -26,7 +26,6 @@ class LLVMLinker(JITLinker):
     OPTIONS = (
         "fastmath",
         "opt_level",
-        "cache",
         "numba_fallback",
         "input_layout",
         "check_layouts",
@@ -39,7 +38,6 @@ class LLVMLinker(JITLinker):
         self,
         fastmath=True,
         opt_level=3,
-        cache=True,
         numba_fallback=True,
         input_layout="any",
         check_layouts=False,
@@ -51,7 +49,6 @@ class LLVMLinker(JITLinker):
         super().__init__(**kwargs)
         self.fastmath = fastmath
         self.opt_level = opt_level
-        self.cache = cache
         self.numba_fallback = numba_fallback
         self.input_layout = input_layout
         self.check_layouts = check_layouts
