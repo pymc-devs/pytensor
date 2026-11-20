@@ -1426,9 +1426,13 @@ def local_advanced_inc_subtensor_remove_broadcastable_index(fgraph, node):
             for dim, length in zip(index_dims, index_shape, strict=True)
             if y.type.broadcastable[dim] and length != 1
         ]
-        y = y.sum(axis=index_dims, dtype=y.type.dtype)
+        dtype = y.type.dtype
+        y = y.sum(axis=index_dims, dtype=dtype)
         if repeats:
-            y = y * cast(variadic_mul(*repeats), y.type.dtype)
+            # A large repeat count can overflow float16 even for a zero update.
+            repeat_dtype = "float32" if dtype == "float16" else dtype
+            repeat_count = cast(variadic_mul(*repeats), repeat_dtype)
+            y = cast(y * repeat_count, dtype)
     else:
         # Take the last update from a provably nonempty selection.
         y = y[(slice(None),) * position + (-1,) * index_ndim]

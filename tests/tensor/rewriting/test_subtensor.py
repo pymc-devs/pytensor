@@ -929,6 +929,24 @@ class TestAdvancedIncSubtensorRemoveBroadcastableIndex:
                 np.full(len(indices), 7, dtype=y.dtype),
             )
 
+    def test_maybe_empty_with_large_repeat_count(self):
+        x = tensor("x", shape=(1, 1), dtype="float16")
+        rows = tensor("rows", shape=(None, 1), dtype="int64")
+        cols = tensor("cols", shape=(1, 65536), dtype="int64")
+        y = tensor("y", shape=(None, 1), dtype=x.dtype)
+        outputs = [x[rows, cols].inc(y)]
+
+        result = utt.RewriteTester([x, rows, cols, y], outputs)
+        repeats = pt.constant([[65536]], dtype="float32")
+        total = y.squeeze(1).sum(dtype=y.dtype)[None, None]
+        result.assert_graph(x + (repeats * total).astype(x.dtype))
+        result.assert_eval(
+            np.array([[7]], dtype=x.dtype),
+            np.empty((0, 1), dtype=rows.dtype),
+            np.zeros(cols.type.shape, dtype=cols.dtype),
+            np.empty((0, 1), dtype=y.dtype),
+        )
+
     def test_mixed_dtype_accumulation(self):
         x = tensor("x", shape=(1,))
         x_int8 = tensor("x_int8", shape=(1,), dtype="int8")
