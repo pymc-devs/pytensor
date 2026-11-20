@@ -888,14 +888,31 @@ class TestAdvancedIncSubtensorRemoveBroadcastableIndex:
                 np.array(7, dtype=y.dtype),
             )
 
-    def test_mixed_dtype_accumulation(self):
-        x = tensor("x", shape=(1,), dtype="int8")
-        idx = tensor("idx", shape=(2,), dtype="int64")
-        y = pt.scalar("y", dtype="float64")
+    def test_maybe_empty_symbolic_index(self):
+        x = tensor("x", shape=(1,))
+        idx = pt.lvector("idx")
+        y = pt.vector("y", dtype=x.dtype)
         outputs = [x[idx].inc(y)]
 
         result = utt.RewriteTester([x, idx, y], outputs)
-        result.assert_graph(*outputs)
+        result.assert_graph(x + y.sum()[None])
+        for indices in ([], [0, -1, 0]):
+            result.assert_eval(
+                np.array([10], dtype=x.dtype),
+                np.array(indices, dtype=idx.dtype),
+                np.full(len(indices), 7, dtype=y.dtype),
+            )
+
+    def test_mixed_dtype_accumulation(self):
+        x = tensor("x", shape=(1,))
+        x_int8 = tensor("x_int8", shape=(1,), dtype="int8")
+        idx = tensor("idx", shape=(2,), dtype="int64")
+        y = pt.scalar("y", dtype="float32")
+        lossy = x_int8[idx].inc(y)
+
+        result = utt.RewriteTester([x, x_int8, idx, y], [x[idx].inc(y), lossy])
+        repeats = pt.constant([2], dtype=x.dtype)
+        result.assert_graph(x + repeats * y[None].astype(x.dtype), lossy)
 
     def test_mixed_indices(self):
         x = tensor("x", shape=(1, 3), dtype="int8")

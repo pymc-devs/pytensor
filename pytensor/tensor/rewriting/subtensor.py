@@ -1374,9 +1374,11 @@ def local_advanced_inc_subtensor_remove_broadcastable_index(fgraph, node):
         x[idx].inc(y, ignore_duplicates=True) -> x[:].inc(y[-1:])
 
     The rewrite assumes only statically broadcastable update dimensions broadcast.
-    Accumulating increments count each broadcast copy and require y to have x's dtype.
-    A provably empty selection returns x. If the selection might be empty at
-    runtime, keep the advanced write.
+    Accumulating increments count each broadcast copy and require y to cast safely
+    to x's dtype. A provably empty selection returns x. Taking the last update needs
+    every index dimension to be provably nonempty. Accumulating needs that only for
+    the index dimensions along which y broadcasts, because a zero repeat count would
+    turn an infinite update into nan.
     When indexing both broadcastable and nonbroadcastable axes, replace
     singleton-axis index arrays with zero if the other indices supply the joint shape.
     """
@@ -1390,7 +1392,9 @@ def local_advanced_inc_subtensor_remove_broadcastable_index(fgraph, node):
 
     accumulates = not (op.set_instead_of_inc or op.ignore_duplicates)
     if accumulates and y.type.dtype != x.type.dtype:
-        return None
+        if not np.can_cast(y.type.dtype, x.type.dtype, casting="safe"):
+            return None
+        y = cast(y, x.type.dtype)
 
     index_shape = joint_integer_index_shape(
         fgraph, [index_vars[op.idx_list[axis]] for axis in adv_axes]
@@ -1401,17 +1405,22 @@ def local_advanced_inc_subtensor_remove_broadcastable_index(fgraph, node):
     ]
     if 0 in index_shape:
         return [x]
-    if not all(_is_provably_positive(length) for length in index_shape):
-        return None
 
     index_ndim = len(index_shape)
     indexed_ndim = x.ndim - len(adv_axes) + index_ndim
     y = shape_padleft(y, indexed_ndim - y.ndim)
     position = 0 if _non_consecutive_adv_indexing(op.idx_list) else adv_axes[0]
+    index_dims = tuple(range(position, position + index_ndim))
+
+    if not all(
+        _is_provably_positive(length)
+        for dim, length in zip(index_dims, index_shape, strict=True)
+        if y.type.broadcastable[dim] or not accumulates
+    ):
+        return None
 
     if accumulates:
         # Sum the updates, counting repeats along broadcast axes.
-        index_dims = tuple(range(position, position + index_ndim))
         repeats = [
             cast(length, "int64")
             for dim, length in zip(index_dims, index_shape, strict=True)

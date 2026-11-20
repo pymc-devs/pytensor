@@ -1102,7 +1102,8 @@ class TestSubtensor(utt.OptimizationTestMixin):
         t = n[idx]
 
         mode = self.mode.excluding(
-            "local_advanced_subtensor_remove_broadcastable_index"
+            "local_advanced_subtensor_remove_broadcastable_index",
+            "local_advanced_inc_subtensor_remove_broadcastable_index",
         )
         f = self.function([idx], t, op=AdvancedSubtensor, mode=mode)
         topo = f.maker.fgraph.toposort()
@@ -1121,7 +1122,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         # Test the gradient
         c = t.sum()
         gn = pytensor.grad(c, n)
-        g = self.function([idx], gn, op=AdvancedIncSubtensor)
+        g = self.function([idx], gn, op=AdvancedIncSubtensor, mode=mode)
         g_0 = g([0])
         assert g_0.shape == (1, 3)
         assert np.allclose(g_0, 1)
