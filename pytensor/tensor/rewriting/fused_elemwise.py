@@ -14,6 +14,7 @@ from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import GraphRewriter, copy_stack_trace, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
+from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import InconsistencyError
 from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import (
@@ -63,6 +64,12 @@ def _view_root(view_i, var):
     return var
 
 
+def _depends_on(var, outputs, blockers):
+    """Whether `var` is computed from any of `outputs` (not looking past `blockers`)."""
+    outputs = set(outputs)
+    return any(v in outputs for v in ancestors([var], blockers=blockers))
+
+
 @node_rewriter([CAReduce])
 def wrap_reduced_gather_in_elemwise(fgraph, node):
     """Wrap a reduction of a bare indexed read in an identity Elemwise.
@@ -96,6 +103,7 @@ optdb.register(
     "fuse_indexed_into_elemwise",
     fused_elemwise_optdb,
     "numba",
+    "llvm",
     # symbolic_op_recognition is excluded from OpFromGraph inner-graph
     # compilation, preventing recursive fusion.
     "symbolic_op_recognition",
@@ -108,6 +116,7 @@ fused_elemwise_optdb.register(
     "wrap_reduced_gather_in_elemwise",
     dfs_rewriter(wrap_reduced_gather_in_elemwise),
     "numba",
+    "llvm",
     position=-0.5,
 )
 
@@ -559,6 +568,12 @@ class FuseElemwise(GraphRewriter):
 
                 target, _, *idx_vars = client_node.inputs
 
+                # A target computed from this Elemwise's own outputs (e.g. a chain
+                # inc(inc(zeros, out_b, idx), out_a, idx) from a gradient) would
+                # make the fused node an input of itself.
+                if _depends_on(target, node.outputs, blockers=node.inputs):
+                    continue
+
                 # Fusing an in-place write whose target is a buffer we also read
                 # through (same root) makes it two distinct inputs of one node, one
                 # read and one destroyed: the destroy handler rejects that aliasing.
@@ -952,4 +967,6 @@ class FuseElemwise(GraphRewriter):
                 continue
 
 
-fused_elemwise_optdb.register("fuse_elemwise", FuseElemwise(), "numba", position=0)
+fused_elemwise_optdb.register(
+    "fuse_elemwise", FuseElemwise(), "numba", "llvm", position=0
+)

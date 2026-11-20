@@ -21,6 +21,7 @@ Modules
    d3viz/index
    graph/index
    gradient
+   link/index
    printing
    scan
    sparse/index

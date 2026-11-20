@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextvars
+import enum
 import warnings
 from collections.abc import Callable, Sequence
 from copy import copy
@@ -17,6 +18,7 @@ from pytensor.graph.basic import (
     NominalVariable,
     Variable,
 )
+from pytensor.graph.features import op_view_parents, view_feature
 from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op, io_connection_pattern
@@ -130,6 +132,16 @@ def construct_nominal_fgraph(
     return fgraph
 
 
+class Execution(enum.Enum):
+    """How a backend runs an `OpFromGraph` it does not inline.
+
+    Backends that don't distinguish ways of running it ignore it.
+    """
+
+    #: The inner graph is compiled as one function (the LLVM backend calls this a unit).
+    COMPILED = "compiled"
+
+
 class OpFromGraph(HasInnerFunction, Op):
     r"""Create an Op from inputs and outputs lists of variables.
 
@@ -226,6 +238,7 @@ class OpFromGraph(HasInnerFunction, Op):
         outputs: list[Variable],
         *,
         inline: bool = False,
+        execution: Execution | None = None,
         pullback: Callable | OpFromGraph | None = None,
         pushforward: Callable | OpFromGraph | None = None,
         lop_overrides: Callable | OpFromGraph | None = None,
@@ -234,6 +247,7 @@ class OpFromGraph(HasInnerFunction, Op):
         strict: bool = False,
         name: str | None = None,
         destroy_map: dict[int, tuple[int, ...]] | None = None,
+        view_map: dict[int, tuple[int, ...]] | None = None,
         fgraph: FrozenFunctionGraph | None = None,
         **kwargs,
     ):
@@ -247,6 +261,9 @@ class OpFromGraph(HasInnerFunction, Op):
         inline : bool, optional
             If True, the Op's inner graph is inlined during compilation. If False (default), a
             pre-compiled function is used instead.
+        execution : Execution, optional
+            For backends that compile graphs: ``COMPILED`` compiles the inner graph as one
+            function. ``None`` leaves it to the backend.
         pullback
             Overrides the :meth:`Op.pullback` (vector-Jacobian product) method.
 
@@ -330,6 +347,11 @@ class OpFromGraph(HasInnerFunction, Op):
             raise NotImplementedError("Updates and givens are not supported")
 
         self.is_inline = inline
+        if execution is not None and not isinstance(execution, Execution):
+            raise TypeError(
+                f"execution must be an Execution or None, got {execution!r}"
+            )
+        self.execution = execution
 
         if fgraph is not None:
             # Caller supplies an already-nominalized frozen inner graph (built,
@@ -393,6 +415,7 @@ class OpFromGraph(HasInnerFunction, Op):
             assert isinstance(name, str), "name must be None or string object"
         self.name = name
         self.destroy_map = destroy_map if destroy_map is not None else {}
+        self.view_map = view_map if view_map is not None else {}
 
         self._frozen_lop = None
         self._frozen_rop = None
@@ -487,7 +510,9 @@ class OpFromGraph(HasInnerFunction, Op):
         if (
             self.fgraph != other.fgraph
             or self.is_inline != other.is_inline
+            or getattr(self, "execution", None) != getattr(other, "execution", None)
             or self.destroy_map != other.destroy_map
+            or self.view_map != other.view_map
         ):
             return False
         # Identical override objects (e.g. a clone from ``clone_with_inner_graph``)
@@ -511,12 +536,17 @@ class OpFromGraph(HasInnerFunction, Op):
         )
 
     def __hash__(self):
-        return hash((type(self), self.fgraph, self.is_inline))
+        return hash(
+            (type(self), self.fgraph, self.is_inline, getattr(self, "execution", None))
+        )
 
     def __str__(self):
         name = self.__class__.__name__ if self.name is None else self.name
         is_inline = self.is_inline
-        return f"{name}{{inline={is_inline}}}"
+        execution = getattr(self, "execution", None)
+        if execution is None:
+            return f"{name}{{inline={is_inline}}}"
+        return f"{name}{{inline={is_inline}, execution={execution.value}}}"
 
     def _combine_list_overrides(self, default_outs, custom_outs, callable_args):
         """Combines default and custom overrides into a single list of outputs."""
@@ -909,6 +939,29 @@ class OpFromGraph(HasInnerFunction, Op):
         # zip strict not specified because we are in a hot loop
         for output, variable in zip(outputs, variables):
             output[0] = variable
+
+
+@op_view_parents.register(OpFromGraph)
+def _ofg_view_parents(op, node):
+    """Besides its `view_map`: the inputs whose memory an inner output may lie in, and
+    the earlier output whose memory it shares (one inner value returned twice, or
+    views of one)."""
+    fg = op.fgraph
+    inner = view_feature(fg)
+    position = {v: k for k, v in enumerate(fg.inputs)}
+    first_output = {}  # inner root that isn't an input -> the first output in it
+    parents = []
+    for k, (io, o) in enumerate(zip(fg.outputs, node.outputs, strict=True)):
+        mine = dict.fromkeys(node.inputs[i] for i in op.view_map.get(k, ()))
+        for r in inner.view_roots(fg, io):
+            if r in position:
+                mine[node.inputs[position[r]]] = None
+            elif r in first_output:
+                mine[first_output[r]] = None
+            else:
+                first_output[r] = o
+        parents.append(tuple(mine))
+    return parents
 
 
 class FinalizedOpFromGraph(OpFromGraph):

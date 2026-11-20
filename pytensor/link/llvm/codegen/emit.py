@@ -1,0 +1,855 @@
+"""Helpers for generating code: arrays, errors, temporary memory, casts, loops."""
+
+from __future__ import annotations
+
+import math
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from pytensor.graph.basic import Constant
+from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout
+from pytensor.link.llvm.codegen.types import (
+    ScalarRepr,
+    Slot,
+    TensorRepr,
+    ir,
+    is_float,
+    is_signed,
+    itemsize,
+    memory_type,
+    value_type,
+)
+
+
+if TYPE_CHECKING:
+    from pytensor.link.llvm.codegen.call import LinkTable
+    from pytensor.link.llvm.codegen.graph import GraphFunction
+    from pytensor.link.llvm.planner import Planner
+
+
+#: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
+#: as long as one generated function has no more than the budget of them.
+STACK_TEMPORARY_BYTES = 1024
+STACK_BUDGET_BYTES = 16 * 1024
+
+# ------------------------------------------------------------------ arrays
+
+
+@dataclass
+class Array:
+    """An array inside generated code: data pointer, one i64 per length and byte stride.
+
+    Lengths and strides are constants where the type, the layout or an allocation fixes
+    them. `layout` is what is known about the strides when generating the code (default:
+    nothing); code uses it to pick loops (analysis/layout.py).
+    """
+
+    dtype: str
+    data: ir.Value
+    shape: list
+    strides: list
+    layout: Layout
+    #: the node input this memory belongs to (inputs and their views), if known
+    base: int | None = None
+    #: may code write it? Inputs may not (`store` refuses)
+    writable: bool = True
+    #: Some nodes return either a view of an input or new memory, and only the run
+    #: time knows which. For such a value, `base` is the input it may be a view of, and
+    #: `base_if` is an i1 that is true when it really is one. None means it certainly
+    #: is (if `base` is set).
+    base_if: ir.Value | None = None
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def static_shape(self):
+        """The lengths as ints, None where not constant."""
+        return [s.const_int for s in self.shape]
+
+    def with_strides(self, shape, strides, layout=None):
+        """The same memory with other lengths/strides (e.g. a broadcast view)."""
+        return self.view(self.data, shape, strides, layout)
+
+    def view(self, data, shape, strides, layout=None) -> Array:
+        """An array in the same memory: `data` points into it. It belongs to the same
+        input and is as writable as this one. `layout`: default nothing known."""
+        return Array(
+            self.dtype,
+            data,
+            list(shape),
+            list(strides),
+            unknown_layout(shape) if layout is None else layout,
+            self.base,
+            self.writable,
+            self.base_if,
+        )
+
+    # ---- elements (indices are i64 values or Python ints; nothing is bounds-checked)
+
+    def ptr(self, b, *index):
+        """Address of the element at `index` (one index per axis)."""
+        if len(index) != self.ndim:
+            raise ValueError(f"{len(index)} indices for an array with {self.ndim} axes")
+        p = self.data
+        for i, stride in zip(index, self.strides, strict=True):
+            p = advance(b, p, i, stride, self.dtype)
+        return p
+
+    def load(self, b, *index):
+        """The element at `index`, as a `Num` of the array's dtype."""
+        from pytensor.link.llvm.codegen.num import Num
+
+        return Num(b, load(b, self.dtype, self.ptr(b, *index)), self.dtype)
+
+    def store(self, b, value, *index):
+        """Write `value` to the element at `index`: a `Num` of the array's dtype, an IR
+        value of its type, or a Python number."""
+        from pytensor.link.llvm.codegen.num import Num
+
+        if isinstance(value, Num):
+            if value.dtype != self.dtype:
+                raise TypeError(
+                    f"storing a {value.dtype} into an array of {self.dtype}: convert with astype"
+                )
+            value = value.value
+        elif isinstance(value, bool | int | float):
+            value = constant(b, self.dtype, value)
+        if not self.writable:
+            raise ValueError(
+                "storing into an input: inputs are only read, unless the op may "
+                "destroy them (`writable`). Write the output (`out.allocate(shape)`)"
+            )
+        store(b, self.dtype, value, self.ptr(b, *index))
+
+    def at(self, b, i, axis: int = 0) -> Array:
+        """The sub-array at index `i` of `axis` (`a[i]`, `a[:, i]`, ...): a view with
+        one axis less, with what its layout still says."""
+        from pytensor.link.llvm.analysis.layout import remove_axis
+
+        axis = range(self.ndim)[axis]
+        keep = [a for a in range(self.ndim) if a != axis]
+        return self.view(
+            advance(b, self.data, i, self.strides[axis], self.dtype),
+            [self.shape[a] for a in keep],
+            [self.strides[a] for a in keep],
+            remove_axis(self.layout, axis, self.static_shape(), itemsize(self.dtype)),
+        )
+
+
+def c_array(dtype, data, shape, strides) -> Array:
+    """A C-contiguous array (strides from `c_strides`)."""
+    return Array(dtype, data, list(shape), list(strides), Layout.c(len(shape)))
+
+
+def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
+    """An array at `data` packed in `layout` (all axes packed; default C-contiguous)."""
+    nd = len(shape)
+    static = [n.const_int for n in shape]
+    if layout is None:
+        layout = Layout.c(nd)
+    layout = Layout.make(static, layout.order, layout.strides)
+    if not layout.fully_packed(static):
+        raise ValueError(f"can't allocate an array of layout {layout}")
+    return Array(
+        dtype,
+        data,
+        list(shape),
+        layout.stride_values(b, itemsize(dtype), shape, {}),
+        layout,
+    )
+
+
+def unknown_layout(shape) -> Layout:
+    """`Layout.unknown` for the lengths `shape` (i64 values)."""
+    return Layout.unknown([n.const_int for n in shape])
+
+
+def view_layout(a: Array, shape, strides, source) -> Layout:
+    """The layout of a view of `a` with `shape` and `strides` (i64 values) whose axis k
+    is axis `source[k]` of `a` (None: an axis of its own, e.g. a broadcast one).
+
+    An axis that keeps `a`'s stride keeps its kind, but PACKED only while the packed
+    axes inside it (in `a`'s memory order) keep their strides and lengths: a packed
+    stride is the product of those lengths. A zero stride is 0; any other is DYNAMIC."""
+    kept = {
+        k: s
+        for k, s in enumerate(source)
+        if s is not None and strides[k] is a.strides[s]
+    }
+    view_axis = {s: k for k, s in kept.items()}
+    static = a.static_shape()
+    still_packed = set()
+    for ax in reversed(a.layout.order):
+        if a.layout.strides[ax] is not PACKED:
+            break
+        if ax not in view_axis:
+            if static[ax] == 1:  # (contributes nothing to the products)
+                continue
+            break
+        still_packed.add(ax)
+        if not _same_length(shape[view_axis[ax]], a.shape[ax]):
+            break
+    kinds: list = []
+    for k, st in enumerate(strides):
+        s = kept.get(k)
+        kind = DYNAMIC if s is None else a.layout.strides[s]
+        if kind is PACKED and s not in still_packed:
+            kind = DYNAMIC
+        if kind is DYNAMIC and st.const_int == 0:
+            kind = 0
+        kinds.append(kind)
+    # own axes first; `a`'s axes in its memory order (which orders the packed ones)
+    pos = {ax: i for i, ax in enumerate(a.layout.order)}
+    order = sorted(
+        range(len(shape)), key=lambda k: (k in kept, pos.get(kept.get(k), k))
+    )
+    return Layout.make([n.const_int for n in shape], order, kinds)
+
+
+def _same_length(m, n) -> bool:
+    return m is n or (m.const_int is not None and m.const_int == n.const_int)
+
+
+def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
+    """`a` iterated over the loop `shape`: axes of static length 1 in `a` (broadcast)
+    and `zero_axes` get stride 0; the layout records that."""
+    zero = b.i64(0)
+    static = a.static_shape()
+    bcast = {
+        ax
+        for ax in range(a.ndim)
+        if ax in zero_axes or (static[ax] == 1 and shape[ax].const_int != 1)
+    }
+    strides = [zero if ax in bcast else st for ax, st in enumerate(a.strides)]
+    kinds = [0 if ax in bcast else k for ax, k in enumerate(a.layout.strides)]
+    loop_static = [n.const_int for n in shape]
+    return Array(
+        a.dtype,
+        a.data,
+        list(shape),
+        strides,
+        Layout.make(loop_static, a.layout.order, kinds),
+    )
+
+
+def c_strides(b, dtype, shape):
+    """C-contiguous byte strides for `shape` (i64 values)."""
+    strides = [None] * len(shape)
+    acc = b.i64(itemsize(dtype))
+    for a in reversed(range(len(shape))):
+        strides[a] = acc
+        acc = b.mul(acc, shape[a], nsw=True)
+    return strides
+
+
+def size(b, shape):
+    n = b.i64(1)
+    for s in shape:
+        n = b.mul(n, s, nsw=True)
+    return n
+
+
+def unpack(b, r: TensorRepr, value) -> Array:
+    """The Array of a tensor value in its representation."""
+    if r.ndim == 0:
+        return Array(r.dtype, value, [], [], Layout.c(0))
+    data = b.extract(value, 0)
+    lengths = b.extract(value, 1)
+    shape, k = [], 0
+    for s in r.shape:
+        if s is None:
+            shape.append(b.extract(lengths, k))
+            k += 1
+        else:
+            shape.append(b.i64(s))
+    passed = {}
+    if r.stride_axes:
+        st = b.extract(value, 2)
+        passed = {a: b.extract(st, k) for k, a in enumerate(r.stride_axes)}
+    strides = r.layout.stride_values(b, itemsize(r.dtype), shape, passed)
+    return Array(r.dtype, data, shape, strides, r.layout)
+
+
+def pack(b, r: TensorRepr, a: Array):
+    """A tensor value in its representation."""
+    if r.ndim == 0:
+        return a.data
+    lengths = b.aggregate(
+        ir.Type.array(ir.i64, len(r.dynamic_axes)), [a.shape[k] for k in r.dynamic_axes]
+    )
+    strides = b.aggregate(
+        ir.Type.array(ir.i64, len(r.stride_axes)), [a.strides[k] for k in r.stride_axes]
+    )
+    return b.aggregate(r.ir_type, [a.data, lengths, strides])
+
+
+def load(b, dtype, ptr):
+    """Load an element; bools become i1."""
+    v = b.load(memory_type(dtype), ptr)
+    if dtype == "bool":
+        return b.ne(v, 0)
+    return v
+
+
+def store(b, dtype, value, ptr):
+    if dtype == "bool":
+        value = b.zext(value, ir.i8)
+    b.store(value, ptr)
+
+
+def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Array:
+    """The array a kernel wrote into an output slot (static lengths stay constants;
+    with a known `layout`, only its dynamic strides are read)."""
+    nd = len(static_shape)
+    t = _slot_type(nd)
+    data = b.load(ir.ptr, b.field_ptr(t, slot, Slot.DATA))
+    lp, sp = b.field_ptr(t, slot, Slot.LENGTHS), b.field_ptr(t, slot, Slot.STRIDES)
+    shape = [
+        b.i64(s) if s is not None else b.load(ir.i64, b.gep(ir.i64, lp, a))
+        for a, s in enumerate(static_shape)
+    ]
+    if layout is None:
+        layout = Layout.unknown(static_shape)
+    else:
+        layout = Layout.make(static_shape, layout.order, layout.strides)
+    passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
+    strides = layout.stride_values(b, itemsize(dtype), shape, passed)
+    return Array(dtype, data, shape, strides, layout)
+
+
+def advance(b, p, i, stride, dtype):
+    """`p + i * stride` (`stride` in bytes), addressed in elements of `dtype`.
+
+    Loops address their elements with this: LLVM's vectorizer versions a loop on a
+    stride only known at run time by speculating that it is one *element*. With byte
+    offsets it speculates a byte stride of 1, which never holds, and the vectorized loop
+    never runs."""
+    isz = itemsize(dtype)
+    if isinstance(i, int):
+        i = b.i64(i)
+    c = stride.const_int
+    if c is not None:
+        if c % isz:
+            return b.gep_bytes(p, b.mul(i, stride, nsw=True))
+        es = c // isz
+    elif isz == 1:
+        es = stride
+    else:
+        # strides of arrays are multiples of the itemsize (validated at the boundary)
+        es = b.ashr(stride, isz.bit_length() - 1)
+    return b.gep(memory_type(dtype), p, b.mul(i, es, nsw=True))
+
+
+# ------------------------------------------------------------------ indices
+
+
+def index_bounds(var):
+    """(min, max) known of the values of the integer index variable `var` (None where
+    unknown): a constant's values, or at least 0 for an unsigned dtype."""
+    if isinstance(var, Constant):
+        if var.data.size == 0:
+            return 0, -1
+        return int(var.data.min()), int(var.data.max())
+    if var.type.dtype.startswith("uint"):
+        return 0, None
+    return None, None
+
+
+def checked_index(cg, i, n, message, bounds=(None, None)):
+    """Index `i` (i64) into an axis of length `n`: negative values wrap, out-of-range
+    ones fail with `message`. Generates only what `bounds` (`index_bounds`), a constant
+    `i` and a constant `n` don't already guarantee."""
+    b = cg.b
+    if i.const_int is not None:
+        bounds = (i.const_int, i.const_int)
+    lo, hi = bounds
+    if lo is None or lo < 0:
+        i = b.select(b.slt(i, 0), b.add(i, n), i)
+    nc = n.const_int
+    if lo is None or hi is None or nc is None or lo < -nc or hi >= nc:
+        cg.check(b.ult(i, n), message)  # also catches what is still negative
+    return i
+
+
+# ------------------------------------------------------------------ casts
+
+
+def constant(b, dtype, value):
+    if is_float(dtype):
+        return b.const_float(value_type(dtype), float(value))
+    if dtype == "bool":
+        return b.const_bool(bool(value))
+    return b.const_int(value_type(dtype), int(value))
+
+
+def _float_to_int(b, v, dst: str):
+    """Float to integer, saturating; NaN gives 0. (`fptosi`/`fptoui` are poison for
+    values out of range.)"""
+    dt = value_type(dst)
+    if is_signed(dst):
+        lo, hi = -(2.0 ** (dt.bits - 1)), 2.0 ** (dt.bits - 1)
+        low_end, high_end = -(2 ** (dt.bits - 1)), 2 ** (dt.bits - 1) - 1
+        below = b.fcmp(ir.FCmp.OLT, v, lo)
+        lower_ok = b.fcmp(ir.FCmp.OGE, v, lo)
+        convert = b.fptosi
+    else:
+        # truncation takes (-1, 0) to 0, which is in range
+        lo, hi = -1.0, 2.0**dt.bits
+        low_end, high_end = 0, 2**dt.bits - 1
+        below = b.fcmp(ir.FCmp.OLE, v, lo)
+        lower_ok = b.fcmp(ir.FCmp.OGT, v, lo)
+        convert = b.fptoui
+    above = b.fcmp(ir.FCmp.OGE, v, hi)
+    # ordered compares: NaN is neither below, above nor in range, and converts 0.0
+    in_range = b.and_(lower_ok, b.fcmp(ir.FCmp.OLT, v, hi))
+    return b.select(
+        above,
+        high_end,
+        b.select(below, low_end, convert(b.select(in_range, v, 0.0), dt)),
+    )
+
+
+def cast(b, v, src: str, dst: str):
+    """Convert a value like numpy's astype."""
+    if src == dst:
+        return v
+    st, dt = value_type(src), value_type(dst)
+    if dst == "bool":
+        if is_float(src):
+            return b.fcmp(ir.FCmp.UNE, v, 0.0)
+        return b.ne(v, 0)
+    if is_float(src) and is_float(dst):
+        return b.fpext(v, dt) if dt.bits > st.bits else b.fptrunc(v, dt)
+    if is_float(dst):
+        return b.sitofp(v, dt) if is_signed(src) else b.uitofp(v, dt)
+    if is_float(src):
+        return _float_to_int(b, v, dst)
+    # integer to integer (bool is i1, unsigned)
+    if dt.bits > st.bits:
+        return b.sext(v, dt) if is_signed(src) else b.zext(v, dt)
+    if dt.bits < st.bits:
+        return b.trunc(v, dt)
+    return v  # int8 <-> uint8
+
+
+def _slot_type(ndim):
+    from pytensor.link.llvm.codegen.types import slot_type
+
+    return slot_type(ndim)
+
+
+# ------------------------------------------------------------------ the context
+
+
+class _ScratchScope(list):
+    """The memory to give back when a `scratch_scope` ends. Each entry is either
+    (ctx, pointer, None): scratch memory to free, or (ctx, slot, ndim): an output slot
+    whose buffer (allocated by a kernel) to release."""
+
+    def __init__(self, function: bool):
+        super().__init__()
+        self.function = function
+
+
+@dataclass
+class Codegen:
+    """The state of generating one kernel's code: the builder and the kernel's
+    parameters (`ctx`, its `config` = link table), and what nested code needs (link
+    table, module, the planner of inner graphs)."""
+
+    b: ir.Builder
+    ctx: ir.Value
+    #: the kernel's config: its link table (call.py)
+    config: ir.Value
+    #: bytes of stack temporaries so far (`temp_memory`)
+    stack_bytes: int = 0
+    #: may loops run in parallel (`Options.parallel`)?
+    parallel: bool = True
+    #: the link table of the kernel being generated (call.py); None: it calls nothing
+    links: LinkTable | None = None
+    #: Decides how the nodes of an inner graph run (generated code or a kernel), for
+    #: `graph_function`. None: the code generated here can't run inner graphs.
+    planner: Planner | None = None
+    #: the module being built, and the name of the function being built in it (nested
+    #: functions are named after it)
+    module: ir.Module | None = None
+    name: str = ""
+    #: the scratch memory taken in the scopes being emitted, innermost last: what to
+    #: free at the end of each (`scratch_scope`)
+    scratch_scopes: list = field(default_factory=list)
+    _checks: int = field(default=0)
+
+    def par(self, per_element: float) -> ParallelPolicy | None:
+        """How loops over elements costing `per_element` each (`analysis/work.py`) may
+        run in parallel, or None."""
+        return (
+            ParallelPolicy(self, per_element)
+            if self.parallel and per_element > 0
+            else None
+        )
+
+    def fail(self, message: str | None):
+        """Report `message` (unless a called kernel already did) and return 1."""
+        if message is not None:
+            self.b.rt_fail(self.ctx, message)
+        self.b.ret(1)
+
+    def check(self, ok, message: str | None):
+        """Fail with `message` unless `ok` (i1). Constant conditions fold."""
+        c = ok.const_int
+        if c == 1:
+            return
+        with self.b.if_(self.b.not_(ok)):
+            self.fail(message)
+
+    def graph_function(
+        self, inputs, outputs, in_layouts, name: str = "graph"
+    ) -> GraphFunction:
+        """Prepare an inner graph (a Scan's loop body, a Blockwise's core, ...) to be
+        run from the function being generated. Run it with
+        `GraphFunction.emit_call`.
+
+        The graph goes from the variables `inputs` to the variables `outputs`.
+        `in_layouts` gives the layout of each input as it will be passed (None for
+        inputs that aren't tensors); the graph's code is specialized for them.
+
+        This emits code for the graph's constants at the current point, so call it
+        before a loop that runs the graph, not inside the loop. `name` is used to name
+        the LLVM functions of its nodes.
+
+        Raises NotImplementedError if inner graphs can't be run here (no planner)."""
+        from pytensor.link.llvm.codegen.graph import GraphFunction
+
+        if self.planner is None or self.links is None or self.module is None:
+            raise NotImplementedError("inner graphs here")
+        body = self.planner.graph(inputs, outputs, in_layouts)
+        return GraphFunction.bind(self, body, f"{self.name}_{name}")
+
+    def temp_memory(self, nbytes, escapes: bool = False):
+        """Temporary memory of `nbytes` (i64), 64-byte aligned, uninitialized.
+
+        Small memory of static size is on the stack of the function being generated:
+        LLVM sees all of it, and may keep it in registers. Everything else is scratch
+        memory of the context (`rt_scratch`). Of a static size, it is taken when the
+        function starts, like stack memory (a loop asking for it in every iteration gets
+        the same memory), and freed when the function's scope ends; else it is freed
+        when the innermost `scratch_scope` ends.
+
+        `escapes`: the memory is used after the function being generated returns (an
+        output that is a temporary of the unit around it); then it is never on the stack,
+        and the caller frees it.
+
+        Each call is a new piece of scratch: ask before a loop, not inside it."""
+        b = self.b
+        n = nbytes.const_int
+        if n is not None and not escapes:
+            p = self._stack_memory(n)
+            if p is not None:
+                return p
+        at_entry = n is not None and not escapes
+        p = b.rt_scratch(self.ctx, nbytes, at_entry=at_entry)
+        self.check(b.ne(p, b.null()), None)
+        if at_entry:
+            self.free_later(p, function=True)
+        elif not escapes:
+            self.free_later(p)
+        return p
+
+    def _stack_memory(self, n: int):
+        """Stack memory for `n` bytes, or None if it shouldn't go on the stack.
+
+        This is the rule `temp_memory` follows: memory goes on the stack if it is small
+        (at most `STACK_TEMPORARY_BYTES`) and the function hasn't used up its stack
+        budget (`STACK_BUDGET_BYTES`)."""
+        if n > STACK_TEMPORARY_BYTES:
+            return None
+        rounded = max(64, -(-n // 64) * 64)
+        if self.stack_bytes + rounded > STACK_BUDGET_BYTES:
+            return None
+        self.stack_bytes += rounded
+        return self.b.alloca(ir.Type.array(ir.i8, max(n, 1)))
+
+    def temporaries(self, sizes: dict, lives: dict) -> tuple[dict, tuple[dict, int]]:
+        """Memory for several temporary values of a known size.
+
+        * `sizes`: the size in bytes of each value ({key: bytes});
+        * `lives`: when each value is needed: from item `lives[key][0]` to item
+          `lives[key][1]` (both included).
+
+        Each value gets its own stack memory if `temp_memory` would put it on the stack
+        (the values defined first get the stack first). The other values share one
+        block of scratch memory, the arena: two values can use the same place in it if
+        they are never needed at the same time (`analysis.liveness.first_fit`).
+
+        Returns the memory of each value ({key: pointer}), and the arena's layout
+        ({key: offset in the arena}, size of the arena in bytes)."""
+        from pytensor.link.llvm.analysis.liveness import first_fit
+
+        memory = {}
+        shared = []
+        for key in sorted(sizes, key=lambda k: lives[k]):
+            p = self._stack_memory(sizes[key])
+            if p is None:
+                shared.append((*lives[key], sizes[key], key))
+            else:
+                memory[key] = p
+        offsets, nbytes = first_fit(shared)
+        if offsets:
+            arena = self.temp_memory(self.b.i64(nbytes))
+            memory.update((k, self.b.gep_bytes(arena, at)) for k, at in offsets.items())
+        return memory, (offsets, nbytes)
+
+    def free_later(self, p, function: bool = False):
+        """Free the scratch memory `p` when the innermost `scratch_scope` ends, or with
+        `function` the innermost one of the function being generated (anything else
+        than scratch is ignored when running)."""
+        scopes = [sc for sc in self.scratch_scopes if sc.function or not function]
+        if not scopes:
+            raise ValueError("scratch memory outside of a scratch_scope")
+        scopes[-1].append((self.ctx, p, None))
+
+    def release_later(self, slot, ndim: int):
+        """Release the buffer a kernel allocated into the output slot `slot`, when the
+        innermost `scratch_scope` ends."""
+        if not self.scratch_scopes:
+            raise ValueError("a buffer to release outside of a scratch_scope")
+        self.scratch_scopes[-1].append((self.ctx, slot, ndim))
+
+    @contextmanager
+    def scratch_scope(self, function: bool = False):
+        """The scratch memory taken inside is freed at its end (on the way out of the
+        code emitted inside, unless that returned; on errors the caller's mark releases
+        it). The code emitted inside must be one region of control flow: a function body
+        (`function`, also a parallel body), a loop iteration, a branch."""
+        taken = _ScratchScope(function)
+        self.scratch_scopes.append(taken)
+        try:
+            yield
+        finally:
+            self.scratch_scopes.pop()
+        if not self.b.terminated:
+            b = self.b
+            for ctx, p, ndim in reversed(taken):
+                if ndim is not None:
+                    owner = b.field_ptr(_slot_type(ndim), p, Slot.OWNER)
+                    b.rt_decref(ctx, b.load(ir.ptr, owner))
+                    continue
+                # (folds away for checked scratch, and where a view left null)
+                with b.if_(b.ne(p, b.null())):
+                    b.rt_scratch_free(ctx, p)
+
+    def temporary(
+        self, dtype, shape, layout: Layout | None = None, escapes: bool = False
+    ) -> Array:
+        """A temporary array (`temp_memory`), packed in `layout` (default C). `shape`:
+        i64 values or Python ints."""
+        b = self.b
+        shape = [b.i64(n) if isinstance(n, int) else n for n in shape]
+        nbytes = b.mul(size(b, shape), itemsize(dtype), nsw=True)
+        data = self.temp_memory(nbytes, escapes)
+        return packed_array(b, dtype, data, shape, layout)
+
+
+# ------------------------------------------------------------------ loops
+
+
+def is_contiguous(b, shape, a: Array, order=None):
+    """i1: is `a` packed over `shape` in axis `order` (outermost first; default C)? A
+    constant when the layout settles it; else checked at run time."""
+    nd = len(shape)
+    order = list(range(nd)) if order is None else list(order)
+    static = [n.const_int for n in shape]
+    lay = a.layout
+    same_order = [ax for ax in lay.order if static[ax] != 1] == [
+        ax for ax in order if static[ax] != 1
+    ]
+    if lay.fully_packed(static) and same_order:
+        return b.const_bool(True)
+    if not lay.dynamic_axes and not (lay.fully_packed(static) and same_order):
+        # the layout is fully known and isn't this one (degenerate lengths at run time
+        # just take the general path)
+        if not all(st.const_int is not None for st in a.strides):
+            return b.const_bool(False)
+    ok = b.const_bool(True)
+    expect = b.i64(itemsize(a.dtype))
+    for ax in reversed(order):
+        if static[ax] == 1:
+            continue
+        st = a.strides[ax]
+        if st.const_int is not None and expect.const_int is not None:
+            same = b.const_bool(st.const_int == expect.const_int)
+        else:
+            eq = b.eq(st, expect)
+            one = b.eq(shape[ax], 1)
+            same = b.or_(eq, one)
+        ok = b.and_(ok, same)
+        expect = b.mul(expect, shape[ax], nsw=True)
+    return ok
+
+
+def loop_order(shape, arrays) -> list[int]:
+    """The axis order (outermost first) to loop in: the memory order most arrays share
+    (by their packed axes; on a tie, the one of the later array, usually an output).
+    Identity when nothing is known."""
+    static = [n.const_int for n in shape]
+    votes = {}  # packed block (innermost first) -> (count, last position)
+    for pos, a in enumerate(arrays):
+        block = tuple(a.layout.packed_block(static))
+        if block:
+            count, _ = votes.get(block, (0, -1))
+            votes[block] = (count + len(block), pos)
+    if not votes:
+        return list(range(len(shape)))
+    block = max(votes, key=lambda k: votes[k])
+    rest = [ax for ax in range(len(shape)) if ax not in block]
+    return rest + list(reversed(block))
+
+
+# ------------------------------------------------------------------ parallel loops
+
+#: cost (analysis/work.py units) of one chunk of a parallel loop: enough to make the
+#: overhead of a parallel region (microseconds) small
+CHUNK_COST = 50_000
+#: loops cheaper than this stay serial (decided when generating the code when the
+#: shapes are static; at run time by the runtime otherwise: one chunk runs directly)
+MIN_PARALLEL_COST = 2 * CHUNK_COST
+
+
+@dataclass
+class ParallelPolicy:
+    """A loop whose iterations may run in parallel: the context, the cost of one item."""
+
+    cg: Codegen
+    per_element: float
+
+    def worth_it(self, n_elements) -> bool:
+        """False if the loop is statically too small for a parallel region."""
+        n = n_elements.const_int
+        return n is None or n * self.per_element >= MIN_PARALLEL_COST
+
+    def grain(self, b, elements_per_iteration):
+        """Iterations per chunk (i64), for iterations of `elements_per_iteration` items."""
+        per = elements_per_iteration.const_int
+        if per is not None:
+            return b.i64(
+                max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1))))
+            )
+        target = max(1, math.ceil(CHUNK_COST / self.per_element))
+        per = b.smax(elements_per_iteration, 1)
+        return b.smax(b.sdiv(target, per), 1)
+
+    def range(self, b, n, elements_per_iteration, body):
+        """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
+        chunk fail the function."""
+        with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as r:
+            # (a parallel body is a function of its own)
+            with (
+                self.cg.scratch_scope(function=True),
+                b.loop(b.sub(r.end, r.start)) as j,
+            ):
+                body(b.add(r.start, j))
+        self.cg.check(b.eq(r.result, 0), None)
+
+
+def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
+    """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
+
+    `arrays` have strides over `shape` (0 where broadcast). The loops follow memory order
+    (`loop_order`). When every array is packed in that order this is one flat loop over
+    element indices (what the vectorizer likes). The layouts decide that when they can;
+    only arrays whose layout leaves it open are checked at run time, and then both the
+    flat loop and the nest are generated.
+
+    With `par`, the loop (the flat one, or the nest's outermost) runs in chunks that may
+    run in parallel when there's enough work. Iterations must not depend on each other.
+    """
+    order = loop_order(shape, arrays)
+    if par is not None and not par.worth_it(size(b, shape)):
+        par = None
+    contig = b.const_bool(True)
+    for a in arrays:
+        contig = b.and_(contig, is_contiguous(b, shape, a, order))
+    c = contig.const_int
+    if c == 1:
+        _flat(b, shape, arrays, body, par)
+    elif c == 0:
+        _strided(b, shape, arrays, body, order, par=par)
+    else:
+        b.if_else(
+            contig,
+            lambda: _flat(b, shape, arrays, body, par),
+            lambda: _strided(b, shape, arrays, body, order, par=par),
+        )
+
+
+def _flat(b, shape, arrays, body, par=None):
+    n = size(b, shape)
+
+    def at(i):
+        body([b.gep(memory_type(a.dtype), a.data, i) for a in arrays])
+
+    if par is not None:
+        par.range(b, n, b.i64(1), at)
+        return
+    with b.loop(n) as i:
+        at(i)
+
+
+def _strided(b, shape, arrays, body, order, level=0, base=None, par=None):
+    """Loops over the axes in `order` (outermost first; may be a subset of the axes).
+    With `par`, the outermost loop runs in chunks that may run in parallel."""
+    if base is None:
+        base = [a.data for a in arrays]
+    if level == len(order):
+        body(base)
+        return
+    axis = order[level]
+
+    def at(i):
+        ptrs = [
+            advance(b, p, i, a.strides[axis], a.dtype)
+            for p, a in zip(base, arrays, strict=True)
+        ]
+        _strided(b, shape, arrays, body, order, level + 1, ptrs)
+
+    if par is not None and level == 0:
+        inner = size(b, [shape[a] for a in order[1:]])
+        par.range(b, shape[axis], inner, at)
+        return
+    with b.loop(shape[axis]) as i:
+        at(i)
+
+
+def copy(cg, src: Array, dst: Array):
+    """Copy (and convert) `src` into `dst` of the same shape."""
+    b = cg.b
+
+    def body(p):
+        store(
+            b, dst.dtype, cast(b, load(b, src.dtype, p[0]), src.dtype, dst.dtype), p[1]
+        )
+
+    for_each(b, dst.shape, [src, dst], body, cg.par(1.0))
+
+
+__all__ = [
+    "Array",
+    "Codegen",
+    "ScalarRepr",
+    "TensorRepr",
+    "advance",
+    "c_array",
+    "cast",
+    "checked_index",
+    "constant",
+    "copy",
+    "for_each",
+    "index_bounds",
+    "load",
+    "loop_order",
+    "loop_view",
+    "packed_array",
+    "store",
+]
