@@ -1522,7 +1522,8 @@ class TestJoinAndSplit:
         b = dvector("b")
         A = stack([a, b])
         B = A.T.dot(A)
-        Ha, Hb = hessian(B.sum(), [a, b])
+        with pytest.warns(DeprecationWarning, match="pytensor.scan is deprecated"):
+            Ha, Hb = hessian(B.sum(), [a, b])
 
         # Try some values
         a_v = np.random.random(4)
@@ -1541,7 +1542,8 @@ class TestJoinAndSplit:
         a = dvector("a")
         b = dvector("b")
         A = stack([a, b])
-        Ha, Hb = hessian(A.sum(), [a, b])
+        with pytest.warns(DeprecationWarning, match="pytensor.scan is deprecated"):
+            Ha, Hb = hessian(A.sum(), [a, b])
 
         # Try some values
         a_v = np.random.random(4)
