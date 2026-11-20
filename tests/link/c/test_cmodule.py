@@ -8,6 +8,7 @@ deterministic based on the input type and the op.
 import multiprocessing
 import re
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,7 +24,12 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import CLinker
-from pytensor.link.c.cmodule import GCC_compiler, ModuleCache, default_blas_ldflags
+from pytensor.link.c.cmodule import (
+    GCC_compiler,
+    ModuleCache,
+    default_blas_ldflags,
+    std_lib_dirs_and_libs,
+)
 from pytensor.link.c.exceptions import CompileError
 from pytensor.link.c.op import COp
 from pytensor.tensor.type import dvectors, vector
@@ -74,6 +80,53 @@ class MyAddVersioned(MyAdd):
 def test_compiler_error():
     with pytest.raises(CompileError), tempfile.TemporaryDirectory() as dir_name:
         GCC_compiler.compile_str("module_name", "blah", location=dir_name)
+
+
+@pytest.mark.parametrize("library", ["python3.15", ":libmissing.so.1"])
+def test_compiler_error_names_missing_library(library, capsys, tmp_path):
+    stderr = (
+        f"/opt/conda/bin/x86_64-conda-linux-gnu-ld: cannot find -l{library}: "
+        "No such file or directory\n"
+    ).encode()
+    with (
+        patch(
+            "pytensor.link.c.cmodule.output_subprocess_Popen",
+            return_value=(b"", stderr, 1),
+        ),
+        pytest.raises(CompileError),
+    ):
+        GCC_compiler.compile_str("module_name", "", location=tmp_path)
+    reported = re.findall(r"library (.*) is not found\.", capsys.readouterr().out)
+    assert reported == [library]
+
+
+@pytest.mark.parametrize(
+    "platform, expected_libs",
+    [("linux", []), ("darwin", []), ("win32", ["python314"])],
+)
+def test_std_lib_dirs_and_libs(platform, expected_libs, tmp_path, monkeypatch):
+    import setuptools._distutils.sysconfig as distutils_sysconfig
+
+    python_version = "3.14"
+    libdir = str(tmp_path / "lib")
+    config_vars = {"LIBDIR": libdir}
+    monkeypatch.setattr(distutils_sysconfig, "get_config_var", config_vars.__getitem__)
+    monkeypatch.setattr(
+        distutils_sysconfig, "get_python_inc", lambda: str(tmp_path / "include")
+    )
+    monkeypatch.setattr(
+        distutils_sysconfig,
+        "get_python_lib",
+        lambda **kwargs: str(tmp_path / "lib" / f"python{python_version}"),
+    )
+    monkeypatch.setattr(sysconfig, "get_python_version", lambda: python_version)
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(std_lib_dirs_and_libs, "data", None)
+
+    expected_dirs = [libdir]
+    if platform == "win32":
+        expected_dirs.insert(0, str(tmp_path / "libs"))
+    assert std_lib_dirs_and_libs() == (expected_libs, expected_dirs)
 
 
 def test_inter_process_cache():
