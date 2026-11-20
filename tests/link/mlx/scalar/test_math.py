@@ -56,8 +56,17 @@ def test_gammaln_edge_cases(dtype):
     x = vector("x", dtype=dtype)
     # Poles at the non-positive integers, plus inf and nan propagation. The finite
     # entries keep the test from passing on an implementation that returns inf for
-    # everything
-    x_test_value = np.array([0.0, -1.0, -2.0, np.inf, np.nan, 0.5, 4.0], dtype=dtype)
+    # everything. The powers of two and the floats just below them bound the octaves
+    # that pick a table row, and 64 is where the table hands over to Stirling's series.
+    # The edge at 2 is a zero, covered by the relative-accuracy tests around it
+    octave_edges = 2.0 ** np.arange(2, 7)
+    x_test_value = np.concatenate(
+        [
+            [0.0, -1.0, -2.0, np.inf, np.nan, 0.5],
+            octave_edges,
+            np.nextafter(octave_edges.astype(dtype), 0),
+        ]
+    ).astype(dtype)
 
     compare_mlx_and_py([x], [pt.gammaln(x)], [x_test_value])
 
@@ -66,15 +75,15 @@ def test_gammaln_edge_cases(dtype):
     "low, high",
     [
         (0.5, 20.0),
-        # Below 0.5 the argument must be shifted up by the recurrence rather than
-        # reflected: reflection would route it through mx.sin, which is float32-accurate
-        # whatever the input dtype, and that alone costs seven orders of magnitude
+        # Small positive arguments must be shifted up by the recurrence rather than
+        # reflected: reflection would route them through mx.sin, which is
+        # float32-accurate whatever the input dtype
         (1e-3, 0.5),
     ],
     ids=["above-half", "below-half"],
 )
 def test_gammaln_float64_precision(low, high):
-    # MLX weak-types Python floats to float32, which would silently pin the Lanczos
+    # MLX weak-types Python floats to float32, which would silently pin the series
     # coefficients (and so the whole result) to float32 accuracy. float64 lives on
     # the CPU stream, so the dispatch is exercised directly rather than through a
     # compiled function.
@@ -100,6 +109,22 @@ def _lgamma_near_one(x):
 def _lgamma_near_two(x):
     # lgamma(x) = lgamma(x - 1) + log(x - 1)
     return _lgamma_near_one(x - 1.0) + np.log1p(x - 2.0)
+
+
+@pytest.mark.parametrize(
+    "zero, reference",
+    [(1.0, _lgamma_near_one), (2.0, _lgamma_near_two)],
+    ids=["one", "two"],
+)
+def test_gammaln_float64_relative_accuracy_near_zeros(zero, reference):
+    offsets = np.geomspace(1e-12, 1e-2, 50)
+    x_test_value = zero + np.concatenate([-offsets, offsets])
+
+    with mlx.stream(mlx.cpu):
+        gammaln = funcify_from_graph(pt.gammaln, "float64")
+        res = np.asarray(gammaln(mlx.array(x_test_value, dtype=mlx.float64)))
+
+    np.testing.assert_allclose(res, reference(x_test_value), rtol=1e-14, atol=0.0)
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"], ids=str)

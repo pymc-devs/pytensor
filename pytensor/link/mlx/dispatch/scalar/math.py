@@ -1,3 +1,5 @@
+from functools import cache
+
 import mlx.core as mx
 import numpy as np
 
@@ -53,6 +55,7 @@ def _flat(table):
 
 # The panels cover [1, 64), where Stirling's series takes over
 _TABLE_END = 64.0
+_STIRLING = tuple(float(c) for c in gamma_tables.STIRLING)
 _STIRLING32 = gamma_tables.STIRLING32
 _DSTIRLING32 = _STIRLING32 * np.arange(1, 2 * _STIRLING32.size, 2)
 
@@ -211,6 +214,94 @@ def _pi_cot_pi(z, const):
     return const(np.pi) / mx.tan(const(np.pi) * (z - mx.round(z)))
 
 
+@cache
+def _lgamma_table():
+    return mx.array(gamma_tables.LGAMMA, dtype=mx.float64)
+
+
+def _horner(coeffs, t, const):
+    out = const(coeffs[-1])
+    for coeff in reversed(coeffs[:-1]):
+        out = out * t + const(coeff)
+    return out
+
+
+# A float64 y in [1, 64) has biased exponent 1023 + e for its octave e, and the top
+# five bits of its mantissa are its panel within the octave. So y's bits shifted right
+# by 47 are 32 * (1023 + e) + panel, and the 47 bits below are its position in the
+# panel. Reading them directly needs no float-to-int cast, which would be
+# indistinguishable in the compiled graph from MLX copying the dispatch's input, the
+# thing test_dispatch_does_not_copy_its_input guards against.
+_PANEL_SHIFT = 47
+_ROW_OFFSET = 1023 << 5
+_POSITION_MASK = (1 << _PANEL_SHIFT) - 1
+_ONE_BITS = 1023 << 52
+
+
+def _int64(value):
+    return mx.array(value, dtype=mx.int64)
+
+
+def _panel_series(table, y, const):
+    """The series of the panel of ``table`` holding each ``y``, all in ``[1, 64)``."""
+    y_bits = mx.view(y, mx.int64)
+    row = mx.right_shift(y_bits, _int64(_PANEL_SHIFT)) - _int64(_ROW_OFFSET)
+    # The position in the panel moved to the top of the mantissa of 1.0 is exactly
+    # 1 + t for t in [0, 1), so s = 2 t - 1 = 2 (1 + t) - 3 is exact
+    position = mx.left_shift(
+        mx.bitwise_and(y_bits, _int64(_POSITION_MASK)), _int64(52 - _PANEL_SHIFT)
+    )
+    one_plus_t = mx.view(mx.bitwise_or(position, _int64(_ONE_BITS)), mx.float64)
+    s = const(2.0) * one_plus_t - const(3.0)
+    rows = mx.take(table, row, axis=0)
+
+    width = table.shape[1]
+    out = rows[..., width - 1]
+    for k in range(width - 2, -1, -1):
+        out = out * s + rows[..., k]
+    return out
+
+
+def _lgamma_positive_double(x, const):
+    """``lgamma(x)`` in float64 for ``x > 0``, from the panels on ``[1, 64)``."""
+    one, two, table_end = const(1.0), const(2.0), const(_TABLE_END)
+
+    # Below 1 the argument shifts up by one, lgamma(x) = lgamma(x + 1) - log(x). The
+    # table holds lgamma(y) / ((y - 1) (y - 2)) on [1, 4), so the zeros at 1 and 2 keep
+    # their relative accuracy
+    small = x < one
+    y = mx.where(small, x + one, x)
+    f = _panel_series(_lgamma_table(), mx.where(y < table_end, y, one), const)
+    zeros = mx.where(small, x * (x - one), (x - one) * (x - two))
+    table_value = mx.where(
+        x >= const(4.0),
+        f,
+        zeros * f - mx.where(small, mx.log(x), const(0.0)),
+    )
+
+    # clamped so that the branch the where discards stays finite
+    big = mx.where(x >= table_end, x, table_end)
+    inv = one / big
+    stirling = (
+        (big - const(0.5)) * (mx.log(big) - one)
+        + const(gamma_tables.STIRLING_C)
+        + inv * _horner(_STIRLING, inv * inv, const)
+    )
+    return mx.where(x >= table_end, stirling, table_value)
+
+
+def _gammaln_double(z, const):
+    reflect = z <= const(0.0)
+    positive = _lgamma_positive_double(mx.where(reflect, const(1.0) - z, z), const)
+    out = mx.where(
+        reflect,
+        const(np.log(np.pi)) - _log_abs_sin_pi(z, const) - positive,
+        positive,
+    )
+    # both limits are +inf, which the reflection turns into NaN at -inf
+    return mx.where(mx.isinf(z), const(np.inf), out)
+
+
 @mlx_funcify.register(Sigmoid)
 def mlx_funcify_Sigmoid(op, node, **kwargs):
     dtype = node.outputs[0].dtype
@@ -258,31 +349,22 @@ def mlx_funcify_GammaLn(op, node, **kwargs):
         fast = _metal_math_call("gammaln", mx.asarray(x).astype(out_dtype))
         if fast is not None:
             return fast
+        if z.dtype == mx.float64:
+            return _gammaln_double(z, const).astype(out_dtype)
 
-        double = z.dtype == mx.float64
         half = const(0.5)
         one = const(1.0)
-
-        # In double precision, small positive arguments go up by one via
-        # lgamma(x) = lgamma(x + 1) - log(x) rather than through the reflection formula
-        # below. Both are exact as mathematics, but reflection would route them through
-        # mx.sin, which is only float32-accurate whatever the input dtype. Single
-        # precision has nothing to protect, and the extra log costs a pass
-        shift_up = (z > const(0.0)) & (z < half) if double else None
-        y = mx.where(shift_up, z + one, z) if double else z
-        reflect = y < half
+        reflect = z < half
 
         # Evaluating the series on the reflected argument means one polynomial
         # covers both branches, and neither can produce a NaN the other must mask
-        w = mx.where(reflect, one - y, y) - one
+        w = mx.where(reflect, one - z, z) - one
         lanczos = _lanczos_log_gamma(w, const)
         out = mx.where(
             reflect,
-            const(np.log(np.pi)) - _log_abs_sin_pi(y, const) - lanczos,
+            const(np.log(np.pi)) - _log_abs_sin_pi(z, const) - lanczos,
             lanczos,
         )
-        if double:
-            out = mx.where(shift_up, out - mx.log(z), out)
 
         # The series returns NaN at +/-inf, where both limits are +inf
         out = mx.where(mx.isinf(z), const(np.inf), out)
@@ -314,7 +396,10 @@ def mlx_funcify_Psi(op, node, **kwargs):
 
         # psi(y) = psi(y + n) - sum 1/(y + i), which holds for every y, so the shift
         # is applied unconditionally. Testing whether each element still needs it
-        # would cost a comparison and a select per iteration and buy nothing
+        # would cost a comparison and a select per iteration and buy nothing. The
+        # Chebyshev panels the Metal kernel reads would be more accurate next to the
+        # zero at 1.4616, but on the vectorized path their gather costs more than the
+        # divisions here
         one = const(1.0)
         shift = -one / y
         for i in range(1, n_shifts):
@@ -322,10 +407,7 @@ def mlx_funcify_Psi(op, node, **kwargs):
         y = y + const(float(n_shifts))
 
         r2 = one / (y * y)
-        series = const(coeffs[-1])
-        for coeff in reversed(coeffs[:-1]):
-            series = const(coeff) + series * r2
-        out = shift + mx.log(y) - const(0.5) / y - series * r2
+        out = shift + mx.log(y) - const(0.5) / y - _horner(coeffs, r2, const) * r2
         out = mx.where(reflect, out - _pi_cot_pi(z, const), out)
 
         return out.astype(out_dtype)
