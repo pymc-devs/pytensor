@@ -6,6 +6,11 @@ use super::*;
 use crate::abi::OutputMode::{Allocated, Provided};
 use crate::testing::{In, Out, call};
 
+/// The faer kernels' layouts of outputs with `ndims` axes each.
+fn layouts(ndims: &[usize]) -> Vec<Layout> {
+    faer_layouts(ndims, &[])
+}
+
 /// A general matrix whose LU factorization pivots; its determinant is -16.
 const A: [f64; 9] = [2.0, 1.0, 1.0, 4.0, -6.0, 0.0, -2.0, 7.0, 2.0];
 /// A Cholesky factor, and S = L L^T, symmetric positive definite.
@@ -99,6 +104,7 @@ fn dot_of_vectors_and_matrices() {
         let kernel = Dot::<f64> {
             parallel: false,
             mode,
+            layouts: layouts(&[1]),
             element: PhantomData,
         };
         let r = call(&kernel, &[x, v], vec![Out::new::<f64>(mode, &[5])]).unwrap();
@@ -108,6 +114,7 @@ fn dot_of_vectors_and_matrices() {
     let kernel = Dot::<f64> {
         parallel: false,
         mode: Provided,
+        layouts: layouts(&[1]),
         element: PhantomData,
     };
     let r = call(
@@ -119,6 +126,7 @@ fn dot_of_vectors_and_matrices() {
     let kernel = Dot::<f64> {
         parallel: false,
         mode: Allocated,
+        layouts: layouts(&[2]),
         element: PhantomData,
     };
     let at = t(&a, 5, 3);
@@ -143,6 +151,7 @@ fn cholesky_and_solve_triangular() {
             let kernel = Cholesky::<f64> {
                 parallel: false,
                 mode,
+                layouts: layouts(&[2]),
                 lower,
                 element: PhantomData,
             };
@@ -161,6 +170,7 @@ fn cholesky_and_solve_triangular() {
     let kernel = Cholesky::<f64> {
         parallel: false,
         mode: Provided,
+        layouts: layouts(&[2]),
         lower: true,
         element: PhantomData,
     };
@@ -184,6 +194,7 @@ fn cholesky_and_solve_triangular() {
             let kernel = SolveTriangular::<f64> {
                 parallel: false,
                 mode,
+                layouts: layouts(&[1]),
                 lower,
                 unit_diagonal,
                 element: PhantomData,
@@ -200,6 +211,7 @@ fn cholesky_and_solve_triangular() {
     let kernel = SolveTriangular::<f64> {
         parallel: false,
         mode: Provided,
+        layouts: layouts(&[1]),
         lower: true,
         unit_diagonal: false,
         element: PhantomData,
@@ -225,6 +237,7 @@ fn solve() {
             let kernel = Solve::<f64> {
                 parallel: false,
                 mode,
+                layouts: layouts(&[1]),
                 assume,
                 element: PhantomData,
             };
@@ -240,6 +253,7 @@ fn solve() {
         let kernel = Solve::<f64> {
             parallel: false,
             mode: Provided,
+            layouts: layouts(&[2]),
             assume,
             element: PhantomData,
         };
@@ -265,6 +279,7 @@ fn solve() {
             let kernel = Solve::<f64> {
                 parallel: false,
                 mode: Provided,
+                layouts: layouts(&[1]),
                 assume,
                 element: PhantomData,
             };
@@ -277,6 +292,7 @@ fn solve() {
     let kernel = Solve::<f32> {
         parallel: false,
         mode: Allocated,
+        layouts: layouts(&[1]),
         assume: Assume::General,
         element: PhantomData,
     };
@@ -310,6 +326,7 @@ fn cholesky_solve_reads_one_triangle() {
             let kernel = CholeskySolve::<f64> {
                 parallel: false,
                 mode,
+                layouts: layouts(&[1]),
                 lower,
                 element: PhantomData,
             };
@@ -330,6 +347,7 @@ fn inverse() {
         let kernel = MatrixInverse::<f64> {
             parallel: false,
             mode,
+            layouts: layouts(&[2]),
             element: PhantomData,
         };
         let r = call(&kernel, &[x], vec![Out::new::<f64>(mode, &[3, 3])]).unwrap();
@@ -338,6 +356,7 @@ fn inverse() {
     let kernel = MatrixInverse::<f64> {
         parallel: false,
         mode: Provided,
+        layouts: layouts(&[2]),
         element: PhantomData,
     };
     let r = call(
@@ -366,6 +385,7 @@ fn determinants() {
         let kernel = Det::<f64> {
             parallel: false,
             mode,
+            layouts: layouts(&[0]),
             element: PhantomData,
         };
         let r = call(&kernel, &[x], vec![Out::new::<f64>(mode, &[])]).unwrap();
@@ -374,6 +394,7 @@ fn determinants() {
     let kernel = SLogDet::<f64> {
         parallel: false,
         modes: [Provided, Allocated],
+        layouts: layouts(&[0, 0]),
         element: PhantomData,
     };
     let outputs = || vec![Out::provided::<f64>(&[]), Out::allocated::<f64>(0)];
@@ -390,6 +411,7 @@ fn determinants() {
     let kernel = Det::<f64> {
         parallel: false,
         mode: Allocated,
+        layouts: layouts(&[0]),
         element: PhantomData,
     };
     let r = call(
@@ -430,6 +452,7 @@ fn lu_factor() {
         let kernel = LUFactor::<f64> {
             parallel: false,
             modes: [mode, mode],
+            layouts: layouts(&[2, 1]),
             element: PhantomData,
         };
         let outputs = vec![Out::new::<f64>(mode, &[3, 3]), Out::new::<i32>(mode, &[3])];
@@ -443,6 +466,7 @@ fn lu_factor() {
     let kernel = LUFactor::<f64> {
         parallel: false,
         modes: [Provided, Provided],
+        layouts: layouts(&[2, 1]),
         element: PhantomData,
     };
     let outputs = vec![Out::provided::<f64>(&[2, 2]), Out::provided::<i32>(&[2])];
@@ -457,6 +481,7 @@ fn lu_in_its_three_forms() {
         let kernel = LU::<f64> {
             parallel: false,
             modes: vec![mode; 3],
+            layouts: layouts(&[2, 2, 2]),
             form: LuForm::Matrix,
             element: PhantomData,
         };
@@ -477,6 +502,7 @@ fn lu_in_its_three_forms() {
     let kernel = LU::<f64> {
         parallel: false,
         modes: vec![Provided, Allocated, Provided],
+        layouts: layouts(&[1, 2, 2]),
         form: LuForm::Indices,
         element: PhantomData,
     };
@@ -497,6 +523,7 @@ fn lu_in_its_three_forms() {
     let kernel = LU::<f64> {
         parallel: false,
         modes: vec![Allocated; 2],
+        layouts: layouts(&[2, 2]),
         form: LuForm::PermuteL,
         element: PhantomData,
     };
@@ -518,6 +545,7 @@ fn pivots_to_permutations() {
     for (inverse, expected) in [(true, [1i64, 2, 0]), (false, [2, 0, 1])] {
         let kernel = PivotToPermutations::<i32> {
             mode: Provided,
+            layouts: layouts(&[1]),
             inverse,
             element: PhantomData,
         };
@@ -529,6 +557,7 @@ fn pivots_to_permutations() {
         assert_eq!(r.unwrap()[0].values::<i64>(), expected);
         let kernel = PivotToPermutations::<i64> {
             mode: Allocated,
+            layouts: layouts(&[1]),
             inverse,
             element: PhantomData,
         };
@@ -538,6 +567,7 @@ fn pivots_to_permutations() {
     }
     let kernel = PivotToPermutations::<i32> {
         mode: Provided,
+        layouts: layouts(&[1]),
         inverse: true,
         element: PhantomData,
     };
@@ -558,6 +588,7 @@ fn eigh() {
         let kernel = Eigh::<f64> {
             parallel: false,
             modes: vec![mode; 2],
+            layouts: layouts(&[1, 2]),
             lower: true,
             vectors: true,
             element: PhantomData,
@@ -575,6 +606,7 @@ fn eigh() {
     let kernel = Eigh::<f64> {
         parallel: false,
         modes: vec![Allocated],
+        layouts: layouts(&[1]),
         lower: false,
         vectors: false,
         element: PhantomData,
@@ -596,6 +628,7 @@ fn svd() {
             let kernel = Svd::<f64> {
                 parallel: false,
                 modes: vec![mode; 3],
+                layouts: layouts(&[2, 1, 2]),
                 full_matrices: true,
                 compute_uv: true,
                 element: PhantomData,
@@ -625,6 +658,7 @@ fn svd() {
         let kernel = Svd::<f64> {
             parallel: false,
             modes: vec![Allocated; 3],
+            layouts: layouts(&[2, 1, 2]),
             full_matrices: false,
             compute_uv: true,
             element: PhantomData,
@@ -649,6 +683,7 @@ fn svd() {
         let kernel = Svd::<f64> {
             parallel: false,
             modes: vec![Provided],
+            layouts: layouts(&[1]),
             full_matrices: true,
             compute_uv: false,
             element: PhantomData,
@@ -671,6 +706,7 @@ fn qr() {
             let kernel = Qr::<f64> {
                 parallel: false,
                 modes: vec![mode; 2],
+                layouts: layouts(&[2, 2]),
                 mode: QrMode::Full,
                 element: PhantomData,
             };
@@ -693,6 +729,7 @@ fn qr() {
         let kernel = Qr::<f64> {
             parallel: false,
             modes: vec![Allocated; 2],
+            layouts: layouts(&[2, 2]),
             mode: QrMode::Economic,
             element: PhantomData,
         };
@@ -710,6 +747,7 @@ fn qr() {
         let kernel = Qr::<f64> {
             parallel: false,
             modes: vec![Provided],
+            layouts: layouts(&[2]),
             mode: QrMode::R,
             element: PhantomData,
         };
@@ -728,6 +766,7 @@ fn pinv() {
         let kernel = MatrixPinv::<f64> {
             parallel: false,
             mode,
+            layouts: layouts(&[2]),
             hermitian: false,
             element: PhantomData,
         };
@@ -739,6 +778,7 @@ fn pinv() {
     let kernel = MatrixPinv::<f64> {
         parallel: false,
         mode: Provided,
+        layouts: layouts(&[2]),
         hermitian: true,
         element: PhantomData,
     };
@@ -757,6 +797,7 @@ fn empty_matrices() {
         &Det::<f64> {
             parallel: false,
             mode: Provided,
+            layouts: layouts(&[0]),
             element: PhantomData,
         },
         &[empty(0, 0)],
@@ -767,6 +808,7 @@ fn empty_matrices() {
         &MatrixInverse::<f64> {
             parallel: false,
             mode: Allocated,
+            layouts: layouts(&[2]),
             element: PhantomData,
         },
         &[empty(0, 0)],
@@ -776,6 +818,7 @@ fn empty_matrices() {
     let kernel = Eigh::<f64> {
         parallel: false,
         modes: vec![Allocated; 2],
+        layouts: layouts(&[1, 2]),
         lower: true,
         vectors: true,
         element: PhantomData,
@@ -789,6 +832,7 @@ fn empty_matrices() {
     let kernel = Svd::<f64> {
         parallel: false,
         modes: vec![Allocated; 3],
+        layouts: layouts(&[2, 1, 2]),
         full_matrices: true,
         compute_uv: true,
         element: PhantomData,
@@ -806,6 +850,7 @@ fn empty_matrices() {
     let kernel = Qr::<f64> {
         parallel: false,
         modes: vec![Allocated; 2],
+        layouts: layouts(&[2, 2]),
         mode: QrMode::Full,
         element: PhantomData,
     };
@@ -817,6 +862,7 @@ fn empty_matrices() {
     let kernel = MatrixPinv::<f64> {
         parallel: false,
         mode: Allocated,
+        layouts: layouts(&[2]),
         hermitian: false,
         element: PhantomData,
     };

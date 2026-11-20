@@ -11,8 +11,9 @@
 //!   context of a call;
 //! * `jit`, `target`: the JIT and LLVM setup; `perf`: perf maps;
 //! * `math`, `random`, `parallel`: what generated code calls;
-//! * `kernel`: what Rust kernels are written with; `linalg`, `sort`, `interp::kernels`:
-//!   the kernels; `testing`: calling them in tests.
+//! * `kernel`: what Rust kernels are written with, `layout`: the layouts of their
+//!   inputs and outputs; `linalg`, `sort`: the kernels; `testing`: calling them in
+//!   tests.
 
 use pyo3::prelude::*;
 
@@ -23,6 +24,7 @@ pub mod interp;
 pub mod ir;
 pub mod jit;
 pub mod kernel;
+pub mod layout;
 pub mod linalg;
 pub mod math;
 pub mod parallel;

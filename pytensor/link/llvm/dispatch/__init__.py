@@ -16,6 +16,8 @@ see codegen/interface.py). Importing this package registers them all.
 * `ofg`: compiled units (OpFromGraph), which run their inner graph.
 """
 
+# (the Rust kernels say the layouts of what they compute: `llvm_layout` of their ops)
+import pytensor.link.llvm.kernels.rust  # noqa: F401
 from pytensor.link.llvm.dispatch import (
     advanced,
     basic,

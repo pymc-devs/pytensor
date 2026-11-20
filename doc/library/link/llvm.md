@@ -106,9 +106,10 @@ Layouts are claims the code relies on (packed strides aren't passed, they're com
 so they come only from how a value is produced:
 
 * new memory has the layout the op's `llvm_layout` declares (default C-contiguous;
-  Elemwise follows its inputs); Rust kernels and Scan allocate C-contiguous, graph
-  outputs the caller provides are C-contiguous, constants are stored in their own
-  memory order (packed, else C);
+  Elemwise follows its inputs); for an op with a Rust kernel that is the layout the
+  kernel chose (the faer kernels: column-major; Sort: its input's order where known),
+  Scan allocates C-contiguous, graph outputs the caller provides are C-contiguous,
+  constants are stored in their own memory order (packed, else C);
 * a view's layout follows from its input's, as the op's `llvm_layout` declares it
   (DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...; helpers in analysis/layout.py); a
   view nothing is declared for is DYNAMIC;
@@ -265,9 +266,11 @@ How an output comes to be follows from the op and the types, not from the emitte
 The one thing an op's implementation declares is the layout of each output, by a
 dispatch per op: `llvm_layout(op, node, in_layouts) -> [Layout | None]` (section 1a;
 `None`: the default, C-contiguous for new memory and DYNAMIC for something that may be
-a view). It describes the output whichever way the emitter produces it. Rust kernels
-say the same about theirs in Rust, next to the kernel (`Kernel.outputs`); a numba
-kernel returns new memory of unknown layout. Declarations are binding:
+a view). It describes the output whichever way the emitter produces it. A Rust kernel
+is made for the layouts of its inputs and chooses the layouts of its outputs then, in
+Rust, next to the kernel (`Kernel::output_layouts`); `llvm_layout` of its op says
+what it chose (`kernels/rust.py`). A numba kernel allocates its outputs in the declared
+layouts. Declarations are binding:
 
 * provided: whoever provides the memory provides it in the declared layout. Arena
   memory can have any packed order. A unit's (or program's) provided output has its
@@ -530,13 +533,17 @@ reference each, released when dropped); raw `PtBuffer*`s only exist in `PtArray`
 at the C and numpy boundaries.
 
 **Rust kernels** are written with `src/kernel.rs`: a kernel is a type holding its
-parameters that implements `Kernel` (`arity`, and `run(ctx, args)`), and `entry::<K>`
-is its function with the ABI above, with a `K` as its config. Writing one needs no
-`unsafe`. `Args` hands out the inputs as `PtArrayRef`s and the outputs as `OutSlot`s,
-and typed arrays on top (`Array<T>`, `ArrayMut<T>`: also as faer matrices, or lane by
-lane along an axis). Asking for input `i` as an array of `T` checks its dtype; asking
-for an output checks its dtype, number of axes, and that it is provided or to be
-returned as the kernel's mode says; `entry` checks the number of arguments. A kernel
+parameters that implements `Kernel` (`arity`, `output_layouts`, and `run(ctx, args)`),
+and `entry::<K>` is its function with the ABI above, with a `K` as its config. Writing
+one needs no `unsafe`. A kernel is made for the layouts of its inputs (and the number
+of axes of its outputs), and chooses the layouts of its outputs then
+(`output_layouts`, packed); the planner chooses whether each output is provided or
+allocated (its mode). `Args` hands out the inputs as `PtArrayRef`s and the outputs as
+`OutSlot`s, and typed arrays on top (`Array<T>`, `ArrayMut<T>`: also as faer
+matrices, or lane by lane along an axis). Asking for input `i` as an array of `T`
+checks its dtype; asking for an output checks its dtype, number of axes, and that it
+is provided or to be returned as the kernel's mode says, and allocates it in its
+layout; `entry` checks the number of arguments. A kernel
 called with other arguments than it was made for fails with an error, and a panic is
 caught and reported as one: kernels are called from generated code, whose frames
 can't be unwound. One kernel keeps raw pointers of its own: the hand-vectorized

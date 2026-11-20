@@ -3,9 +3,11 @@
 `rust_kernel(op, node, in_layouts, linalg_parallel)` returns a
 `pytensor_llvm.interp.RustKernel` (function address + config) or None when the node has
 no Rust kernel; `in_layouts` are the inputs' layouts (analysis/layout.py; None where
-unknown). A kernel declares how it produces its outputs and in which layouts
-(`Kernel.outputs`, in Rust next to the kernel; the counterpart of `node_outputs` for
-generated code): `rust_kernel_outputs` reads that.
+unknown). Each kernel is made for its inputs' layouts and the number of axes of its
+outputs (`made_for`), and chooses the layouts of its outputs then
+(`Kernel::output_layouts`, in Rust next to the kernel; the counterpart of
+`node_outputs` for generated code). Whether an output is provided or allocated is
+decided here (`fresh_mode`). `rust_kernel_outputs` reads both back.
 """
 
 from __future__ import annotations
@@ -14,19 +16,29 @@ from functools import singledispatch
 
 import numpy as np
 
-from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.signature import Output, OutputMode
 from pytensor.link.llvm.codegen.types import repr_of
-from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot
-from pytensor.tensor.shape import SpecifyShape
 
 
 def interp():
     from pytensor_llvm import interp
 
     return interp
+
+
+def made_for(node, in_layouts) -> tuple[list, list[int]]:
+    """What every kernel is made for, its last two arguments: the layouts of the
+    inputs (`Layout.to_spec`, None where unknown) and the number of axes of each
+    output. It chooses the layouts of its outputs from them."""
+    from pytensor.link.llvm.codegen.signature import known_layouts
+
+    ins = [
+        None if lay is None else lay.to_spec()
+        for lay in known_layouts(node, in_layouts)
+    ]
+    return ins, [o.type.ndim for o in node.outputs]
 
 
 def fresh_mode(out):
@@ -37,56 +49,26 @@ def fresh_mode(out):
 
 @singledispatch
 def rust_kernel(op, node, in_layouts=None, linalg_parallel=False):
-    """A Rust kernel for `node`, or None. The kernel chooses how its outputs are
-    produced and declares it (`Kernel.outputs`, next to the kernel in Rust).
+    """A Rust kernel for `node`, or None. It is made for the inputs' layouts, and
+    chooses the layouts of its outputs then (`Kernel::output_layouts`, next to the
+    kernel in Rust).
 
     `linalg_parallel`: may the linear algebra kernels (faer) use the thread pool? (The
     linker's option of that name.)"""
     return None
 
 
-def rust_kernel_outputs(kernel, node, in_layouts) -> list[Output]:
-    """What `kernel` declares about its outputs, as the `Output`s of a signature."""
-    from pytensor.link.llvm.codegen.signature import known_layouts
-
-    ins = [
-        None if lay is None else lay.to_spec()
-        for lay in known_layouts(node, in_layouts)
-    ]
-    decls = kernel.outputs(ins, [o.type.ndim for o in node.outputs])
+def rust_kernel_outputs(kernel, node) -> list[Output]:
+    """What `kernel` declares about the outputs of `node` (it chose their layouts when
+    it was made for its inputs' layouts), as the `Output`s of a signature: new memory,
+    provided or allocated by the kernel."""
     outs = []
-    for o, (mode, view_of, spec) in zip(node.outputs, decls, strict=True):
+    for o, (mode, spec) in zip(node.outputs, kernel.outputs(), strict=True):
         shape = tuple(None if s is None else int(s) for s in o.type.shape)
         r = repr_of(o.type, Layout.from_spec(spec, shape))
-        # (a kernel says what it does: it allocates, or returns a view of one input)
-        if mode == "provided":
-            outs.append(Output(r, OutputMode.PROVIDED))
-        else:
-            outs.append(
-                Output(r, OutputMode.RETURNED, (view_of,) if mode == "view" else ())
-            )
+        mode = OutputMode.PROVIDED if mode == "provided" else OutputMode.RETURNED
+        outs.append(Output(r, mode))
     return outs
-
-
-@rust_kernel.register(DimShuffle)
-def _(op, node, in_layouts=None, linalg_parallel=False):
-    return interp().DimShuffle([None if o == "x" else int(o) for o in op.new_order])
-
-
-@rust_kernel.register(ViewOp)
-@rust_kernel.register(SpecifyShape)
-def _(op, node, in_layouts=None, linalg_parallel=False):
-    from pytensor.link.llvm.codegen.types import is_absent
-
-    if any(not is_absent(i.type) for i in node.inputs[1:]):
-        return None  # lengths to check: generated code
-    return interp().DimShuffle(list(range(node.outputs[0].type.ndim)))
-
-
-@rust_kernel.register(DeepCopyOp)
-def _(op, node, in_layouts=None, linalg_parallel=False):
-    out = node.outputs[0]
-    return interp().Copy(fresh_mode(out), np.dtype(out.type.dtype))
 
 
 @rust_kernel.register(Dot)
@@ -97,7 +79,13 @@ def _(op, node, in_layouts=None, linalg_parallel=False):
         return None
     if not (a.type.dtype == b.type.dtype == out.type.dtype in ("float64", "float32")):
         return None
-    return interp().Dot(fresh_mode(out), np.dtype(out.type.dtype), linalg_parallel)
+    dt = np.dtype(out.type.dtype)
+    return interp().Dot(
+        fresh_mode(out),
+        dt,
+        linalg_parallel,
+        *made_for(node, in_layouts),
+    )
 
 
 def fresh_modes(node):
@@ -154,6 +142,7 @@ def _register_more():
             np.dtype(x.type.dtype),
             axis,
             op.kind in ("mergesort", "stable"),
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(Cholesky)
@@ -162,7 +151,11 @@ def _register_more():
         if dt is None or node.inputs[0].type.ndim != 2:
             return None
         return interp().Cholesky(
-            fresh_mode(node.outputs[0]), dt, bool(op.lower), linalg_parallel
+            fresh_mode(node.outputs[0]),
+            dt,
+            bool(op.lower),
+            linalg_parallel,
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(SolveTriangular)
@@ -180,6 +173,7 @@ def _register_more():
             bool(op.lower),
             bool(op.unit_diagonal),
             linalg_parallel,
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(Solve)
@@ -192,7 +186,12 @@ def _register_more():
         if dt is None or assume_a is None:
             return None
         return interp().Solve(
-            fresh_mode(node.outputs[0]), dt, assume_a, bool(op.lower), linalg_parallel
+            fresh_mode(node.outputs[0]),
+            dt,
+            assume_a,
+            bool(op.lower),
+            linalg_parallel,
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(CholeskySolve)
@@ -201,7 +200,11 @@ def _register_more():
         if dt is None:
             return None
         return interp().CholeskySolve(
-            fresh_mode(node.outputs[0]), dt, bool(op.lower), linalg_parallel
+            fresh_mode(node.outputs[0]),
+            dt,
+            bool(op.lower),
+            linalg_parallel,
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(MatrixInverse)
@@ -211,7 +214,10 @@ def _register_more():
             None
             if dt is None
             else interp().MatrixInverse(
-                fresh_mode(node.outputs[0]), dt, linalg_parallel
+                fresh_mode(node.outputs[0]),
+                dt,
+                linalg_parallel,
+                *made_for(node, in_layouts),
             )
         )
 
@@ -221,7 +227,12 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().Det(fresh_mode(node.outputs[0]), dt, linalg_parallel)
+            else interp().Det(
+                fresh_mode(node.outputs[0]),
+                dt,
+                linalg_parallel,
+                *made_for(node, in_layouts),
+            )
         )
 
     @rust_kernel.register(SLogDet)
@@ -230,7 +241,12 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().SLogDet(fresh_modes(node), dt, linalg_parallel)
+            else interp().SLogDet(
+                fresh_modes(node),
+                dt,
+                linalg_parallel,
+                *made_for(node, in_layouts),
+            )
         )
 
     @rust_kernel.register(LUFactor)
@@ -239,7 +255,12 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().LUFactor(fresh_modes(node), dt, linalg_parallel)
+            else interp().LUFactor(
+                fresh_modes(node),
+                dt,
+                linalg_parallel,
+                *made_for(node, in_layouts),
+            )
         )
 
     @rust_kernel.register(LU)
@@ -254,7 +275,13 @@ def _register_more():
         return (
             None
             if dt is None
-            else interp().LU(fresh_modes(node), dt, form, linalg_parallel)
+            else interp().LU(
+                fresh_modes(node),
+                dt,
+                form,
+                linalg_parallel,
+                *made_for(node, in_layouts),
+            )
         )
 
     @rust_kernel.register(PivotToPermutations)
@@ -263,7 +290,10 @@ def _register_more():
         if dt not in ("int32", "int64") or node.outputs[0].type.dtype != "int64":
             return None
         return interp().PivotToPermutations(
-            fresh_mode(node.outputs[0]), np.dtype(dt), bool(op.inverse)
+            fresh_mode(node.outputs[0]),
+            np.dtype(dt),
+            bool(op.inverse),
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(Eigh)
@@ -278,6 +308,7 @@ def _register_more():
             bool(op.lower),
             isinstance(op, Eigh),
             linalg_parallel,
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(SVD)
@@ -291,6 +322,7 @@ def _register_more():
             bool(op.full_matrices),
             bool(op.compute_uv),
             linalg_parallel,
+            *made_for(node, in_layouts),
         )
 
     @rust_kernel.register(QR)
@@ -298,7 +330,9 @@ def _register_more():
         dt = _linalg_dtype(node)
         if dt is None or op.pivoting or op.mode not in ("full", "economic", "r"):
             return None
-        return interp().QR(fresh_modes(node), dt, op.mode, linalg_parallel)
+        return interp().QR(
+            fresh_modes(node), dt, op.mode, linalg_parallel, *made_for(node, in_layouts)
+        )
 
     @rust_kernel.register(MatrixPinv)
     def _(op, node, in_layouts=None, linalg_parallel=False):
@@ -306,8 +340,37 @@ def _register_more():
         if dt is None:
             return None
         return interp().MatrixPinv(
-            fresh_mode(node.outputs[0]), dt, bool(op.hermitian), linalg_parallel
+            fresh_mode(node.outputs[0]),
+            dt,
+            bool(op.hermitian),
+            linalg_parallel,
+            *made_for(node, in_layouts),
         )
 
 
 _register_more()
+
+
+def _declare_layouts():
+    """The layouts of the outputs of an op with a Rust kernel are the kernel's choice:
+    `llvm_layout` says what the kernel declares for the inputs' layouts, so that the
+    planner binds the outputs to them. (Where no kernel applies, e.g. for another
+    dtype, the default: what a numba kernel then allocates.)"""
+    from pytensor.link.llvm.analysis.layout import shape_of
+    from pytensor.link.llvm.codegen.interface import llvm_layout
+
+    def declared(op, node, in_layouts):
+        kernel = rust_kernel(op, node, in_layouts)
+        if kernel is None:
+            return [None] * len(node.outputs)
+        return [
+            Layout.from_spec(spec, shape_of(o))
+            for o, (_, spec) in zip(node.outputs, kernel.outputs(), strict=True)
+        ]
+
+    for cls in rust_kernel.registry:
+        if cls is not object:
+            llvm_layout.register(cls, declared)
+
+
+_declare_layouts()

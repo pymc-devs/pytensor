@@ -22,20 +22,27 @@ def call(kernel, inputs, outputs):
     return ir.call_kernel(kernel.address, inputs, outputs, kernel.config)
 
 
+def sort(mode, input_layout=None):
+    """A kernel sorting the rows of a matrix, made for an input with `input_layout`."""
+    return interp.Sort(mode, f64, 1, True, [input_layout], [2])
+
+
 def test_rust_kernels_run_as_they_were_made():
     values = np.array([[3.0, 1.0, 2.0], [0.0, -1.0, 5.0]])
-    sort = interp.Sort(interp.OutputMode.Allocated, f64, 1, True)
-    (result,) = call(sort, [values], [(f64, 2)])
+    (result,) = call(sort(interp.OutputMode.Allocated), [values], [(f64, 2)])
     np.testing.assert_array_equal(result, np.sort(values, axis=1))
+    assert result.flags.c_contiguous
+    # made for an input in column-major order: so is what it allocates
+    column_major = ([1, 0], ["P", "P"])
+    (result,) = call(
+        sort(interp.OutputMode.Allocated, column_major), [values], [(f64, 2)]
+    )
+    np.testing.assert_array_equal(result, np.sort(values, axis=1))
+    assert result.flags.f_contiguous
     # into memory the caller provides, with strides of its own
-    sort = interp.Sort(interp.OutputMode.Provided, f64, 1, True)
     memory = np.empty((3, 2)).T
-    call(sort, [values], [memory])
+    call(sort(interp.OutputMode.Provided), [values], [memory])
     np.testing.assert_array_equal(memory, np.sort(values, axis=1))
-    # a view of the input
-    transpose = interp.DimShuffle([1, 0])
-    (result,) = call(transpose, [values], [(f64, 2)])
-    np.testing.assert_array_equal(result, values.T)
 
 
 @pytest.mark.parametrize(
@@ -56,24 +63,18 @@ def test_rust_kernels_run_as_they_were_made():
     ],
 )
 def test_rust_kernels_reject_other_arguments(inputs, outputs, message):
-    sort = interp.Sort(interp.OutputMode.Allocated, f64, 1, True)
     with pytest.raises(RuntimeError, match=message):
-        call(sort, inputs, outputs)
+        call(sort(interp.OutputMode.Allocated), inputs, outputs)
 
 
 def test_rust_kernels_reject_missing_or_other_memory():
     values = np.zeros((2, 3))
-    sort = interp.Sort(interp.OutputMode.Provided, f64, 1, True)
+    provided = sort(interp.OutputMode.Provided)
     # (no memory, and a shape that is still all zeros: not the array it writes)
     with pytest.raises(RuntimeError, match=r"expected \[2, 3\]"):
-        call(sort, [values], [(f64, 2)])
+        call(provided, [values], [(f64, 2)])
     with pytest.raises(RuntimeError, match=r"it has shape \[3, 2\]"):
-        call(sort, [values], [np.zeros((3, 2))])
-    transpose = interp.DimShuffle([1, 0])
-    with pytest.raises(RuntimeError, match="provides memory"):
-        call(transpose, [values], [np.zeros((3, 2))])
-    with pytest.raises(RuntimeError, match="axis 1 of an array with 1 axes"):
-        call(transpose, [np.zeros(3)], [(f64, 2)])
+        call(provided, [values], [np.zeros((3, 2))])
 
 
 def test_generated_kernels_check_their_arguments_when_asked():
