@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pytensor.graph.basic import Constant
+from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     Slot,
@@ -19,13 +20,12 @@ from pytensor.link.llvm.codegen.types import (
     memory_type,
     value_type,
 )
-from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout
 
 
 if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.call import LinkTable
     from pytensor.link.llvm.codegen.graph import GraphFunction
-    from pytensor.link.llvm.plan.resolve import Resolver
+    from pytensor.link.llvm.planner import Planner
 
 
 #: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
@@ -42,7 +42,7 @@ class Array:
 
     Lengths and strides are constants where the type, the layout or an allocation fixes
     them. `layout` is what is known about the strides when generating the code (default:
-    nothing); code uses it to pick loops (layout.py).
+    nothing); code uses it to pick loops (analysis/layout.py).
     """
 
     dtype: str
@@ -126,7 +126,7 @@ class Array:
     def at(self, b, i, axis: int = 0) -> Array:
         """The sub-array at index `i` of `axis` (`a[i]`, `a[:, i]`, ...): a view with
         one axis less, with what its layout still says."""
-        from pytensor.link.llvm.layout import remove_axis
+        from pytensor.link.llvm.analysis.layout import remove_axis
 
         axis = range(self.ndim)[axis]
         keep = [a for a in range(self.ndim) if a != axis]
@@ -457,7 +457,7 @@ class _ScratchScope(list):
 class Codegen:
     """The state of generating one kernel's code: the builder and the kernel's
     parameters (`ctx`, its `config` = link table), and what nested code needs (link
-    table, module, the resolver of inner graphs)."""
+    table, module, the planner of inner graphs)."""
 
     b: ir.Builder
     ctx: ir.Value
@@ -471,7 +471,7 @@ class Codegen:
     links: LinkTable | None = None
     #: Decides how the nodes of an inner graph run (generated code or a kernel), for
     #: `graph_function`. None: the code generated here can't run inner graphs.
-    resolver: Resolver | None = None
+    planner: Planner | None = None
     #: the module being built, and the name of the function being built in it (nested
     #: functions are named after it)
     module: ir.Module | None = None
@@ -482,8 +482,8 @@ class Codegen:
     _checks: int = field(default=0)
 
     def par(self, per_element: float) -> ParallelPolicy | None:
-        """How loops over elements costing `per_element` each (`work.py`) may run in
-        parallel, or None."""
+        """How loops over elements costing `per_element` each (`analysis/work.py`) may
+        run in parallel, or None."""
         return (
             ParallelPolicy(self, per_element)
             if self.parallel and per_element > 0
@@ -519,12 +519,12 @@ class Codegen:
         before a loop that runs the graph, not inside the loop. `name` is used to name
         the LLVM functions of its nodes.
 
-        Raises NotImplementedError if inner graphs can't be run here (no resolver)."""
+        Raises NotImplementedError if inner graphs can't be run here (no planner)."""
         from pytensor.link.llvm.codegen.graph import GraphFunction
 
-        if self.resolver is None or self.links is None or self.module is None:
+        if self.planner is None or self.links is None or self.module is None:
             raise NotImplementedError("inner graphs here")
-        body = self.resolver.graph(inputs, outputs, in_layouts)
+        body = self.planner.graph(inputs, outputs, in_layouts)
         return GraphFunction.bind(self, body, f"{self.name}_{name}")
 
     def temp_memory(self, nbytes, escapes: bool = False):
@@ -581,11 +581,11 @@ class Codegen:
         Each value gets its own stack memory if `temp_memory` would put it on the stack
         (the values defined first get the stack first). The other values share one
         block of scratch memory, the arena: two values can use the same place in it if
-        they are never needed at the same time (`plan.memory.first_fit`).
+        they are never needed at the same time (`analysis.liveness.first_fit`).
 
         Returns the memory of each value ({key: pointer}), and the arena's layout
         ({key: offset in the arena}, size of the arena in bytes)."""
-        from pytensor.link.llvm.plan.memory import first_fit
+        from pytensor.link.llvm.analysis.liveness import first_fit
 
         memory = {}
         shared = []
@@ -709,8 +709,8 @@ def loop_order(shape, arrays) -> list[int]:
 
 # ------------------------------------------------------------------ parallel loops
 
-#: cost (work.py units) of one chunk of a parallel loop: enough to make the overhead
-#: of a parallel region (microseconds) small
+#: cost (analysis/work.py units) of one chunk of a parallel loop: enough to make the
+#: overhead of a parallel region (microseconds) small
 CHUNK_COST = 50_000
 #: loops cheaper than this stay serial (decided when generating the code when the
 #: shapes are static; at run time by the runtime otherwise: one chunk runs directly)

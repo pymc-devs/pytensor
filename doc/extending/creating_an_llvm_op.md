@@ -11,14 +11,14 @@ only shows how to use them.
 
 ## 1. Three ways to implement an op
 
-A node of the graph becomes a *task* of the program. The planner looks for the kernel
-of that task in this order:
+A node of the graph becomes a *step* of the program. The planner looks for the kernel
+of that step in this order:
 
 1. **Generated code**: an emitter, registered with `llvm_emit`, writes LLVM IR for the
    node. The code is specialized to the node's dtypes, static shapes and layouts, and
    several nodes can be compiled into one function. This is what the tutorial covers,
    and what most ops should use.
-2. **A Rust kernel** (`rust_kernels.py`): precompiled code that looks at its arguments
+2. **A Rust kernel** (`kernels/rust.py`): precompiled code that looks at its arguments
    when it runs. For ops whose work is a library call (a Cholesky factorization, a
    sort), where there is nothing to specialize.
 3. **A numba kernel**: PyTensor's numba implementation of the op, called through a
@@ -253,7 +253,7 @@ def _(op, node, cg, inputs, outputs): ...
 ```
 
 * `cg` is the code generation context. `cg.b` is the builder; `cg.check(ok, message)`
-  makes the task fail with `message` unless `ok` holds.
+  makes the step fail with `message` unless `ok` holds.
 * `inputs` has one entry per input of the node. A tensor is an `Array`:
   * `a.dtype`: the dtype as a string,
   * `a.data`: the pointer to the first element,
@@ -342,21 +342,21 @@ np.testing.assert_array_equal(f(values), [1.0, 3.0, 3.0, 5.0, 5.0])
 ```
 
 `f.maker.linker.program` is the compiled program. Its dump lists the values and the
-items its function runs, and `f.maker.linker.stats` counts what the planner used:
+steps its function runs, and `f.maker.linker.stats` counts what the planner used:
 
 ```python
 program = f.maker.linker.program
 print(program.dump())
-assert program.tasks == ["CumMax"]
+assert program.steps == ["CumMax"]
 assert f.maker.linker.stats.numba == []  # the ops that fell back to numba
 ```
 
 ```text
-program: 1 inputs, 1 outputs, 1 items, arena 0 bytes
+program: 1 inputs, 1 outputs, 1 steps, arena 0 bytes
 values:
   %0    float64[?]               input 0
-  %1    float64[?]               allocated by its item
-items:
+  %1    float64[?]               allocated by its step
+steps:
   0    (%0) -> (%1)  CumMax
 outputs: %1 (returned)
 ```
@@ -402,7 +402,7 @@ np.testing.assert_array_equal(result, [1.0, 3.0, 3.0, 5.0, 5.0])
 ```
 
 `f.maker.linker.ir()` is the IR of the code generated for a compiled function: one
-module per generated task, each under a comment naming the task, as in
+module per generated step, each under a comment naming the step, as in
 `program.dump()`. `ir(optimized=True)` is the IR after optimization, which shows whether
 a loop was vectorized. The modules of compiled units are included. Ops
 running Rust or numba kernels have no module. For one module at a time,
@@ -455,7 +455,7 @@ softsign = Elemwise(Softsign(upgrade_to_float, name="softsign"))
 ```
 
 ```python
-from pytensor.link.llvm.codegen.scalar import nums, register
+from pytensor.link.llvm.dispatch.scalar import nums, register
 
 
 @register(Softsign)
@@ -521,7 +521,7 @@ A `Layout` has one entry per axis:
 * `DYNAMIC`: not known; the stride is read when the code runs.
 
 ```python
-from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout
+from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout
 
 c = Layout.c(2)  # C-contiguous: all packed, last axis innermost
 unknown = Layout.dynamic(2)
@@ -562,7 +562,7 @@ without looking at its strides, so a wrong claim gives wrong results, not an err
 
 ### Where layouts come from
 
-* Memory the backend allocates itself (outputs of tasks, temporaries) is C-contiguous,
+* Memory the backend allocates itself (outputs of steps, temporaries) is C-contiguous,
   or in the order the op asked for.
 * A view gets its layout from its input's: the transpose of a C-contiguous matrix is
   Fortran-contiguous.
@@ -578,7 +578,7 @@ for a graph:
 
 ```python
 from pytensor.graph.fg import FunctionGraph
-from pytensor.link.llvm.layout import infer_layouts
+from pytensor.link.llvm.analysis.layout import infer_layouts
 
 A = pt.matrix("A")
 outs = [A.T, A[1], A[:, ::2], A[::-1], pt.exp(A), pt.exp(A.T)]
@@ -615,7 +615,7 @@ is why `input_layout="c"` pays off for functions whose inputs are always contigu
 
 ### What a layout does for an emitter
 
-Nothing has to be done to benefit. The planner generates each task's code for the
+Nothing has to be done to benefit. The planner generates each step's code for the
 layouts of its inputs, and what the layout fixes arrives in the emitter as a constant:
 `x.strides[0].const_int` is `8` and not `None`, and `x.load(b, i)` then addresses its
 element with a constant step. A packed stride is not even passed to the generated function:
@@ -633,7 +633,7 @@ assert any_strides.signature.inputs[0].stride_axes == (
 assert contiguous.signature.inputs[0].stride_axes == ()  # nothing to pass
 ```
 
-The dump of a program shows, in braces, the input layouts each task was generated for:
+The dump of a program shows, in braces, the input layouts each step was generated for:
 
 ```python
 C_INPUTS = STRICT.clone(link_kwargs={"input_layout": "c"})
@@ -851,7 +851,7 @@ minus the stride of the input, so if the one is known, so is the other:
 
 ```python
 from pytensor.link.llvm.codegen.interface import llvm_layout
-from pytensor.link.llvm.layout import itemsize_of, shape_of
+from pytensor.link.llvm.analysis.layout import itemsize_of, shape_of
 
 
 def reverse_layout(node, x: Layout) -> Layout:
@@ -884,7 +884,7 @@ def _(op, node, cg, inputs, outputs):
 
 The layout function is shared by the declaration and the emitter, which is how the
 backend's own view ops are written (`subtensor_layout`, `dimshuffle_layout` in
-`layout.py`).
+`analysis/layout.py`).
 
 ```python
 CHECKED = STRICT.clone(link_kwargs={"input_layout": "c", "check_layouts": True})
@@ -930,15 +930,15 @@ Two things guard against wrong declarations:
   ```
 
 * The linker option `check_layouts=True` (or `PYTENSOR_LLVM_CHECK_LAYOUTS=1`) makes
-  every generated task verify, when it runs, that its arguments have the layouts it
-  was generated for. It costs a few comparisons per task. Use it in the tests of any
+  every generated step verify, when it runs, that its arguments have the layouts it
+  was generated for. It costs a few comparisons per step. Use it in the tests of any
   op with its own `llvm_layout`: it catches a layout that is declared consistently
   but is not what the code produces.
 
 ## 6. Temporary memory
 
 Some ops need memory besides their outputs while they run. `cg.temporary(dtype, shape)`
-returns an `Array` for that: C-contiguous, uninitialized, and gone when the task ends.
+returns an `Array` for that: C-contiguous, uninitialized, and gone when the step ends.
 
 The example computes the mean of every column of a matrix. To read the matrix in
 memory order it goes row by row, so it needs one running sum per column, and it keeps
@@ -1033,7 +1033,7 @@ program.seed(123)
 The draws are the same for every number of threads, so a seeded function is
 reproducible.
 
-`codegen/random.py` implements `RandomVariable` once, for all distributions: it works
+`dispatch/random.py` implements `RandomVariable` once, for all distributions: it works
 out the shape of the draws, broadcasts the parameters, checks them and loops. A
 distribution only supplies the function for one draw, as a `Sampler`:
 
@@ -1070,7 +1070,7 @@ A Gumbel number is `loc - scale * log(e)` for a standard exponential number `e`,
 `e` is `-log(1 - u)` for a uniform `u`:
 
 ```python
-from pytensor.link.llvm.codegen.random import SAMPLERS, Sampler
+from pytensor.link.llvm.dispatch.random import SAMPLERS, Sampler
 
 
 def gumbel(b, cg, u, params):
@@ -1126,7 +1126,7 @@ with its neighbors. The default is one unit per output element; a comparison and
 store per element is about two:
 
 ```python
-from pytensor.link.llvm.work import Work, llvm_work
+from pytensor.link.llvm.analysis.work import Work, llvm_work
 
 
 @llvm_work.register(CumMax)
@@ -1140,16 +1140,16 @@ assert llvm_work(cummax, cummax(static).owner).total == 8.0
 ## 9. Putting it into the backend
 
 The registrations above work from anywhere, which is how this tutorial runs. An op that
-belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/codegen/`:
+belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/dispatch/`:
 
 1. Write the emitter in the module that fits (`basic.py`, `shape.py`, `extra.py`, ...),
-   or in a new one. A new module must be added to the imports at the top of
-   `codegen/__init__.py`, which is what registers its emitters.
-2. Scalar ops go into `codegen/scalar.py`, with their cost in `SCALAR_COSTS` in
-   `work.py`; distributions into the `SAMPLERS` table of `codegen/random.py`.
-3. Register `llvm_work` in `work.py` if one unit per output element is far off, and
+   or in a new one. A new module must be added to the imports in
+   `dispatch/__init__.py`, which is what registers its emitters.
+2. Scalar ops go into `dispatch/scalar.py`, with their cost in `SCALAR_COSTS` in
+   `analysis/work.py`; distributions into the `SAMPLERS` table of `dispatch/random.py`.
+3. Register `llvm_work` in `analysis/work.py` if one unit per output element is far off, and
    `llvm_layout` next to the emitter if an output is a view (its layout function goes
-   into `layout.py`).
+   into `analysis/layout.py`).
 4. Add a test to `tests/link/llvm/test_ops.py` that compiles with
    `numba_fallback=False` and compares with numpy, over the dtypes, with a strided
    input and with static and unknown shapes; for a view, also with
@@ -1166,7 +1166,7 @@ Things that commonly go wrong:
 * **Assuming contiguous inputs.** Always go through the array (`load`, `store`, `at`),
   which follows the strides. The planner passes the strides it knows as constants, so
   this costs nothing when the input is contiguous.
-* **A temporary inside a loop.** Each request is new memory until the task ends. Ask
+* **A temporary inside a loop.** Each request is new memory until the step ends. Ask
   once, before the loop.
 * **Writing an input.** Inputs are only read, except one the op destroys and the
   planner lets the node overwrite (`writable`); `overwrite_or_copy` handles both cases.

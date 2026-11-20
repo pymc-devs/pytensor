@@ -252,15 +252,16 @@ def numba_kernel(node, orders=None):
     lines.append("    return 1")
     src = "\n".join(lines)
     # Cache the wrapper on disk through PyTensor's numba cache, keyed by the Op's own
-    # cache key and the variable types (the wrapper is fully determined by those).
+    # cache key and the variable types (the wrapper is fully determined by those), and
+    # this module's name: a cached kernel imports it again when it is loaded.
     cache_key = None
     if op_key is not None and config.numba__cache:
         types_sig = ",".join(str(v.type) for v in (*node.inputs, *node.outputs))
         types_sig += f"|orders{orders}"
         # hashed: the key ends up in a file name
-        digest = hashlib.sha256(
-            f"{op_key}|{types_sig}|fastmath{int(config.numba__fastmath)}".encode()
-        ).hexdigest()
+        fastmath = int(config.numba__fastmath)
+        key = f"{__name__}|{op_key}|{types_sig}|fastmath{fastmath}"
+        digest = hashlib.sha256(key.encode()).hexdigest()
         cache_key = f"llvm_numba_kernel_v{CACHE_VERSION}_{digest}"
     kernel = compile_numba_function_src(
         src, "kernel", global_env=env, cache_key=cache_key

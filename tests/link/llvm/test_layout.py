@@ -13,10 +13,10 @@ from pytensor.tensor.elemwise import DimShuffle
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
+from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
 from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
 from pytensor.link.llvm.codegen.signature import node_outputs  # noqa: E402
-from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
 
 LLVM = get_mode("LLVM")
@@ -106,7 +106,7 @@ def test_views_feed_specialized_code():
     ]
     values = [rng.normal(size=(6, 7)), rng.normal(size=(6, 7))]
     check_against_numpy([x, y], outs, values)
-    # with C-contiguous inputs, views of them are known too: tasks are specialized
+    # with C-contiguous inputs, views of them are known too: steps are specialized
     f = check_against_numpy(
         [x, y], outs, values, mode=CHECKED.clone(link_kwargs={"input_layout": "c"})
     )
@@ -212,7 +212,7 @@ def test_specialized_signature_passes_fewer_strides():
 
 def test_feature_predicts_and_invalidates():
     from pytensor.graph.fg import FunctionGraph
-    from pytensor.link.llvm.layout import LayoutFeature
+    from pytensor.link.llvm.analysis.layout import LayoutFeature
 
     x = pt.dmatrix("x")
     t = x.T
@@ -354,7 +354,7 @@ def test_provided_layouts_are_binding():
     out = (
         pt.exp(s.T) * t.T
     )  # declared: provided memory in the inputs' (transposed) order
-    # as tasks of the program (inside a compiled unit the unit does the same)
+    # as steps of the program (inside a compiled unit the unit does the same)
     f = pytensor.function([s, t], out, mode=mode.excluding("llvm_units"))
     g = pytensor.function([s, t], out, mode=mode)
     p = f.maker.linker.program
@@ -404,7 +404,7 @@ def test_view_layout_is_checked_when_generating():
 
 def test_kernels_declare_their_outputs():
     from pytensor.link.llvm.codegen.signature import OutputMode
-    from pytensor.link.llvm.rust_kernels import rust_kernel, rust_kernel_outputs
+    from pytensor.link.llvm.kernels.rust import rust_kernel, rust_kernel_outputs
 
     x = pt.dmatrix("x")
     node = x.T.owner

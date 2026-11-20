@@ -20,6 +20,7 @@ pytest.importorskip("pytensor_llvm.ir")
 
 from pytensor_llvm import ir
 
+from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
 from pytensor.link.llvm.codegen.emit import for_each, load, store
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
@@ -31,10 +32,9 @@ from pytensor.link.llvm.codegen.signature import (
     destroyed_input,
     node_outputs,
 )
-from pytensor.link.llvm.plan.memory import lifetimes, place_temporaries
 from pytensor.link.llvm.program import Options, build_program
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
-from tests.link.llvm.test_aliasing import item
+from tests.link.llvm.test_aliasing import step
 
 
 # (fused, a chain of Elemwise is one loop and has nothing to overwrite)
@@ -317,17 +317,17 @@ def test_a_value_that_stands_for_several_variables_is_not_overwritten():
 
 
 def test_an_overwritten_value_lives_on_under_another_name():
-    items = [
-        item([0], [1], [P]),
-        item([1], [2], [R], [(0,)]),  # 2 is 1, overwritten
-        item([0], [3], [P]),
-        item([2, 3], [4], [P]),
+    steps = [
+        step([0], [1], [P]),
+        step([1], [2], [R], [(0,)]),  # 2 is 1, overwritten
+        step([0], [3], [P]),
+        step([2, 3], [4], [P]),
     ]
-    _, end = lifetimes(items, kept=[4])
+    _, end = lifetimes(steps, kept=[4])
     assert end[1] == 3  # alive until 2 was read
-    offsets, _ = place_temporaries(items, {1: 64, 3: 64}, kept=[4])
+    offsets, _ = place_temporaries(steps, {1: 64, 3: 64}, kept=[4])
     assert offsets[1] != offsets[3]
 
     # overwriting the function's output: alive until the end
-    _, end = lifetimes([item([0], [1], [P]), item([1], [2], [R], [(0,)])], kept=[2])
+    _, end = lifetimes([step([0], [1], [P]), step([1], [2], [R], [(0,)])], kept=[2])
     assert end[1] == 2

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pytensor.link.llvm.analysis.layout import Layout, remove_axis
 from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
@@ -52,7 +53,6 @@ from pytensor.link.llvm.codegen.interface import (
     llvm_layout,
 )
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, value_type
-from pytensor.link.llvm.layout import Layout, remove_axis
 
 
 def register():

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.link.llvm.analysis.layout import dimshuffle_layout, same_layout
 from pytensor.link.llvm.codegen.emit import Array, cast, copy
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.layout import dimshuffle_layout, same_layout
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.shape import SpecifyShape

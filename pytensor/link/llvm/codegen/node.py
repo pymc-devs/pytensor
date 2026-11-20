@@ -73,7 +73,7 @@ def build_node_function(
     parallel=True,
     kernel=None,
     links=None,
-    resolver=None,
+    planner=None,
     writable=frozenset(),
 ) -> NodeFunction:
     """The LLVM function of one node, always inlined.
@@ -81,11 +81,11 @@ def build_node_function(
     * `temporary_outputs`: allocated outputs that are temporaries of a compiled unit;
       they go into temporary memory instead of runtime buffers;
     * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
-    * `kernel`: a `CalledKernel` implementing the node (a Rust kernel, a numba kernel):
+    * `kernel`: a `Kernel` implementing the node (a Rust kernel, a numba kernel):
       the function calls it (call.py), through an entry of `links`, the
       link table that is the config of the kernel being generated. Code nested in the
       node (a Scan's loop body, a Blockwise's core) links its kernels there too;
-    * `resolver`: decides how the nodes of inner graphs run (a Scan's loop body, a
+    * `planner`: decides how the nodes of inner graphs run (a Scan's loop body, a
       Blockwise's core: `Codegen.graph_function`);
     * `writable`: positions of the inputs the node may overwrite (`node_outputs`).
     """
@@ -114,7 +114,7 @@ def build_node_function(
         config,
         parallel=parallel,
         links=links,
-        resolver=resolver,
+        planner=planner,
         module=module,
         name=name,
     )

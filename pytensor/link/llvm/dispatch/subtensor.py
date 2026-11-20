@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pytensor.link.llvm.analysis.layout import subtensor_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     cast,
@@ -16,8 +17,7 @@ from pytensor.link.llvm.codegen.interface import (
     llvm_layout,
     overwrite_or_copy,
 )
-from pytensor.link.llvm.codegen.scalar import emit_scalar
-from pytensor.link.llvm.layout import subtensor_layout
+from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add
 from pytensor.tensor.subtensor import IncSubtensor, Subtensor, unflatten_index_variables
 

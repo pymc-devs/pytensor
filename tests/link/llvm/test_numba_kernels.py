@@ -27,8 +27,8 @@ def compiled(f):
     return f.maker.linker.program
 
 
-def numba_tasks(f):
-    return [d for d in compiled(f).tasks if "numba:" in d]
+def numba_steps(f):
+    return [d for d in compiled(f).steps if "numba:" in d]
 
 
 def test_numba_ops_mixed_with_rust_kernels():
@@ -42,7 +42,7 @@ def test_numba_ops_mixed_with_rust_kernels():
         pt.linalg.det(x[:4, :4]),
     ]
     f = pytensor.function([x, s], outs, mode=LLVM)
-    assert len(numba_tasks(f)) >= 3
+    assert len(numba_steps(f)) >= 3
     v = rng.normal(size=(4, 5))
     sv = np.array([1, 0, 3, 2, 1])
     res = f(v, sv)
@@ -78,7 +78,7 @@ def test_numba_exception_is_reported():
     x = pt.vector("x")
     s = pt.lvector("s")
     f = pytensor.function([x, s], pt.repeat(x, s) * 2, mode=LLVM)
-    assert numba_tasks(f)
+    assert numba_steps(f)
     np.testing.assert_allclose(f(np.arange(3.0), np.array([1, 0, 2])), [0.0, 4.0, 4.0])
     with pytest.raises(Exception, match="numba: Repeat"):
         f(np.arange(3.0), np.array([1, 2]))
@@ -104,7 +104,7 @@ class _Picky(Op):
 def test_numba_object_mode_exception_is_reported():
     x = pt.matrix("x")
     f = pytensor.function([x], pt.dot(_Picky()(x), x.T), mode=LLVM)
-    assert numba_tasks(f)
+    assert numba_steps(f)
     np.testing.assert_allclose(f(np.ones((2, 2))), np.full((2, 2), 4.0))
     with pytest.raises(Exception, match=r"numba: _Picky: .* raised an exception"):
         f(-np.ones((2, 2)))
@@ -122,7 +122,7 @@ def test_numba_object_mode_from_the_cache(tmp_path):
         x, v = pt.matrix("x", shape=(3, 2)), pt.vector("v", shape=(4,))
         mode = get_mode("LLVM").excluding("bool_idx_to_nonzero")
         f = pytensor.function([x, v], pt.set_subtensor(x[mask], v) * 2, mode=mode)
-        assert any("numba:" in d for d in f.maker.linker.program.tasks)
+        assert any("numba:" in d for d in f.maker.linker.program.steps)
         print(f(np.zeros((3, 2)), np.arange(1.0, 5.0)).tolist())
         """
     )
@@ -154,7 +154,7 @@ def test_numba_through_c_api_without_gil():
     x = pt.matrix("x")
     out = (pt.argsort(x, axis=1) * 2).sum(axis=0)
     f = pytensor.function([x], out, mode=LLVM)
-    assert numba_tasks(f)
+    assert numba_steps(f)
     v = rng.normal(size=(30, 7))
     fn = compiled(f).c_function()
     a = Api.from_address(compiled(f).c_api_table())

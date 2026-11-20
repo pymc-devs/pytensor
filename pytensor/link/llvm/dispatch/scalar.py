@@ -15,7 +15,6 @@ from functools import reduce, singledispatch
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as psm
 from pytensor.graph.basic import Constant
-from pytensor.link.llvm.codegen import gamma
 from pytensor.link.llvm.codegen.emit import cast, constant
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import (
@@ -25,6 +24,7 @@ from pytensor.link.llvm.codegen.types import (
     is_signed,
     value_type,
 )
+from pytensor.link.llvm.dispatch import gamma
 from pytensor.scalar.loop import ScalarLoop
 
 

@@ -235,7 +235,7 @@ def test_elemwise_shape_mismatch_raises():
 
 
 def test_provided_output_with_any_strides():
-    from pytensor.link.llvm.layout import Layout
+    from pytensor.link.llvm.analysis.layout import Layout
 
     x = pt.tensor("x", shape=(4, 6))
     node = pt.exp(x).owner
