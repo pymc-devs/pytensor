@@ -188,6 +188,29 @@ def _lanczos_log_gamma(w, const):
     )
 
 
+def _log_abs_sin_pi(z, const):
+    """``log|sin(pi z)|``, ``-inf`` at the integers.
+
+    Reducing by the nearest integer is exact, where subtracting floor(z) rounds once z
+    is small and negative, and it keeps the result accurate at large |z|. Taking the
+    sine from the tangent by the half-angle identity keeps it off mx.sin, which is a
+    float32 kernel at any dtype where mx.tan is not.
+    """
+    tan_half = mx.tan(const(0.5 * np.pi) * (z - mx.round(z)))
+    # |tan_half| <= 1, so 1 + tan_half**2 is in [1, 2] and costs nothing to form
+    return mx.log(const(2.0) * mx.abs(tan_half) / (const(1.0) + tan_half * tan_half))
+
+
+def _pi_cot_pi(z, const):
+    """``pi * cot(pi z)``, infinite at the integers.
+
+    The cotangent is a reciprocal tangent: mx.tan is genuine at float64 where mx.cos
+    and mx.sin are float32 kernels whatever they are handed. Reducing by the nearest
+    integer is exact and puts the tangent on a true zero at every pole.
+    """
+    return const(np.pi) / mx.tan(const(np.pi) * (z - mx.round(z)))
+
+
 @mlx_funcify.register(Sigmoid)
 def mlx_funcify_Sigmoid(op, node, **kwargs):
     dtype = node.outputs[0].dtype
@@ -253,14 +276,11 @@ def mlx_funcify_GammaLn(op, node, **kwargs):
         # covers both branches, and neither can produce a NaN the other must mask
         w = mx.where(reflect, one - y, y) - one
         lanczos = _lanczos_log_gamma(w, const)
-
-        # Reducing by the nearest integer is exact, where subtracting floor(y) rounds
-        # once y is small and negative, and it keeps log|sin(pi x)| accurate at large
-        # |x|. Taking the sine from the tangent by the half-angle identity keeps it off
-        # mx.sin, which is a float32 kernel at any dtype where mx.tan is not
-        tan_half = mx.tan(const(0.5 * np.pi) * (y - mx.round(y)))
-        log_sin = mx.log(const(2.0) * mx.abs(tan_half)) - mx.log1p(tan_half * tan_half)
-        out = mx.where(reflect, const(np.log(np.pi)) - log_sin - lanczos, lanczos)
+        out = mx.where(
+            reflect,
+            const(np.log(np.pi)) - _log_abs_sin_pi(y, const) - lanczos,
+            lanczos,
+        )
         if double:
             out = mx.where(shift_up, out - mx.log(z), out)
 
@@ -306,15 +326,7 @@ def mlx_funcify_Psi(op, node, **kwargs):
         for coeff in reversed(coeffs[:-1]):
             series = const(coeff) + series * r2
         out = shift + mx.log(y) - const(0.5) / y - series * r2
-
-        # psi(x) = psi(1 - x) - pi * cot(pi x), with the cotangent taken as a reciprocal
-        # tangent rather than a ratio of cosine to sine: mx.tan is genuine at float64
-        # where both of the others are float32 kernels whatever they are handed.
-        # Reducing by the nearest integer is exact and costs the period nothing, and it
-        # puts the tangent on a true zero at every pole rather than near one, so those
-        # come back infinite instead of large and finite
-        cot_arg = const(np.pi) * (z - mx.round(z))
-        out = mx.where(reflect, out - const(np.pi) / mx.tan(cot_arg), out)
+        out = mx.where(reflect, out - _pi_cot_pi(z, const), out)
 
         return out.astype(out_dtype)
 
