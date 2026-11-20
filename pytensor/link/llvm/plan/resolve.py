@@ -1,10 +1,9 @@
 """Stage 2: how each node is run.
 
-A node is run by generated code (an emitter, `llvm_emit`), by a Rust kernel, by a numba
-kernel, or, for an OpFromGraph with `execution=INTERPRETED`, by a subprogram: its inner
-graph planned and compiled on its own. `Resolver` decides, and
-says what the choice means for the node's outputs (how they come to be, and their layouts): a
-`CalledKernel` describes a kernel, `None` stands for generated code.
+A node is run by generated code (an emitter, `llvm_emit`), by a Rust kernel, or by a
+numba kernel. `Resolver` decides, and says what the choice means for the node's outputs
+(how they come to be, and their layouts): a `CalledKernel` describes a kernel, `None`
+stands for generated code.
 
 The layouts of the outputs are not a choice: they are the binding ones (what
 `llvm_layout` declares, `node_outputs`), and what runs a node must give its outputs
@@ -26,9 +25,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
-
-from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.graph.basic import Constant
 from pytensor.graph.traversal import io_toposort
 from pytensor.link.llvm.codegen.blockwise import (
@@ -38,7 +34,6 @@ from pytensor.link.llvm.codegen.blockwise import (
 from pytensor.link.llvm.codegen.call import CalledKernel
 from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.node import build_node_function
-from pytensor.link.llvm.codegen.scan import scan_body_layouts
 from pytensor.link.llvm.codegen.signature import (
     Output,
     OutputMode,
@@ -47,11 +42,10 @@ from pytensor.link.llvm.codegen.signature import (
     node_signature,
 )
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
-from pytensor.link.llvm.layout import Layout, itemsize_of, shape_of
+from pytensor.link.llvm.layout import Layout, graph_layouts, itemsize_of, shape_of
 from pytensor.link.llvm.plan.flatten import flatten
 from pytensor.link.llvm.plan.values import NodeItem, Values
 from pytensor.link.llvm.rust_kernels import interp, rust_kernel, rust_kernel_outputs
-from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise
 
@@ -79,8 +73,6 @@ class Resolved:
     kernel: CalledKernel | None
     #: the signature of its function: representations of inputs and outputs
     signature: Signature
-    #: for a generated Scan: its loop body
-    body: Body | None = None
 
     @property
     def arguments(self) -> list:
@@ -104,9 +96,12 @@ class Resolved:
 
 @dataclass
 class Body:
-    """The inner graph of a Scan, resolved: what one iteration runs."""
+    """A graph with every decision made about how its nodes run (`Resolver.graph`):
+    a Scan's loop body, a Blockwise's core, a unit's inner graph, or the program.
 
-    #: the values of the inner graph's inputs and outputs
+    Its items are in the order they run, and refer to values by their vids."""
+
+    #: the values (vids) of the graph's inputs and outputs
     in_ids: list
     out_ids: list
     items: list  # of Resolved
@@ -119,24 +114,61 @@ class Resolver:
         self.opts = options
         self.stats = stats
         self.values = values
+        #: (inputs, outputs, layouts) -> Body (`graph`)
+        self._graphs: dict[tuple, Body] = {}
 
     # ------------------------------------------------------------ the kinds of kernels
 
-    def has_body(self, node) -> bool:
-        """A node whose generated code runs a resolved inner graph (`Body`): a Scan
-        (its loop body, inlined into the loop), or a Blockwise (its core node)."""
+    def has_inner_graph(self, node) -> bool:
+        """Does the node's generated code run an inner graph (a Scan runs its loop body,
+        a Blockwise its core graph)?
+
+        For such nodes the planner tries generated code before a Rust kernel, because
+        the generated loop has the inner graph inlined into it."""
         return isinstance(node.op, Scan | Blockwise)
 
-    def body(self, node, in_layouts) -> Body:
-        """The resolved inner graph of a node that `has_body`."""
-        if isinstance(node.op, Blockwise):
-            return self.blockwise_body(node, in_layouts)
-        return self.scan_body(node, in_layouts)
+    def graph(self, inputs, outputs, in_layouts) -> Body:
+        """Decide how each node of a graph runs, when the graph runs inside generated
+        code (`resolve_items`).
+
+        The graph goes from the variables `inputs` to the variables `outputs`.
+        `in_layouts` gives the layout of each input (None for inputs that aren't
+        tensors). Inputs that are constants stay constants of the graph.
+
+        The layouts of the graph's variables come from `graph_layouts`, with every
+        OpFromGraph inlined (that is what generated code does with them). The values
+        inside an inlined OpFromGraph aren't variables of the graph: they get their
+        layouts from `node_outputs` while resolving, as in the planner.
+
+        The result is cached: the same graph with the same input layouts is resolved
+        only once."""
+        key = (tuple(inputs), tuple(outputs), tuple(in_layouts))
+        if key in self._graphs:
+            return self._graphs[key]
+        values = self.values
+        scope: dict = {}
+        in_ids = [
+            values.of(v, scope) if isinstance(v, Constant) else values.new(v.type)
+            for v in inputs
+        ]
+        scope.update(zip(inputs, in_ids, strict=True))
+        items = flatten(values, io_toposort(inputs, outputs), scope, inside_unit=True)
+        out_ids = [values.of(o, scope) for o in outputs]
+        known = graph_layouts(inputs, outputs, in_layouts, inlined=True)
+        layouts: dict = {}
+        for v, k in scope.items():
+            lay = Layout.of_const(v.data) if k in values.consts else known.get(v)
+            if lay is not None:
+                layouts.setdefault(k, lay)
+        resolved = self.resolve_items(items, layouts)
+        body = Body(in_ids, out_ids, resolved, values.constants_of(items, out_ids))
+        self._graphs[key] = body
+        return body
 
     def rust(self, node, in_layouts, binding) -> CalledKernel | None:
         """The node's Rust kernel, if it has one that gives its outputs the `binding`
         layouts."""
-        k = rust_kernel(node.op, node, in_layouts)
+        k = rust_kernel(node.op, node, in_layouts, self.opts.linalg_parallel)
         if k is None:
             return None
         outputs = rust_kernel_outputs(k, node, in_layouts)
@@ -192,41 +224,6 @@ class Resolver:
             raise NotImplementedError(f"No LLVM backend implementation for {node.op}")
         return self.numba(node, binding)
 
-    def subprogram(self, node, in_layouts) -> CalledKernel:
-        """A subprogram for an OpFromGraph: its inner graph, planned and compiled on its
-        own (a `Program`, whose function is the kernel)."""
-        from pytensor.link.llvm.program import Planner
-
-        if any(isinstance(o.type, ScalarType) for o in node.outputs):
-            raise NotImplementedError("a subprogram with ScalarType outputs")
-        modes = [
-            OutputMode.ABSENT
-            if is_absent(o.type)
-            else OutputMode.PROVIDED
-            if repr_of(o.type).static
-            else OutputMode.RETURNED
-            for o in node.outputs
-        ]
-        sub = Planner(self.opts)
-        prog = sub.plan(node.op.fgraph, output_modes=modes, input_layouts=in_layouts)
-        self.stats.n_subprograms += 1
-        outs = []
-        for o, mode, lay in zip(node.outputs, modes, sub.output_layouts, strict=True):
-            if mode is OutputMode.ABSENT:
-                outs.append(Output(repr_of(o.type), mode))
-            elif mode is OutputMode.PROVIDED or lay is None:
-                outs.append(Output(repr_of(o.type, Layout.c(o.type.ndim)), mode))
-            else:
-                # a returned output is the inner value if it owns a buffer, else a C copy
-                shape = tuple(None if s is None else int(s) for s in o.type.shape)
-                lay = lay.join(
-                    Layout.c(o.type.ndim), shape, np.dtype(o.type.dtype).itemsize
-                )
-                outs.append(Output(repr_of(o.type, lay), mode))
-        return CalledKernel(
-            prog.address, prog.config, outs, f"program: {node.op}", prog
-        )
-
     # ------------------------------------------------------------ inside generated code
 
     def can_generate(self, node, in_layouts) -> bool:
@@ -242,37 +239,42 @@ class Resolver:
         except NotImplementedError:
             return False
 
-    def inside(
-        self, node, in_layouts, binding
-    ) -> tuple[CalledKernel | None, Body | None]:
-        """How a node inside generated code is run: (None, body) for generated code
-        (`body`: a Scan's loop body), else (its kernel, None)."""
-        if (
-            isinstance(node.op, OpFromGraph)
-            and getattr(node.op, "execution", None) is Execution.INTERPRETED
-        ):
-            return self.subprogram(node, in_layouts), None
+    def inside(self, node, in_layouts, binding) -> CalledKernel | None:
+        """How a node inside generated code runs: None if its code is generated (and
+        inlined), else the kernel that runs it."""
         if isinstance(node.op, Scan):
-            return None, self.scan_body(node, in_layouts)
+            return None
         if isinstance(node.op, Blockwise):
+            # generated if its core graph can be resolved (the emitter does it again,
+            # from the cache)
+            core_layouts = blockwise_core_layouts(node, in_layouts)
             try:
-                return None, self.blockwise_body(node, in_layouts)
+                self.graph(*blockwise_core(node), core_layouts)
+                return None
             except NotImplementedError:
-                return self.fallback(node, in_layouts, binding), None
+                return self.fallback(node, in_layouts, binding)
         if self.can_generate(node, in_layouts):
-            return None, None
-        return self.fallback(node, in_layouts, binding), None
+            return None
+        return self.fallback(node, in_layouts, binding)
 
     def resolve_items(self, items, layouts: dict) -> list:
-        """Resolve `items` in order. `layouts` (vid -> Layout) holds the layouts of what
-        they read from outside, and is filled with the (binding) layouts of what they
-        produce."""
+        """Decide how each of `items` runs, in order.
+
+        `layouts` (vid -> Layout) must hold the layouts of the values the items read
+        from outside. It may also hold layouts already known for values the items
+        produce; those are binding. The layouts of the other values the items produce
+        are derived with `node_outputs` and added to it."""
         resolved = []
         for item in items:
             node = item.node
             in_layouts = [layouts.get(vid) for vid in item.inputs]
-            binding = [o.layout for o in node_outputs(node, in_layouts)]
-            kernel, body = self.inside(node, in_layouts, binding)
+            binding = [
+                layouts.get(vid, o.layout)
+                for vid, o in zip(
+                    item.outputs, node_outputs(node, in_layouts), strict=True
+                )
+            ]
+            kernel = self.inside(node, in_layouts, binding)
             signature = node_signature(
                 node,
                 frozenset(),
@@ -283,57 +285,8 @@ class Resolver:
             for vid, lay in zip(item.outputs, binding, strict=True):
                 if lay is not None:
                     layouts[vid] = lay
-            resolved.append(Resolved(item, in_layouts, kernel, signature, body))
+            resolved.append(Resolved(item, in_layouts, kernel, signature))
         return resolved
-
-    def blockwise_body(self, node, in_layouts) -> Body:
-        """The core of a Blockwise: its core graph, resolved for the layouts its inputs
-        have in the generated loop (the inputs at one batch index)."""
-        values = self.values
-        core_inputs, core_outputs = blockwise_core(node)
-        scope = {}
-        # (constant core inputs are the Blockwise's constants: values of the body)
-        in_ids = [
-            values.of(v, scope) if isinstance(v, Constant) else values.new(v.type)
-            for v in core_inputs
-        ]
-        scope.update(zip(core_inputs, in_ids, strict=True))
-        nodes = io_toposort(core_inputs, core_outputs)
-        items = flatten(values, nodes, scope, inside_unit=True)
-        out_ids = [values.of(o, scope) for o in core_outputs]
-        layouts = {
-            k: lay
-            for k, lay in zip(
-                in_ids, blockwise_core_layouts(node, in_layouts), strict=True
-            )
-            if lay is not None
-        }
-        resolved = self.resolve_items(items, layouts)
-        return Body(in_ids, out_ids, resolved, values.constants_of(items, out_ids))
-
-    def scan_body(self, node, in_layouts) -> Body:
-        """The loop body of a generated Scan: the inner graph's items, resolved for the
-        layouts its inputs have in the loop (rows of the sequences and buffers)."""
-        values = self.values
-        fgraph = node.op.fgraph
-        scope = {}
-        in_ids = []
-        for v in fgraph.inputs:
-            k = values.new(v.type)
-            scope[v] = k
-            in_ids.append(k)
-        items = flatten(values, fgraph.toposort(), scope, inside_unit=True)
-        out_ids = [values.of(o, scope) for o in fgraph.outputs]
-        layouts = {
-            k: lay
-            for k, lay in zip(
-                in_ids, scan_body_layouts(node.op, node, in_layouts), strict=True
-            )
-            if lay is not None
-        }
-        resolved = self.resolve_items(items, layouts)
-        return Body(in_ids, out_ids, resolved, values.constants_of(items, out_ids))
-
 
 def _allocated_layout(op, var, lay) -> Layout:
     """The layout a kernel allocates `var` in to give it the layout `lay`: `lay` if it

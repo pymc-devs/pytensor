@@ -102,6 +102,23 @@ class NodeOutput:
     def finish(self) -> None:
         """Called when the emitter is done."""
 
+    def offer_slot(self):
+        """Let whoever produces the result allocate it directly into this output's slot.
+
+        `GraphFunction.emit_call` asks this. If the node that computes the result
+        allocates new memory anyway (a kernel, or an output whose shape is only known
+        at run time), it can put that memory straight into this slot instead of
+        allocating its own and copying it over.
+
+        Returns `(slot, layout)`: the slot to allocate into, and a layout the new memory
+        must imply. Returns None if this output doesn't accept that (the default).
+        When the slot was used, the caller then calls `slot_filled()`."""
+        return None
+
+    def slot_filled(self) -> None:
+        """The result was allocated into the slot from `offer_slot()`: the output is
+        done."""
+
 
 @dataclass
 class ProvidedOutput(NodeOutput):
@@ -136,11 +153,41 @@ class SlotOutput(NodeOutput):
     temporary: bool = False
     #: the (packed) layout `allocate` produces; default C-contiguous
     layout: Layout | None = None
-    #: for a view: the layout it must have (`view` checks)
+    #: the layout the output must have (`view` checks that a view has it)
     declared: Layout | None = None
     #: (scope, noalias scopes) for the memory `allocate` returns (`Builder.mark_array`)
     alias: tuple | None = None
     done: bool = False
+
+    @classmethod
+    def for_output(cls, cg, slot, o, aliases=(), **kwargs) -> SlotOutput:
+        """The `SlotOutput` for `o`, a RETURNED output of a function's signature.
+
+        New memory is allocated in the output's declared layout if that layout says
+        exactly where every element goes (it is packed); otherwise it is allocated
+        C-contiguous, which then implies the declared layout. `aliases`: the positions
+        of the node inputs the output may be a view of."""
+        packed = o.layout.fully_packed(o.repr.shape)
+        return cls(
+            cg,
+            slot,
+            o.repr.dtype,
+            o.repr.ndim,
+            aliases=aliases,
+            layout=o.layout if packed else None,
+            declared=o.layout,
+            **kwargs,
+        )
+
+    def offer_slot(self):
+        # A temporary output lives in scratch memory that the surrounding unit frees.
+        # Memory a kernel allocated into the slot would not be freed that way.
+        if self.temporary or self.declared is None:
+            return None
+        return self.slot, self.declared
+
+    def slot_filled(self) -> None:
+        self.done = True
 
     def allocate(self, shape: list) -> Array:
         """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
@@ -174,8 +221,18 @@ class SlotOutput(NodeOutput):
                     f"the view has layout {a.layout.describe(shape)}, but the output "
                     f"is declared {self.declared.describe(shape)} (llvm_layout)"
                 )
-        self.set_view(a)
-        return a
+        if a.base_if is None:
+            self.set_view(a)
+            return a
+        # Only the run time knows whether `a` really lies in the input's memory: if it
+        # does, pass it on as a view, else copy it into new memory.
+        def copied():
+            NodeOutput.view(self, a)
+
+        self.cg.b.if_else(a.base_if, lambda: self.set_view(a), copied)
+        # (both the view and the copy have the declared layout)
+        declared = self.declared or Layout.dynamic(self.ndim)
+        return read_slot(self.cg.b, self.slot, self.dtype, a.static_shape(), declared)
 
     def set_view(self, a: Array) -> None:
         """Put `a` into the slot as it is: the caller knows it is a view the output may

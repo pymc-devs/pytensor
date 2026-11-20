@@ -117,18 +117,17 @@ def test_generator_as_explicit_input():
     assert draws.shape == (4,) and np.all((draws >= 0) & (draws < 1))
 
 
-def test_nested_program_draws_from_the_callers_state():
+def test_unit_draws_from_the_callers_state():
     from pytensor.compile.builders import Execution, OpFromGraph
 
     a = pt.dscalar("a")
     r = pt.random.type.random_generator_type("r")
     inner = OpFromGraph(
-        [a, r], [a + rb.normal(0, 1, size=(4,), rng=r)], execution=Execution.INTERPRETED
+        [a, r], [a + rb.normal(0, 1, size=(4,), rng=r)], execution=Execution.COMPILED
     )
     x = pt.dscalar("x")
     rng = pytensor.shared(np.random.default_rng(0))
     f = pytensor.function([x], inner(x, rng), mode=MODE)
-    assert "program:" in f.maker.linker.program.dump()
     p = f.maker.linker.program
     p.seed(7)
     r1 = f(0.0)

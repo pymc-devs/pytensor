@@ -480,17 +480,33 @@ def infer_layouts(fgraph, input_layouts=None) -> dict:
     """{variable: Layout} for the variables of `fgraph` (`node_outputs`; None for
     those that aren't tensors). `input_layouts`: per graph input (default: nothing
     known)."""
+    return graph_layouts(fgraph.inputs, fgraph.outputs, input_layouts)
+
+
+def graph_layouts(inputs, outputs, input_layouts=None, inlined=False) -> dict:
+    """Like `infer_layouts`, for the graph from the variables `inputs` to `outputs`.
+
+    With `inlined`, every OpFromGraph is treated as inlined, which is what generated
+    code does with them: its outputs get the layouts its inner graph gives them, even
+    if its `execution` says it is compiled on its own."""
+    from pytensor.compile.builders import OpFromGraph
+    from pytensor.graph.traversal import io_toposort
     from pytensor.link.llvm.codegen.signature import node_outputs
 
     lays = {}
-    for k, v in enumerate(fgraph.inputs):
+    for k, v in enumerate(inputs):
         lay = input_layouts[k] if input_layouts is not None else None
         lays[v] = lay if lay is not None else _default_layout(v)
-    for node in fgraph.toposort():
+    for node in io_toposort(inputs, outputs):
         ins = [lays[i] if i in lays else _default_layout(i) for i in node.inputs]
+        if inlined and isinstance(node.op, OpFromGraph):
+            inner = node.op.fgraph
+            inner_lays = graph_layouts(inner.inputs, inner.outputs, ins, inlined=True)
+            lays.update(zip(node.outputs, (inner_lays[o] for o in inner.outputs)))
+            continue
         outs = node_outputs(node, ins)
         lays.update((v, o.layout) for v, o in zip(node.outputs, outs, strict=True))
-    for o in fgraph.outputs:
+    for o in outputs:
         if o not in lays:
             lays[o] = _default_layout(o)
     return lays
@@ -602,6 +618,7 @@ __all__ = [
     "LayoutFeature",
     "common_order",
     "dimshuffle_layout",
+    "graph_layouts",
     "infer_layouts",
     "layout_feature",
     "new_memory_layout",

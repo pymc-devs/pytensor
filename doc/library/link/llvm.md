@@ -11,9 +11,8 @@ generated function, which calls the code of its parts.
 {doc}`/extending/creating_an_llvm_op` shows how to implement an op.
 
 How much is compiled together is decided in the graph: an `OpFromGraph` with
-`execution=Execution.COMPILED` becomes a unit (one kernel), one with
-`Execution.INTERPRETED` a subprogram (a program of its own, called from the outer
-one), and the `llvm_units` rewrite groups small nodes into units.
+`execution=Execution.COMPILED` becomes a unit (one kernel), and the `llvm_units`
+rewrite groups small nodes into units.
 
 ## Glossary
 
@@ -21,10 +20,10 @@ one), and the `llvm_units` rewrite groups small nodes into units.
 
 * **graph, node, variable**: PyTensor's.
 * **planner** (`program.py`): turns a graph into a program. It names values by **value
-  ids** (vids) and schedules **items**: a **node** (`NodeItem`), a **unit** (several
-  nodes generated as one kernel, `UnitItem`) or a **subprogram** (`SubprogramItem`).
-  Once resolved, an item of a program is a call of a kernel: a node's (Rust, numba, a
-  subprogram) or code compiled on its own (`Call`: a node, a unit).
+  ids** (vids) and schedules **items**: nodes (`NodeItem`), among them **units**
+  (compiled OpFromGraphs: several nodes generated as one kernel).
+  Once resolved, an item of a program is a call of a kernel: a node's (Rust, numba)
+  or code compiled on its own (`Call`: a node, a unit).
 * **emitter**: the code generation of one op (`llvm_emit`), working with a `Codegen`
   (the builder and the parameters of the kernel being generated).
 * **node function**: the LLVM function generated for one node, inlined into kernels.
@@ -38,11 +37,11 @@ one), and the `llvm_units` rewrite groups small nodes into units.
 
 *Run time*
 
-* **program**: a compiled graph: one generated function, generated like a unit's,
-  that calls a **kernel** per item with its inputs and outputs.
+* **program**: a compiled graph: one generated function, which runs its items as a
+  graph (like a unit's inner graph) and calls a **kernel** per item.
 * **kernel**: anything with the kernel ABI (section 6): a **generated kernel** (LLVM: a
-  node, a unit, a program's function), a **Rust kernel**, a **numba kernel**, or a
-  **subprogram** (a nested program's function). Each has a **config**: its read-only
+  node, a unit, a program's function), a **Rust kernel**, or a **numba kernel**.
+  Each has a **config**: its read-only
   data, made when planning (a Rust kernel's parameters, a generated kernel's link
   table).
 * **link table**: a generated kernel's config: the addresses of the kernels it calls
@@ -117,8 +116,7 @@ so they come only from how a value is produced:
   does overwrite it is decided when planning;
 * an OpFromGraph's outputs have the layouts its inner graph gives them; a compiled
   unit's only where new memory can have them too (the unit copies an output that isn't
-  one of its inputs' memory into it), else DYNAMIC; a subprogram's are joined with
-  C-contiguous (it returns an output's value or a C copy);
+  one of its inputs' memory into it), else DYNAMIC;
 * graph inputs are DYNAMIC. With `input_layout="c"` they are C-contiguous: Python calls
   copy other arrays, the C API rejects them.
 
@@ -134,10 +132,11 @@ The planner takes the layouts of the graph's values from the feature (and gets t
 the values inside inlined OpFromGraphs the same way). They are binding: what
 runs a node must give its outputs those layouts, or layouts that imply them. A Rust
 kernel that doesn't is not used; a numba kernel allocates its outputs packed in them; a
-unit returns an output as a view only where the view's layout implies the output's. The
+unit returns an output that lies in an input's memory as a view (its declared layout is
+one the view's implies). The
 planner specializes every generated kernel for its inputs' layouts, and compiled units do
 the same for the values inside them. A Scan's loop body gets the layouts of what the loop
-passes it (rows of the sequences, rows of its own C buffers, the non-sequences).
+passes it (rows of the sequences and of its buffers, the non-sequences).
 `program.dump()` shows the layouts an item's kernel is specialized for, e.g.
 `Sum{axis=0} {[P0, P1]}`.
 
@@ -188,13 +187,14 @@ in the caller and disappear after inlining.
 ### 2a. Calls between kernels
 
 Every kernel has the kernel ABI (section 6), and generated code calls Rust kernels,
-numba kernels, subprograms and code compiled on its own the same way
+numba kernels and code compiled on its own the same way
 (`codegen/call.py`): it
 packs `PtArray`s (with the number of axes and the dtype of each), calls the kernel, and copies what it wrote for allocated and view
 outputs (owner included) into the node's output slots. A node implemented by such a
 kernel gets a node function like any other (`build_node_function(..., kernel=...)`),
-so units and generated loops can contain every kind of node; an item that isn't a node
-(a unit a program calls) gets one from its signature (`build_call_function`). The
+so units and generated loops can contain every kind of node; what a program calls that
+isn't a node (code compiled on its own) gets one from its signature
+(`build_call_function`). The
 called kernel's
 scratch is released after the call; an error returns its code (the kernel set the
 message).
@@ -209,8 +209,7 @@ the code compiled with it once that is compiled (`LinkTable.relink`).
 Inside generated code the planner decides per node (`Resolver.inside`, given the
 input layouts): generate it if we can (inlined: preferred; tried in a scratch module,
 so a failure leaves nothing behind), else its Rust kernel, else a numba kernel.
-Interpreted OpFromGraphs are subprograms when they are items of a program, and inlined
-inside generated code. A unit (and a program) releases the buffers the kernels it calls
+Inside generated code every OpFromGraph is inlined. A unit (and a program) releases the buffers the kernels it calls
 allocate for values inside it when it returns (also on errors).
 
 ### Aliasing
@@ -288,9 +287,12 @@ kernel returns new memory of unknown layout. Declarations are binding:
 An output slot is `{ ptr data, [ndim x i64] lengths, [ndim x i64] strides, ptr owner }`
 (all lengths: the caller needs them). Representations don't carry buffer owners. For
 a returned output that may alias exactly one input, the wrapper sets a null owner to
-that input's. One that may alias several comes back without an owner: the unit (or
-program) keeps all the candidates alive as long as the output, and copies it if it
-leaves.
+that input's. One that may alias several comes back without an owner: the program
+keeps all the candidates alive as long as the output, and copies it if it leaves. Inside
+an inner graph (`emit_call`), a value a node returns that may be a view of one input
+of the graph carries that input (`Array.base`) and whether it really is a view
+(`Array.base_if`: the slot has no owner); an output of the graph is handed on as a view
+only then, else copied.
 
 **What emitters do** (`codegen/interface.py`). An emitter gets an `Array` per tensor
 input, read-only unless the node may overwrite it (`writable`), and a `NodeOutput` per
@@ -388,10 +390,13 @@ memory: the output of a node inside a unit, when it is a temporary of the unit, 
 scratch (`escapes=True`). The node writes the piece into the output slot's owner (null
 for a view), and the unit frees it at the end of its own scope.
 
-The values passed between the items of a unit or a program that are provided outputs
-of a static size share one arena, laid out by liveness (`plan/memory.py`: a value's
-place is free again after its last reader, or the last reader of anything that may be
-a view of it). The arena is itself a temporary of the function. Buffers kernels return
+The values passed between the items of a function (a program, a unit, a loop body)
+that are provided outputs of a static size are its temporaries (`Codegen.temporaries`):
+each gets stack memory of its own where `temp_memory` would (small, within the stack
+budget: LLVM may keep it in registers); the others share one arena of scratch memory,
+laid out by liveness (`plan/memory.py`: a value's place is free again after its last
+reader, or the last reader of anything that may be a view of it). `program.dump()`
+shows each as "on the stack" or "arena +offset". Buffers kernels return
 are released when the function returns.
 
 There is no memory planned per kernel. An earlier design passed every kernel a
@@ -420,7 +425,7 @@ Three levels of state:
   `PtSession` (e.g. one per sampler chain), one per compiled Python function (calls
   from several threads take turns). It holds the context.
 * **The context** (`PtCtx`), part of the session: errors, scratch memory and the
-  random state. Everything a call runs uses it, subprograms included.
+  random state. Everything a call runs uses it.
 
 **Random numbers.** A session has one random state (Xoshiro256++), advanced by
 every draw, in order: a seeded state gives reproducible draws (`program.seed(n)` in
@@ -462,7 +467,7 @@ chunks one after the other, e.g. for samplers already running a chain per core.
 
 ## 6. The kernel ABI
 
-Every kernel (generated, Rust, numba, a subprogram) is called as
+Every kernel (generated, Rust, numba) is called as
 
 ```c
 typedef struct {
@@ -587,24 +592,25 @@ kernel ABI) that calls a kernel per item, in order. Planning runs in stages, eac
 module of `plan/` with its own data, so that each can be read (and tested) alone:
 
 1. **Flatten** (`plan/flatten.py`): the graph becomes a list of items over value ids
-   (`plan/values.py`). OpFromGraphs without a unit are inlined, compiled ones become
-   unit items, interpreted ones subprogram items; nodes touching ScalarType values are
-   grouped into units; FusedElemwise stays one node when its pattern is supported.
+   (`plan/values.py`). OpFromGraphs are inlined, compiled ones (units) are nodes of
+   their own; nodes touching ScalarType values are grouped into units; FusedElemwise
+   stays one node when its pattern is supported.
 2. **Resolve** (`plan/resolve.py`, `Planner.resolve_item`): which implementation runs
    each item, given the layouts of its inputs: a Rust kernel (`rust_kernels.py`),
-   generated code (`codegen/`), a numba kernel, a subprogram. An item of the program
+   generated code (`codegen/`), a numba kernel. An item of the program
    prefers a Rust kernel (nothing to compile); generated code for it (a node, a unit)
-   is a module of its own, which the program calls (a `Call`). For a unit, the body of
-   a generated Scan or the core of a Blockwise this resolves all the items inside, in
-   order, layouts flowing from one to the next: the result (`Resolved`, `Body`) is
-   everything code generation needs. `build_unit_function` and the Scan and Blockwise
-   emitters take it as an argument (`Codegen.body`) and never ask the planner. This is
-   also where in-place work is granted.
-3. **The program's function** (`Planner.program`): generated like a unit's
-   (`build_unit_function`), from the resolved items: values flow between the items in
-   the function, provided temporaries share its arena (`plan/memory.py`), graph outputs
-   are produced in the caller's memory or handed over (copied where they can't be),
-   and array constants are in its link table.
+   is a module of its own, which the program calls (a `Call`). A unit is such a node:
+   its emitter runs its inner graph (`cg.graph_function`, below); if it can't be
+   generated, its nodes become items of their own. This is also where in-place work is
+   granted. Inner graphs (of a unit, a Scan, a Blockwise) are resolved when their
+   emitter asks (below).
+3. **The program's function** (`Planner.program`): the resolved items run as a graph
+   (`build_graph_function`: `GraphFunction.emit_call`, as a unit's inner graph, with
+   the function's outputs as `NodeOutput`s): values flow between the items in the
+   function, temporaries are on the stack or in its arena (`plan/memory.py`), graph
+   outputs are produced in the caller's memory or allocated straight into their slots
+   (`NodeOutput.offer_slot`; copied where they can't be), and array constants are in
+   its link table.
 4. **Compile**: all generated modules, the program's function included, in one
    parallel batch.
 
@@ -612,21 +618,41 @@ module of `plan/` with its own data, so that each can be read (and tested) alone
 constant, arena offset, output, allocated by its item, view of another value), then
 every item with its arguments.
 
+**Inner graphs.** An emitter whose node runs an inner graph gets it from
+`cg.graph_function(inputs, outputs, in_layouts)` (`codegen/graph.py`): the graph's
+nodes resolved for the layouts of the values it will pass (`Resolver.graph`, cached),
+its constants bound. The layouts of the graph's variables are `graph_layouts`' (the
+function behind `infer_layouts` and the `LayoutFeature`, with every OpFromGraph
+inlined, as generated code runs them); values inside inlined OpFromGraphs get theirs
+from `node_outputs`, as in the planner.
+
+`GraphFunction.emit_call(cg, inputs, outputs)` emits code running it and is called
+like an emitter: values for the inputs, a `NodeOutput` per output. An output a node of
+the graph writes into provided memory is `allocate`d before the graph runs (and
+written there if its layout allows it); one a node allocates goes straight into the
+output's slot where the output offers one (`offer_slot`: an output slot of the
+function, not a unit's temporary); the others are `view`ed or `set` afterwards.
+Every output is then `finish`ed, after all were produced: until then the graph's
+inputs may still be read. Nodes we generate are inlined, the others called. Buffers
+called kernels allocate are released when the innermost `scratch_scope` ends.
+
 Scan is generated (`codegen/scan.py`): one kernel holds the loop, the buffers and the
-loop body, whose items are emitted like a unit's (nodes we generate inlined, the
-others called). The buffer conventions are PyTensor's: traced
-outputs (mit-mot, mit-sot, sit-sot) are circular buffers whose first rows hold the
-initial taps, read at `(i + lookback + tap) % len`; after the loop short buffers are
-rotated, while-loops truncated, unused rows zeroed. Body outputs are produced straight
-into their rows when the row can't be one the same iteration reads (a static buffer
-length decides), else copied there; nit-sot buffers whose rows have no static shape are
+loop body, its inner graph run by every iteration. The buffer conventions are
+PyTensor's: traced outputs (mit-mot, mit-sot, sit-sot) are circular buffers whose first
+rows hold the initial taps, read at `(i + lookback + tap) % len`; after the loop short
+buffers are rotated, while-loops truncated, unused rows zeroed. Each body output has a
+`NodeOutput` saying where it goes. Body outputs are produced straight into their rows
+when the row can't be one the same iteration reads (a static buffer length decides),
+else aside and copied there when the iteration is done, so nothing the iteration
+reads is overwritten before; nit-sot buffers whose rows have no static shape are
 allocated by the first iteration; untraced states are read from their output slot in
-every iteration and reallocated when an iteration changes their shape. Buffers of
+every iteration, and the next value replaces them when the iteration is done
+(reallocated when its shape changes). Buffers of
 called kernels and the body's scratch are freed after every iteration.
 
 Blockwise is generated the same way (`codegen/blockwise.py`): a loop over the batch
-whose body is the core graph (the core op's node and what its `make_node` adds),
-resolved for the inputs at one batch index. The outputs are allocated before the loop
+whose body is the core graph (the core op's node and what its `make_node` adds), run
+for the inputs at one batch index. The outputs are allocated before the loop
 when their core lengths are static or named by an input in the signature; then core
 outputs are produced straight into their rows, and the loop may run in parallel
 (estimated by the core's `llvm_work`). A core length only the core knows (`(m,n)->(k)`)
@@ -652,8 +678,7 @@ is copied there.
 ## 10. Profiling
 
 `program.set_profiling(True)` times every item of the program's function (two clock
-reads per item), in subprograms too (an item that runs one). `program.profile()`
-returns rows `(depth, description, calls, seconds)`, `program.profile_report()` a table,
+reads per item). `program.profile()` returns rows `(description, calls, seconds)`, `program.profile_report()` a table,
 slowest first; `reset_profile()` clears the counters. The counters are an array in the
 program's link table, added to atomically (`ptl_rt_counter_add`), so calls from
 several threads (or through the C API) add up.

@@ -135,14 +135,11 @@ def construct_nominal_fgraph(
 class Execution(enum.Enum):
     """How a backend runs an `OpFromGraph` it does not inline.
 
-    Backends that don't distinguish the two ignore it.
+    Backends that don't distinguish ways of running it ignore it.
     """
 
     #: The inner graph is compiled as one function (the LLVM backend calls this a unit).
     COMPILED = "compiled"
-    #: The inner graph is run node by node, each node with its own implementation (the
-    #: LLVM backend calls this a subprogram).
-    INTERPRETED = "interpreted"
 
 
 class OpFromGraph(HasInnerFunction, Op):
@@ -265,8 +262,8 @@ class OpFromGraph(HasInnerFunction, Op):
             If True, the Op's inner graph is inlined during compilation. If False (default), a
             pre-compiled function is used instead.
         execution : Execution, optional
-            For backends that compile graphs: whether the inner graph is compiled as one
-            function or interpreted node by node. ``None`` leaves it to the backend.
+            For backends that compile graphs: ``COMPILED`` compiles the inner graph as one
+            function. ``None`` leaves it to the backend.
         pullback
             Overrides the :meth:`Op.pullback` (vector-Jacobian product) method.
 

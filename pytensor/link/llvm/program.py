@@ -4,24 +4,23 @@
 them:
 
 1. Flatten (`plan/flatten.py`): the graph becomes items. OpFromGraphs are inlined,
-   become units (`execution=COMPILED`) or subprograms (`execution=INTERPRETED`).
+   except units (`execution=COMPILED`), which are nodes generated as one function.
    ScalarType values never cross the kernel ABI: the `llvm_units` rewrite keeps them
    inside units, and a scalar input arrives as a 0-d array.
 2. Each item is resolved (`Planner.resolve_item`; `plan/resolve.py`): a Rust kernel, a
-   numba kernel, a subprogram, or code generated for it, compiled on its own (a node,
-   a unit): each is called by the program's function. The layouts of the values are
-   not decided here: the graph's `LayoutFeature` has them (`layout.py`), and what runs
-   an item must give its outputs those layouts.
-3. The program's function is generated like a unit's (`codegen/unit.py`): it calls the
-   items in order, its temporaries in one arena laid out by liveness
-   (`plan/memory.py`).
+   numba kernel, or code generated for it, compiled on its own: each is called by the
+   program's function. The layouts of the values are not decided here: the graph's
+   `LayoutFeature` has them (`layout.py`), and what runs an item must give its outputs
+   those layouts.
+3. The program's function runs the resolved items as a graph
+   (`codegen/graph.py`, `build_graph_function`): it calls them in order, its
+   temporaries on the stack or in an arena laid out by liveness (`plan/memory.py`).
 4. All generated modules are compiled in one parallel batch, and the function becomes
    a `Program`.
 """
 
 from __future__ import annotations
 
-import contextvars
 import re
 import time
 from dataclasses import dataclass, field, replace
@@ -30,37 +29,34 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 import pytensor.link.llvm.codegen  # noqa: F401 (registers the emitters)
+from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.graph.features import view_feature
 from pytensor.link.llvm.codegen.call import CalledKernel, LinkTable
+from pytensor.link.llvm.codegen.graph import build_graph_function
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.node import build_node_function
 from pytensor.link.llvm.codegen.signature import (
+    Output,
     OutputMode,
     node_outputs,
     node_signature,
     skipped_inputs,
 )
 from pytensor.link.llvm.codegen.types import ScalarRepr, ir, is_absent, repr_of
-from pytensor.link.llvm.codegen.unit import (
-    PROFILE_CALLS,
-    PROFILE_ITEMS,
-    PROFILE_ON,
-    build_unit_function,
-    unit_input_layouts,
-)
+from pytensor.link.llvm.codegen.items import PROFILE_CALLS, PROFILE_ITEMS, PROFILE_ON
 from pytensor.link.llvm.layout import (
     Layout,
-    infer_layouts,
     layout_feature,
 )
 from pytensor.link.llvm.plan.flatten import flatten
 from pytensor.link.llvm.plan.resolve import (
+    Body,
     Call,
     Resolved,
     Resolver,
     check_conforms,
 )
-from pytensor.link.llvm.plan.values import NodeItem, SubprogramItem, UnitItem, Values
+from pytensor.link.llvm.plan.values import NodeItem, Values
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import TensorFromScalar
 
@@ -106,23 +102,6 @@ class Options:
             self.check_layouts = True
         if os.environ.get("PYTENSOR_LLVM_DEBUG_INFO", "0") not in ("", "0"):
             self.debug_info = True
-
-
-#: the options of the program being planned (subprograms use them)
-_current_options: contextvars.ContextVar = contextvars.ContextVar(
-    "llvm_options", default=None
-)
-
-
-def current_options() -> Options:
-    return _current_options.get() or Options()
-
-
-#: the stats of the program being planned: the planner of a subprogram hands its
-#: modules to it
-_current_stats: contextvars.ContextVar = contextvars.ContextVar(
-    "llvm_stats", default=None
-)
 
 
 _DEBUG_METADATA = re.compile(r"^!(\d+) = (?:distinct )?!(DI\w+)\((.*)\)$")
@@ -226,12 +205,10 @@ class Stats:
     n_rust_kernels: int = 0
     n_numba: int = 0
     n_units: int = 0
-    n_subprograms: int = 0
     numba: list = field(default_factory=list)
     #: the ops of the generated items that may overwrite an input
     inplace: list = field(default_factory=list)
-    #: the generated modules (GeneratedModule), including those of subprograms
-    #: planned for this program
+    #: the generated modules (GeneratedModule)
     modules: list = field(default_factory=list)
 
     def ir(
@@ -306,13 +283,16 @@ class Planner:
             try:
                 resolved.append(self.resolve_item(it))
             except NotImplementedError:
-                if not isinstance(it, UnitItem):
+                if not _is_unit(it.node):
                     raise
-                # a compiled OpFromGraph we can't generate: its items on their own,
+                # a compiled OpFromGraph we can't generate: its nodes on their own,
                 # and a copy of each result into the value the OpFromGraph's output is
-                resolved += self.resolve(it.items)
-                for inner, outer in it.outputs:
-                    resolved.append(self.copy_item(inner, outer))
+                inner = it.node.op.fgraph
+                sub = dict(zip(inner.inputs, it.inputs, strict=True))
+                items = flatten(self.values, inner.toposort(), sub, inside_unit=True)
+                resolved += self.resolve(items)
+                for io, outer in zip(inner.outputs, it.outputs, strict=True):
+                    resolved.append(self.copy_item(self.values.of(io, sub), outer))
         return resolved
 
     def roots_of(self, var) -> frozenset:
@@ -350,12 +330,11 @@ class Planner:
 
     def resolve_item(self, it) -> Resolved:
         """How the program's function runs an item."""
-        if isinstance(it, UnitItem):
-            return self.unit_item(it)
         in_layouts = [self.lay(k) for k in it.inputs]
-        if isinstance(it, SubprogramItem):
-            return self.kernel_item(it, self.resolver.subprogram(it.node, in_layouts))
         node = it.node
+        if _is_unit(node):
+            # (if it can't be generated, its nodes run on their own: `resolve`)
+            return self.generated_item(it, {}, in_layouts)
         binding = self.binding(node, it.outputs, in_layouts)
         types = self.values.types
         # constant scalar inputs are folded into the code
@@ -373,7 +352,7 @@ class Planner:
         # A Rust kernel first: there is nothing to compile. Not for a Scan or Blockwise
         # (its body is inlined into the generated loop), and not with folded constants
         # (a kernel would need them as arguments).
-        nested = self.resolver.has_body(node)
+        nested = self.resolver.has_inner_graph(node)
         writable = self.writable_inputs(it, folded)
         if not folded and not nested and not writable:
             kernel = self.resolver.rust(node, in_layouts, binding)
@@ -398,7 +377,7 @@ class Planner:
         return self.kernel_item(it, replace(kernel, destroys=keep))
 
     def kernel_item(self, it, kernel: CalledKernel) -> Resolved:
-        """A node run by a kernel (Rust, numba, a subprogram)."""
+        """A node run by a kernel (Rust, numba)."""
         in_layouts = [self.lay(k) for k in it.inputs]
         sig = node_signature(it.node, in_layouts=in_layouts, declared=kernel.outputs)
         check_conforms(
@@ -428,11 +407,6 @@ class Planner:
         NotImplementedError if no emitter handles it. `writable`: the inputs it may
         overwrite (`writable_inputs`)."""
         node = it.node
-        body = (
-            self.resolver.body(node, in_layouts)
-            if self.resolver.has_body(node)
-            else None
-        )
         module = ir.Module(
             f"node_{type(node.op).__name__}",
             fastmath=self.opts.fastmath,
@@ -446,16 +420,22 @@ class Planner:
             in_layouts=in_layouts,
             parallel=self.opts.parallel,
             links=LinkTable(),
-            body=body,
+            resolver=self.resolver,
             writable=writable,
         )
         if writable:
             self.stats.inplace.append(str(node.op))
         skipped = skipped_inputs(node, folded)
         args = [k for pos, k in enumerate(it.inputs) if pos not in skipped]
-        desc = str(node.op) + _layouts_note(
-            [r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0]
-        )
+        if _is_unit(node):
+            self.stats.n_units += 1
+            nodes = node.op.fgraph.toposort()
+            names = ", ".join(str(n.op) for n in nodes)
+            desc = f"unit[{len(nodes)}]: {names[:120]}"
+        else:
+            desc = str(node.op) + _layouts_note(
+                [r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0]
+            )
         kernel = self.compiled(module, nf, desc)
         check_conforms(
             node, nf.signature.outputs, self.binding(node, it.outputs, in_layouts)
@@ -465,71 +445,6 @@ class Planner:
             [self.lay(k) for k in args],
             kernel,
             nf.signature,
-        )
-
-    def unit_item(self, it: UnitItem) -> Resolved:
-        """The items of a unit, generated as one function, compiled on its own."""
-        types = self.values.types
-        out_types = [types[o] for _, o in it.outputs]
-        outs = [o for _, o in it.outputs]
-        binding = self.binding(it.node, outs, [self.lay(k) for k in it.node_inputs])
-        in_layouts = unit_input_layouts(
-            [types[k] for k in it.inputs], [self.lay(k) for k in it.inputs]
-        )
-        inner_layouts = {
-            k: lay
-            for k, lay in zip(it.inputs, in_layouts, strict=True)
-            if lay is not None
-        }
-        resolved = self.resolver.resolve_items(it.items, inner_layouts)
-        # outputs that may be views of the unit's inputs are returned as such, where
-        # their layout implies the binding one; the others are provided memory when
-        # static, else allocated, in the binding layout
-        views = _unit_views(it, resolved)
-        modes, aliases = [], []
-        for (inner, _), t, lay in zip(it.outputs, out_types, binding, strict=True):
-            if views.get(inner) and inner_layouts[inner].implies(
-                lay, list(t.shape), np.dtype(t.dtype).itemsize
-            ):
-                modes.append(OutputMode.RETURNED)
-                aliases.append(tuple(sorted(views[inner])))
-            else:
-                modes.append(
-                    OutputMode.PROVIDED if repr_of(t).static else OutputMode.RETURNED
-                )
-                aliases.append(())
-        module = ir.Module(
-            f"unit_{len(it.items)}",
-            fastmath=self.opts.fastmath,
-            debug_info=self.opts.debug_info,
-        )
-        nf = build_unit_function(
-            module,
-            "unit",
-            [(k, types[k]) for k in it.inputs],
-            [
-                (inner, t, mode)
-                for (inner, _), t, mode in zip(
-                    it.outputs, out_types, modes, strict=True
-                )
-            ],
-            resolved,
-            {
-                k: c
-                for k, c in self.values.constants_of(it.items).items()
-                if self.values.folded(k)
-            },
-            input_layouts=in_layouts,
-            output_layouts=binding,
-            output_aliases=aliases,
-            parallel=self.opts.parallel,
-        )
-        self.stats.n_units += 1
-        names = ", ".join(str(s.node.op) for s in it.items if isinstance(s, NodeItem))
-        desc = f"unit[{len(it.items)}]: {names[:120]}"
-        kernel = self.compiled(module, nf, desc)
-        return Resolved(
-            Call(list(it.inputs), outs, desc), in_layouts, kernel, nf.signature
         )
 
     def copy_item(self, src, dst) -> Resolved:
@@ -544,32 +459,11 @@ class Planner:
 
     # ------------------------------------------------------------ the program
 
-    def plan(self, fgraph, output_modes=None, input_layouts=None) -> Program:
-        """`input_layouts`: what the caller guarantees about each input's layout (default:
-        from `Options.input_layout`). `output_modes`: how each output is produced
-        (PROVIDED or RETURNED; default: what avoids copies)."""
-        token = _current_options.set(self.opts)
-        parent = _current_stats.get()
-        stats_token = _current_stats.set(self.stats)
-        try:
-            prog = self._plan(fgraph, output_modes, input_layouts)
-        finally:
-            _current_stats.reset(stats_token)
-            _current_options.reset(token)
-        if parent is not None:
-            parent.modules.extend(self.stats.modules)
-        return prog
-
-    def _plan(self, fgraph, output_modes, input_layouts):
+    def plan(self, fgraph) -> Program:
         t0 = time.perf_counter()
         values = self.values
-        if input_layouts is None:
-            feature = layout_feature(fgraph)
-            feature.set_input_layout(self.opts.input_layout)
-            layout_of = fgraph.llvm_layout
-        else:
-            # (a subprogram: its graph is an OpFromGraph's, shared by all its nodes)
-            layout_of = infer_layouts(fgraph, input_layouts).get
+        layout_feature(fgraph).set_input_layout(self.opts.input_layout)
+        layout_of = fgraph.llvm_layout
         scope = {}
         in_ids = []
         boxed = {}  # scalar input -> the 0-d array it arrives in
@@ -590,9 +484,7 @@ class Planner:
             scope[v] = k
             in_ids.append(k)
         contiguous = [
-            input_layouts is None
-            and self.opts.input_layout == "c"
-            and hasattr(v.type, "ndim")
+            self.opts.input_layout == "c" and hasattr(v.type, "ndim")
             for v in fgraph.inputs
         ]
 
@@ -630,10 +522,7 @@ class Planner:
         in_ids = [in_ids[pos] for pos in self.program_inputs]
         contiguous = [contiguous[pos] for pos in self.program_inputs]
         out_ids = [out_ids[pos] for pos in self.program_outputs]
-        if output_modes is None:
-            modes = _output_modes(resolved, out_ids, values.types)
-        else:
-            modes = [output_modes[pos] for pos in self.program_outputs]
+        modes = _output_modes(resolved, out_ids, values.types)
         self.stats.plan_s = time.perf_counter() - t0
         return self.program(resolved, in_ids, contiguous, out_ids, modes)
 
@@ -644,28 +533,32 @@ class Planner:
             "program", fastmath=self.opts.fastmath, debug_info=self.opts.debug_info
         )
         profile = np.zeros(PROFILE_ITEMS + len(resolved), dtype=np.uint64)
-        in_layouts = unit_input_layouts(
-            [types[k] for k in in_ids], [self.lay(k) for k in in_ids]
-        )
-        nf = build_unit_function(
+        constants = self.values.constants_of([r.item for r in resolved], out_ids)
+        body = Body(in_ids, out_ids, resolved, constants)
+        # (returned outputs are handed over in any layout)
+        outputs = [
+            Output(
+                repr_of(
+                    types[k],
+                    Layout.c(types[k].ndim)
+                    if m is OutputMode.PROVIDED
+                    else Layout.dynamic(types[k].ndim),
+                ),
+                m,
+            )
+            for k, m in zip(out_ids, modes, strict=True)
+        ]
+        nf = build_graph_function(
             module,
             "program",
-            [(k, types[k]) for k in in_ids],
-            [(k, types[k], m) for k, m in zip(out_ids, modes, strict=True)],
-            resolved,
-            self.values.constants_of([r.item for r in resolved], out_ids),
-            input_layouts=in_layouts,
-            # (returned outputs are handed over in any layout)
-            output_layouts=[
-                Layout.c(types[k].ndim)
-                if m is OutputMode.PROVIDED
-                else Layout.dynamic(types[k].ndim)
-                for k, m in zip(out_ids, modes, strict=True)
-            ],
+            body,
+            [types[k] for k in in_ids],
+            [self.lay(k) for k in in_ids],
+            outputs,
             parallel=self.opts.parallel,
             links=LinkTable(),
             profile=profile,
-            inline=False,
+            resolver=self.resolver,
         )
         build_kernel_wrapper(module, nf, "kernel", self.opts.check_layouts)
         t1 = time.perf_counter()
@@ -723,8 +616,7 @@ def _output_modes(resolved, out_ids, types) -> list:
 
 class Program:
     """A planned and compiled program: its function, callable from Python
-    (`function`, or the program itself), from C (`c_function`), and as a kernel of
-    other generated code (`address`, `config`: a subprogram)."""
+    (`function`, or the program itself) and from C (`c_function`)."""
 
     def __init__(
         self,
@@ -744,13 +636,6 @@ class Program:
         self.profile_cells = profile
         self.address = compiled.address("kernel")
         self.config = nf.links.address
-        #: per item, the programs it runs (subprograms), for profiling
-        self.children = [
-            [r.kernel.keepalive]
-            if r.kernel is not None and isinstance(r.kernel.keepalive, Program)
-            else []
-            for r in resolved
-        ]
 
         def shape(k):
             return [None if n is None else int(n) for n in types[k].shape]
@@ -809,68 +694,35 @@ class Program:
 
     # ------------------------------------------------------------ profiling
 
-    def _subprograms(self):
-        for children in self.children:
-            yield from children
-
     def set_profiling(self, on: bool):
-        """Turn per-item timing on or off, here and in subprograms (two clock reads
-        per item)."""
+        """Turn per-item timing on or off (two clock reads per item)."""
         self.profile_cells[PROFILE_ON] = int(on)
-        for c in self._subprograms():
-            c.set_profiling(on)
 
     def reset_profile(self):
         self.profile_cells[PROFILE_CALLS:] = 0
-        for c in self._subprograms():
-            c.reset_profile()
 
-    def _calls(self) -> int:
-        return int(self.profile_cells[PROFILE_CALLS])
-
-    def _secs(self) -> list[float]:
-        return [int(n) * 1e-9 for n in self.profile_cells[PROFILE_ITEMS:]]
-
-    def profile(self) -> list[tuple[int, str, int, float]]:
-        """Rows `(depth, description, calls, seconds)`: each item with its total time,
-        followed by the items of the programs it runs at depth + 1; `calls` is the
-        number of runs of the program the item belongs to."""
-        rows = []
-        self._profile_rows(0, rows)
-        return rows
-
-    def _profile_rows(self, depth, rows):
-        calls = self._calls()
-        for desc, secs, children in zip(
-            self.descriptions, self._secs(), self.children, strict=True
-        ):
-            rows.append((depth, desc, calls, secs))
-            for c in children:
-                c._profile_rows(depth + 1, rows)
+    def profile(self) -> list[tuple[str, int, float]]:
+        """Rows `(description, calls, seconds)`: each item with its total time over
+        `calls` runs of the program."""
+        calls = int(self.profile_cells[PROFILE_CALLS])
+        secs = [int(n) * 1e-9 for n in self.profile_cells[PROFILE_ITEMS:]]
+        return [(d, calls, t) for d, t in zip(self.descriptions, secs, strict=True)]
 
     def profile_report(self) -> str:
-        """The profile as a table, slowest first within each program."""
-        calls, secs = self._calls(), self._secs()
-        total = sum(secs)
+        """The profile as a table, slowest first."""
+        rows = self.profile()
+        calls = int(self.profile_cells[PROFILE_CALLS])
+        total = sum(t for *_, t in rows)
         per_call = total / calls * 1e6 if calls else 0.0
         lines = [
             f"{calls} calls, {total * 1e3:.3f} ms in items ({per_call:.2f} us per call)",
-            f"{'%':>7} {'total ms':>10} {'us/call':>10}  item (subprogram items indented)",
+            f"{'%':>7} {'total ms':>10} {'us/call':>10}  item",
         ]
-        self._report_into(0, total, calls, lines)
+        for desc, _, t in sorted(rows, key=lambda r: -r[2]):
+            pct = 100 * t / total if total > 0 else 0.0
+            per = t / calls * 1e6 if calls else 0.0
+            lines.append(f"{pct:>6.1f}% {t * 1e3:>10.3f} {per:>10.2f}  {desc[:100]}")
         return "\n".join(lines) + "\n"
-
-    def _report_into(self, depth, total, calls, lines):
-        secs = self._secs()
-        for k in sorted(range(len(secs)), key=lambda k: -secs[k]):
-            pct = 100 * secs[k] / total if total > 0 else 0.0
-            per = secs[k] / calls * 1e6 if calls else 0.0
-            desc = self.descriptions[k][:100]
-            lines.append(
-                f"{pct:>6.1f}% {secs[k] * 1e3:>10.3f} {per:>10.2f}  {'  ' * depth}{desc}"
-            )
-            for c in self.children[k]:
-                c._report_into(depth + 1, total, calls, lines)
 
 
 def _dump(types, nf, resolved, in_ids, contiguous, out_ids, modes) -> str:
@@ -910,8 +762,8 @@ def _dump(types, nf, resolved, in_ids, contiguous, out_ids, modes) -> str:
             kind = "constant (folded)"
         else:
             r, o = produced[k]
-            if k in offsets:
-                kind = f"arena +{offsets[k]}"
+            if k in nf.temporaries:
+                kind = f"arena +{offsets[k]}" if k in offsets else "on the stack"
                 order = list(o.layout.order) if o.layout is not None else []
                 if o.layout.fully_packed(o.repr.shape) and order != sorted(order):
                     kind += f", order {order}"
@@ -943,18 +795,10 @@ def _dump(types, nf, resolved, in_ids, contiguous, out_ids, modes) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _unit_views(it: UnitItem, resolved) -> dict:
-    """vid -> positions of the unit's inputs the value may be a view of, following the
-    views the unit's items may return."""
-    views = {k: {pos} for pos, k in enumerate(it.inputs)}
-    for r in resolved:
-        args = r.arguments
-        for vid, o in zip(r.item.outputs, r.signature.outputs, strict=True):
-            if o.mode is OutputMode.RETURNED and o.aliases:
-                views[vid] = set().union(*(views.get(args[a], ()) for a in o.aliases))
-    for k in it.inputs:
-        del views[k]
-    return views
+def _is_unit(node) -> bool:
+    """Is the node a compiled unit, an OpFromGraph with `execution=COMPILED`? Its inner
+    graph is generated as one function."""
+    return isinstance(node.op, OpFromGraph) and node.op.execution is Execution.COMPILED
 
 
 def _layouts_note(reprs):

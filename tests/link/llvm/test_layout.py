@@ -359,9 +359,9 @@ def test_provided_layouts_are_binding():
     g = pytensor.function([s, t], out, mode=mode)
     p = f.maker.linker.program
     dump = p.dump()
-    # a graph output must be C-contiguous: the node writes an arena temporary in its
-    # declared order, which is copied into the output
-    assert "arena +0, order [1, 0]" in dump, dump
+    # a graph output must be C-contiguous: the node writes a temporary in its declared
+    # order, which is copied into the output
+    assert "on the stack, order [1, 0]" in dump, dump
     sv, tv = rng.normal(size=(4, 6)), rng.normal(size=(4, 6))
     for fn in (f, g):
         r = fn(sv, tv)

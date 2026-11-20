@@ -16,8 +16,10 @@
 * `basic`: Shape, Shape_i, MakeVector, Alloc, AllocEmpty, ARange, Reshape, Join, CheckAndRaise;
 * `shape`: views (DimShuffle, ViewOp, SpecifyShape) and DeepCopyOp;
 * `random`: random variables (draws from the call context's random state);
-* `unit`: compiled units (several nodes in one function), OpFromGraph layouts;
-* `call`: calls from generated code to kernels, numba and subprograms;
+* `items`: emitting the items of a graph into one function (`emit_items`);
+* `call`: calls from generated code to kernels (Rust, numba, compiled on their own);
+* `graph`: running a whole graph from generated code (a Scan's loop body, a Blockwise's
+  core, a compiled unit, the program's function);
 * `scan`: Scan as a generated loop;
 * `blockwise`: Blockwise as a generated loop over the batch, running the core node.
 """
@@ -29,12 +31,12 @@ from pytensor.link.llvm.codegen import (
     elemwise,
     extra,
     fused,
+    graph,
     random,
     scalar,
     scan,
     shape,
     subtensor,
-    unit,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.kernel import compile_node

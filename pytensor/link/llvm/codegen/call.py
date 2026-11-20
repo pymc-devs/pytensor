@@ -1,7 +1,6 @@
 """Calls from generated code to other kernels.
 
-Rust kernels, numba kernels, subprograms and separately compiled code all have the
-kernel ABI. Generated code calls them all the same way: it packs the arguments into
+Rust kernels, numba kernels and separately compiled code all have the kernel ABI. Generated code calls them all the same way: it packs the arguments into
 `PtArray`s (with the number of axes and the dtype of each), calls the kernel through its
 entry in the link table and reads back what the kernel wrote. A node implemented by such
 a kernel then has a node function like any other (`build_node_function(...,
@@ -33,8 +32,8 @@ from pytensor.link.llvm.codegen.types import (
 
 @dataclass
 class CalledKernel:
-    """A kernel that generated code calls for a node: a Rust kernel, a numba kernel or a
-    subprogram."""
+    """A kernel that generated code calls for a node: a Rust kernel, a numba kernel, or
+    code compiled on its own."""
 
     address: int
     #: the kernel's config (`const void* config` of the kernel ABI)
@@ -250,8 +249,8 @@ def build_call_function(
     module, name: str, signature, kernel: CalledKernel, links: LinkTable, index=None
 ):
     """A function (always inlined) with `signature` that calls `kernel`: how generated
-    code runs a kernel that isn't a node's (a compiled unit, a separately compiled node,
-    a subprogram), and nodes the planner gives a kernel. `index`: the kernel's entry
+    code runs a kernel that isn't a node's (a compiled unit, a separately compiled
+    node), and nodes the planner gives a kernel. `index`: the kernel's entry
     in `links` (default: linked here). Returns a `NodeFunction`."""
     from pytensor.link.llvm.codegen.emit import Codegen, unpack
     from pytensor.link.llvm.codegen.interface import ProvidedOutput, SlotOutput

@@ -24,32 +24,6 @@ class NodeItem:
     of_the_graph: bool = False
 
 
-@dataclass
-class UnitItem:
-    """Several items compiled as one function: an OpFromGraph with
-    `execution=COMPILED`."""
-
-    items: list[Item]
-    inputs: list[int]  # vids read from outside
-    outputs: list[tuple[int, int]]  # (inner vid, outer vid)
-    description: str
-    #: the OpFromGraph's node, and the vids of its inputs
-    node: Apply
-    node_inputs: list[int]
-
-
-@dataclass
-class SubprogramItem:
-    """An OpFromGraph with `execution=INTERPRETED`: a subprogram, compiled on its own."""
-
-    node: Apply
-    inputs: list[int]
-    outputs: list[int]
-
-
-Item = NodeItem | UnitItem | SubprogramItem
-
-
 class Values:
     """The values of a program: a type per value id, and the data of constants."""
 
@@ -84,22 +58,6 @@ class Values:
     def folded(self, k) -> bool:
         """0-d constants are folded into compiled units."""
         return k in self.consts and self.consts[k].ndim == 0
-
-    def unit_inputs(self, items) -> list:
-        """The values `items` read from outside (in order of first use)."""
-        produced = {k for it in items for k in it.outputs}
-        ins = []
-        for it in items:
-            for k in it.inputs:
-                if (
-                    k in produced
-                    or k in ins
-                    or self.folded(k)
-                    or is_absent(self.types[k])
-                ):
-                    continue
-                ins.append(k)
-        return ins
 
     def constants_of(self, items, extra=()) -> dict:
         """{vid: (type, data)} of the constants `items` read (and of the vids `extra`)."""
