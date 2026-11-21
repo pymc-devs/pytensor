@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pytensor.link.llvm.analysis.layout import Layout
+from pytensor.link.llvm.analysis.layout import Layout, same_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     c_array,
@@ -23,7 +23,6 @@ from pytensor.link.llvm.codegen.interface import (
     llvm_outputs,
 )
 from pytensor.link.llvm.codegen.types import ir, is_float
-from pytensor.link.llvm.dispatch.shape import SameView
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
 from pytensor.tensor.shape import Reshape, Shape, Shape_i
@@ -263,7 +262,7 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_outputs.register(CheckAndRaise)
 def _(op, node, input_layouts):
-    return [InputView(0, SameView(node))]
+    return [InputView(0, same_layout(node, input_layouts[0]))]
 
 
 @llvm_emit.register(CheckAndRaise)
@@ -274,4 +273,4 @@ def _(op, node, codegen, inputs, outputs):
         dtype = var.type.dtype
         ok = value if dtype == "bool" else cast(builder, value, dtype, "bool")
         codegen.check(ok, op.msg or "Assertion failed")
-    outputs[0].emit(codegen, inputs)
+    outputs[0].view(inputs[0])

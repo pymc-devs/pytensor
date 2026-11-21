@@ -281,7 +281,7 @@ def _handle(
     assert layout is not None
     match storage:
         case InputView():
-            return InputViewOutput(destination, storage, layout)
+            return InputViewOutput(destination, layout)
         case ViewOrCopy():
             return ViewOrCopyOutput(destination, layout)
         case InPlaceUpdate(input=input):

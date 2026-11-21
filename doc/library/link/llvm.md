@@ -110,10 +110,9 @@ so they come only from how a value is produced:
   kernel chose (the faer kernels: column-major; Sort: its input's order where known),
   Scan allocates C-contiguous, graph outputs the caller provides are C-contiguous,
   constants are stored in their own memory order (packed, else C);
-* a view's layout follows from its input's, by the op's view mapping (`InputView`:
-  DimShuffle, Subtensor, Split, SpecifyShape, ...; their rules in analysis/layout.py) or
-  the layout it declares for a view or a copy (`ViewOrCopy`: Reshape); a view nothing is
-  declared for is DYNAMIC;
+* a view's layout follows from its input's, as the op declares it (`InputView`:
+  DimShuffle, Subtensor, Split, SpecifyShape, ...; `ViewOrCopy`: Reshape; the rules in
+  analysis/layout.py); a view nothing is declared for is DYNAMIC;
 * an output that updates an input in place (`InPlaceUpdate`, section 3) has that input's layout, where new
   memory can have it too (packed, or implied by C-contiguous), else DYNAMIC: whether it
   does overwrite it is decided when planning;
@@ -262,7 +261,7 @@ declared.
 | storage | meaning | layout | handle |
 |---|---|---|---|
 | `NewBuffer(layout)` | new memory | `layout` (default C) | `allocate(shape)` |
-| `InputView(input, mapping)` | always a view of `input` | `mapping.layout(input's layout)` | `emit(cg, inputs)`: `mapping.apply` builds the view |
+| `InputView(input, layout)` | always a view of `input` | `layout` | `view(array)` |
 | `ViewOrCopy(inputs, layout)` | a view of one of `inputs`, or new memory | `layout` | `view(array)`, `allocate(shape)` |
 | `InPlaceUpdate(input)` | `input`, with changes | the input's, where new memory can have it too (`new_memory_layout`) | `buffer()`, `buffer_holding_input()` |
 
@@ -294,8 +293,8 @@ Layouts are binding:
   any layout;
 * callee slot: `allocate` gives memory in the declared layout; a `ViewOrCopy` view is
   checked, when generating the code, to have a layout implying the declared one; an
-  `InputView` gets the layout its mapping computed, and `check_layouts` verifies at run
-  time that its strides match.
+  `InputView` is given the declared layout, and `check_layouts` (off by default)
+  verifies at run time that its strides match.
 
 | passing | argument | the caller | the called function |
 |---|---|---|---|
@@ -317,8 +316,7 @@ only then, else copied.
 **What emitters do** (`codegen/interface.py`). An emitter gets an `Array` per tensor
 input, read-only unless an `InPlaceUpdate` output may reuse it (`writable`), and per
 output the handle of its storage (above), or a `ScalarOutput` (`set(value)`) for a
-ScalarType value. An op whose outputs are all views registers `emit_input_views` as its
-emitter. Ops that run an inner graph (Scan, Blockwise, compiled units) hand each
+ScalarType value. Ops that run an inner graph (Scan, Blockwise, compiled units) hand each
 handle's `destination` on to it (`codegen/destination.py`: caller memory, an output
 slot, a scalar pointer, or their own, like a row of a Scan's buffer).
 

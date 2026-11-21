@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import operator
-from dataclasses import dataclass
 
-from pytensor.graph.basic import Apply
 from pytensor.link.llvm.analysis.layout import Layout, split_layouts
 from pytensor.link.llvm.codegen.emit import Array, Codegen, constant, copy, size
 from pytensor.link.llvm.codegen.interface import (
@@ -50,121 +48,83 @@ def _(op, node, cg, inputs, outputs):
     level(x, out, op.axis % x.ndim)
 
 
-@dataclass(frozen=True)
-class DiagonalView:
-    """The diagonal of two axes, as the last axis of a view."""
-
-    op: ExtractDiag
-    node: Apply
-
-    def layout(self, source: Layout) -> Layout:
-        return Layout.dynamic(self.node.outputs[0].type.ndim)
-
-    def apply(self, codegen: Codegen, inputs: list) -> Array:
-        builder = codegen.b
-        source: Array = inputs[0]
-        axis1, axis2 = self.op.axis1 % source.ndim, self.op.axis2 % source.ndim
-        offset = int(self.op.offset)
-        # length = max(0, min(n1 - max(0, -offset), n2 - max(0, offset)))
-        length1 = builder.sub(source.shape[axis1], max(0, -offset))
-        length2 = builder.sub(source.shape[axis2], max(0, offset))
-        length = builder.smax(builder.smin(length1, length2), 0)
-        if offset >= 0:
-            start = builder.mul(source.strides[axis2], offset, nsw=True)
-        else:
-            start = builder.mul(source.strides[axis1], -offset, nsw=True)
-        start = builder.select(builder.sgt(length, 0), start, 0)
-        kept = [a for a in range(source.ndim) if a not in (axis1, axis2)]
-        shape = [source.shape[a] for a in kept] + [length]
-        strides = [source.strides[a] for a in kept] + [
-            builder.add(source.strides[axis1], source.strides[axis2])
-        ]
-        return source.view(builder.gep_bytes(source.data, start), shape, strides)
+def _diagonal(codegen: Codegen, op: ExtractDiag, source: Array) -> Array:
+    """Return the diagonal of two axes of `source`, as the last axis of a view."""
+    builder = codegen.b
+    axis1, axis2 = op.axis1 % source.ndim, op.axis2 % source.ndim
+    offset = int(op.offset)
+    # length = max(0, min(n1 - max(0, -offset), n2 - max(0, offset)))
+    length1 = builder.sub(source.shape[axis1], max(0, -offset))
+    length2 = builder.sub(source.shape[axis2], max(0, offset))
+    length = builder.smax(builder.smin(length1, length2), 0)
+    if offset >= 0:
+        start = builder.mul(source.strides[axis2], offset, nsw=True)
+    else:
+        start = builder.mul(source.strides[axis1], -offset, nsw=True)
+    start = builder.select(builder.sgt(length, 0), start, 0)
+    kept = [a for a in range(source.ndim) if a not in (axis1, axis2)]
+    shape = [source.shape[a] for a in kept] + [length]
+    strides = [source.strides[a] for a in kept] + [
+        builder.add(source.strides[axis1], source.strides[axis2])
+    ]
+    return source.view(builder.gep_bytes(source.data, start), shape, strides)
 
 
 @llvm_outputs.register(ExtractDiag)
 def _(op, node, input_layouts):
     if op.view:
-        return [InputView(0, DiagonalView(op, node))]
+        return [InputView(0, Layout.dynamic(node.outputs[0].type.ndim))]
     return [NewBuffer()]
 
 
 @llvm_emit.register(ExtractDiag)
 def _(op, node, codegen, inputs, outputs):
     (output,) = outputs
+    diagonal = _diagonal(codegen, op, inputs[0])
     if isinstance(output, InputViewOutput):
-        output.emit(codegen, inputs)
-        return
-    diagonal = DiagonalView(op, node).apply(codegen, inputs)
-    copy(codegen, diagonal, output.allocate(diagonal.shape))
-
-
-def _split_sizes(builder, op: Split, node: Apply, splits: Array) -> list:
-    """Return the length of each part along the split axis (i64)."""
-    sizes = []
-    for k, output in enumerate(node.outputs):
-        static = output.type.shape[op.axis]
-        if static is not None:
-            sizes.append(builder.i64(static))
-        else:
-            sizes.append(splits.load(builder, k).astype("int64").value)
-    return sizes
-
-
-@dataclass(frozen=True)
-class SplitPartView:
-    """Part `part` of the input, split along `op.axis`."""
-
-    op: Split
-    node: Apply
-    part: int
-
-    def layout(self, source: Layout) -> Layout:
-        return split_layouts(self.op, self.node, source)[self.part]
-
-    def apply(self, codegen: Codegen, inputs: list) -> Array:
-        builder = codegen.b
-        source: Array = inputs[0]
-        sizes = _split_sizes(builder, self.op, self.node, inputs[1])
-        start = builder.i64(0)
-        for length in sizes[: self.part]:
-            start = builder.add(start, length)
-        length = sizes[self.part]
-        # an empty part may start at the end: keep the pointer inside the array
-        start = builder.select(builder.sgt(length, 0), start, 0)
-        stride = source.strides[self.op.axis]
-        data = builder.gep_bytes(source.data, builder.mul(start, stride, nsw=True))
-        shape = list(source.shape)
-        shape[self.op.axis] = length
-        return source.view(data, shape, list(source.strides))
+        output.view(diagonal)
+    else:
+        copy(codegen, diagonal, output.allocate(diagonal.shape))
 
 
 @llvm_outputs.register(Split)
 def _(op, node, input_layouts):
-    return [InputView(0, SplitPartView(op, node, k)) for k in range(len(node.outputs))]
+    return [
+        InputView(0, layout) for layout in split_layouts(op, node, input_layouts[0])
+    ]
 
 
 @llvm_emit.register(Split)
 def _(op, node, codegen, inputs, outputs):
     builder = codegen.b
     source, splits = inputs
-    total = builder.i64(0)
-    for k in range(len(node.outputs)):
-        given = splits.load(builder, k).astype("int64").value
-        codegen.check(builder.sge(given, 0), "Split: negative split size")
-        static = node.outputs[k].type.shape[op.axis]
+    axis = op.axis
+    offset = builder.i64(0)
+    parts = []
+    for k, var in enumerate(node.outputs):
+        length = splits.load(builder, k).astype("int64").value
+        codegen.check(builder.sge(length, 0), "Split: negative split size")
+        static = var.type.shape[axis]
         if static is not None:
             codegen.check(
-                builder.eq(given, static),
+                builder.eq(length, static),
                 "Split: split size differs from the static shape",
             )
-        total = builder.add(total, given)
+            length = builder.i64(static)
+        parts.append((offset, length))
+        offset = builder.add(offset, length)
     codegen.check(
-        builder.eq(total, source.shape[op.axis]),
+        builder.eq(offset, source.shape[axis]),
         "Split: the split sizes don't add up to the length of the axis",
     )
-    for output in outputs:
-        output.emit(codegen, inputs)
+    for output, (start, length) in zip(outputs, parts, strict=True):
+        shape = list(source.shape)
+        shape[axis] = length
+        # an empty part may start at the end: keep the pointer inside the array
+        start = builder.select(builder.sgt(length, 0), start, 0)
+        byte_offset = builder.mul(start, source.strides[axis], nsw=True)
+        data = builder.gep_bytes(source.data, byte_offset)
+        output.view(source.view(data, shape, list(source.strides)))
 
 
 @llvm_emit.register(Argmax)

@@ -19,7 +19,7 @@ its strides. They come from how a value is produced:
 
 * memory the planner provides (arena, fresh outputs) and buffers that generated code,
   Rust kernels and Scan allocate are C-contiguous;
-* views get theirs from their input's (the op's view mapping, with the rules below);
+* views get theirs from their input's (as the op declares, with the rules below);
 * numba kernels allocate their outputs packed, in the order asked for (default C);
 * graph inputs are DYNAMIC unless checked.
 
@@ -338,7 +338,7 @@ def remove_axis(layout: Layout, axis, shape, itemsize) -> Layout:
 
 
 # ------------------------------------------------------------------ layouts of views
-# (used by the ops' view mappings, next to their emitters)
+# (used by the ops' `llvm_outputs`, next to their emitters)
 
 
 def same_layout(node, x: Layout) -> Layout:

@@ -374,17 +374,10 @@ def test_provided_layouts_are_binding():
 
 
 def test_view_layout_is_checked_at_run_time():
-    """A view's layout comes from its mapping; `check_layouts` verifies the claim."""
-    from dataclasses import dataclass
-
+    """A view gets the layout its op declares; `check_layouts` verifies the claim."""
     from pytensor.graph.basic import Apply
     from pytensor.graph.op import Op
-    from pytensor.link.llvm.codegen.interface import (
-        InputView,
-        emit_input_views,
-        llvm_emit,
-        llvm_outputs,
-    )
+    from pytensor.link.llvm.codegen.interface import InputView, llvm_emit, llvm_outputs
 
     class BadTranspose(Op):
         """Claims its view is C-contiguous, but returns the transpose."""
@@ -397,20 +390,14 @@ def test_view_layout_is_checked_at_run_time():
         def perform(self, node, inputs, out):
             out[0][0] = inputs[0].T
 
-    @dataclass(frozen=True)
-    class WrongClaim:
-        def layout(self, source):
-            return C(2)
-
-        def apply(self, codegen, inputs):
-            x = inputs[0]
-            return x.view(x.data, x.shape[::-1], x.strides[::-1])
-
     @llvm_outputs.register(BadTranspose)
     def _(op, node, input_layouts):
-        return [InputView(0, WrongClaim())]
+        return [InputView(0, C(2))]
 
-    llvm_emit.register(BadTranspose, emit_input_views)
+    @llvm_emit.register(BadTranspose)
+    def _(op, node, codegen, inputs, outputs):
+        x = inputs[0]
+        outputs[0].view(x.view(x.data, x.shape[::-1], x.strides[::-1]))
 
     x = pt.dmatrix("x")
     node = BadTranspose()(x).owner

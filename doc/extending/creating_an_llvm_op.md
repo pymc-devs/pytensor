@@ -678,7 +678,7 @@ Every output has a *storage*: where its memory comes from. The op declares it wi
 | storage | meaning | the emitter gets | and calls |
 |---|---|---|---|
 | `NewBuffer(layout=None)` | new memory, C-contiguous or packed in `layout` | `NewBufferOutput` | `allocate(shape)` |
-| `InputView(input, mapping)` | always a view of one input | `InputViewOutput` | `emit(cg, inputs)` |
+| `InputView(input, layout)` | always a view of one input, with `layout` | `InputViewOutput` | `view(array)` |
 | `ViewOrCopy(inputs, layout)` | a view of one of `inputs`, or new memory | `ViewOrCopyOutput` | `view(array)` or `allocate(shape)` |
 | `InPlaceUpdate(input)` | the input, with changes | `InPlaceOutput` | `buffer()` or `buffer_holding_input()` |
 
@@ -720,62 +720,43 @@ class Reverse(Op):
 reverse = Reverse()
 ```
 
-A view is described by a `ViewMapping`: an object with two methods that describe the
-same view twice. `layout(source)` says, before the program runs, what is known about
-the view's strides given its input's layout. `apply(cg, inputs)` builds the view in
-generated code, from the input with `x.view(data, shape, strides)` or `x.at(...)`, which
-remember where they come from. The handle gives the view the layout `layout` computed,
-so the emitter never repeats it.
-
+The declaration says what is known about the view's strides, given its input's layout.
 The stride of a reversed vector is minus the stride of the input, so if the one is
 known, so is the other:
 
 ```python
-from dataclasses import dataclass
-
 from pytensor.link.llvm.analysis.layout import itemsize_of, shape_of
-from pytensor.link.llvm.codegen.interface import (
-    InputView,
-    emit_input_views,
-    llvm_outputs,
-)
-
-
-@dataclass(frozen=True)
-class ReversedView:
-    node: Apply
-
-    def layout(self, source: Layout) -> Layout:
-        var = self.node.inputs[0]
-        stride = source.static_stride(0, shape_of(var), itemsize_of(var))
-        return Layout.make(
-            shape_of(self.node.outputs[0]),
-            (0,),
-            (DYNAMIC if stride is None else -stride,),
-        )
-
-    def apply(self, cg, inputs):
-        b = cg.b
-        (x,) = inputs
-        (n,) = x.shape
-        (stride,) = x.strides
-        # the last element (the first, for an empty vector: stay inside the array)
-        last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
-        return x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)])
+from pytensor.link.llvm.codegen.interface import InputView, llvm_outputs
 
 
 @llvm_outputs.register(Reverse)
 def _(op, node, input_layouts):
-    return [InputView(0, ReversedView(node))]
-
-
-llvm_emit.register(Reverse, emit_input_views)
+    var = node.inputs[0]
+    stride = input_layouts[0].static_stride(0, shape_of(var), itemsize_of(var))
+    layout = Layout.make(
+        shape_of(node.outputs[0]), (0,), (DYNAMIC if stride is None else -stride,)
+    )
+    return [InputView(0, layout)]
 ```
 
-An op whose outputs are all views needs no emitter of its own: `emit_input_views`
-builds each one. An emitter that does more (a check first, as `SpecifyShape` does)
-calls `outputs[k].emit(cg, inputs)` itself. Whether the view is handed on as a view or
-copied (into memory a caller provides, say) is not the emitter's business.
+The emitter builds the view from the input, with `x.view(data, shape, strides)` or
+`x.at(...)`, which remember where they come from, and hands it to `view`. It doesn't
+repeat the layout: the handle gives the view the declared one.
+
+```python
+@llvm_emit.register(Reverse)
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
+    (x,) = inputs
+    (n,) = x.shape
+    (stride,) = x.strides
+    # the last element (the first, for an empty vector: stay inside the array)
+    last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
+    outputs[0].view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)]))
+```
+
+Whether the view is handed on as a view or copied (into memory a caller provides, say)
+is not the emitter's business.
 
 ```python
 r = pytensor.function([x], cummax(reverse(x)), mode=STRICT)
@@ -796,9 +777,9 @@ print(r.maker.linker.program.dump())
 ```
 
 `CumMax` runs backwards over the input with a constant stride of -8 bytes, with no copy
-in between. `Layout.dynamic(ndim)` is always a correct `layout`, and never a fast one.
-The backend's own view mappings are in the modules of their ops (`DimShuffleView`,
-`SubtensorView`), with their layout rules in `analysis/layout.py`.
+in between. `Layout.dynamic(ndim)` is always a correct layout, and never a fast one.
+The layout rules of the backend's own views are in `analysis/layout.py`
+(`dimshuffle_layout`, `subtensor_layout`).
 
 Some ops can only sometimes return a view: a reshape of a non-contiguous array copies.
 They declare `ViewOrCopy`, with the layout both cases have, and their emitter calls
@@ -938,7 +919,8 @@ transposed result instead of a strided loop. For new memory the layout must be p
 
   @llvm_outputs.register(Forgetful)
   def _(op, node, input_layouts):
-      return [ViewOrCopy((0,), ReversedView(node).layout(input_layouts[0]))]
+      (view,) = llvm_outputs.dispatch(Reverse)(op, node, input_layouts)
+      return [ViewOrCopy((0,), view.layout)]
 
 
   @llvm_emit.register(Forgetful)
@@ -953,9 +935,11 @@ transposed result instead of a strided loop. For new memory the layout must be p
 
 * The linker option `check_layouts=True` (or `PYTENSOR_LLVM_CHECK_LAYOUTS=1`) makes
   every generated step verify, when it runs, that its arguments have the layouts it
-  was generated for, and that every `InputView` has the layout its mapping claims. It
-  costs a few comparisons per step. Use it in the tests of any op with its own view
-  mapping: it catches a `layout` that doesn't match what `apply` builds.
+  was generated for, and that every `InputView` has the layout its op declares. It
+  costs a few comparisons per step, so it is off by default: without it, no check is
+  generated and a wrong declaration gives wrong results. Use it in the tests of any op
+  that declares a view's layout: it catches a layout that doesn't match the view the
+  emitter builds.
 
 ## 6. Temporary memory
 

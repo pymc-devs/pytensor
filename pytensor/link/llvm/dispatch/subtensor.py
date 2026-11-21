@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from pytensor.graph.basic import Apply
-from pytensor.link.llvm.analysis.layout import Layout, subtensor_layout
+from pytensor.link.llvm.analysis.layout import subtensor_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
-    Codegen,
     cast,
     checked_index,
     for_each,
@@ -19,7 +15,6 @@ from pytensor.link.llvm.codegen.emit import (
 from pytensor.link.llvm.codegen.interface import (
     InPlaceUpdate,
     InputView,
-    emit_input_views,
     llvm_emit,
     llvm_outputs,
 )
@@ -95,26 +90,14 @@ def _entries(op, node, inputs, first):
     return unflatten_index_variables(values, op.idx_list)
 
 
-@dataclass(frozen=True)
-class SubtensorView:
-    """The input indexed by slices and integers."""
-
-    op: Subtensor
-    node: Apply
-
-    def layout(self, source: Layout) -> Layout:
-        return subtensor_layout(self.op, self.node, source)
-
-    def apply(self, codegen: Codegen, inputs: list) -> Array:
-        return index(codegen, inputs[0], _entries(self.op, self.node, inputs, 1))
-
-
 @llvm_outputs.register(Subtensor)
 def _(op, node, input_layouts):
-    return [InputView(0, SubtensorView(op, node))]
+    return [InputView(0, subtensor_layout(op, node, input_layouts[0]))]
 
 
-llvm_emit.register(Subtensor, emit_input_views)
+@llvm_emit.register(Subtensor)
+def _(op, node, codegen, inputs, outputs):
+    outputs[0].view(index(codegen, inputs[0], _entries(op, node, inputs, 1)))
 
 
 @llvm_outputs.register(IncSubtensor)

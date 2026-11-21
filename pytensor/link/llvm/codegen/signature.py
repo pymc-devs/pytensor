@@ -216,12 +216,8 @@ def _resolve(
             if layout is None:
                 layout = Layout.c(var.type.ndim)
             return Output(repr_of(var.type, layout), storage, new_memory)
-        case InputView(input=input, mapping=mapping):
+        case InputView(input=input, layout=layout):
             _check_view(node, position, (input,))
-            source = input_layouts[input]
-            if source is None:
-                raise ValueError(f"{node.op}: output {position} views a non-tensor")
-            layout = mapping.layout(source)
             return Output(
                 repr_of(var.type, layout), storage, Passing.CALLEE_SLOT, (input,)
             )

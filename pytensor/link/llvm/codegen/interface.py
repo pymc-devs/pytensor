@@ -15,8 +15,7 @@ that matches it:
 storage            handle                 the emitter
 =================  =====================  =========================================
 `NewBuffer`        `NewBufferOutput`      `allocate(shape)`, then writes the result
-`InputView`        `InputViewOutput`      `emit(codegen, inputs)`, or registers
-                                          `emit_input_views` as its emitter
+`InputView`        `InputViewOutput`      `view(array)`
 `ViewOrCopy`       `ViewOrCopyOutput`     `view(array)` or `allocate(shape)`
 `InPlaceUpdate`    `InPlaceOutput`        `buffer()` or `buffer_holding_input()`
 (ScalarType)       `ScalarOutput`         `set(value)`
@@ -36,7 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import singledispatch
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.analysis.layout import Layout
@@ -59,27 +58,6 @@ EmitterInput = Array | ir.Value | None
 # ------------------------------------------------------------------ storage
 
 
-class ViewMapping(Protocol):
-    """How a view is made from its input, once for the planner and once for codegen.
-
-    Both methods describe the same view: `layout` is what the planner relies on before
-    the program runs, and `apply` builds the view in generated code. Keeping them in
-    one object keeps them next to each other; with the `check_layouts` option, the
-    generated code also verifies at run time that the view's strides match `layout`.
-    """
-
-    def layout(self, source: Layout) -> Layout:
-        """Return the view's layout, given the layout of the input it views."""
-        ...
-
-    def apply(self, codegen: Codegen, inputs: list[EmitterInput]) -> Array:
-        """Build the view from the node's inputs.
-
-        The returned array's layout doesn't matter: the handle replaces it with
-        `layout(...)`."""
-        ...
-
-
 @dataclass(frozen=True)
 class NewBuffer:
     """The output is written into new memory, packed in `layout`.
@@ -92,10 +70,15 @@ class NewBuffer:
 
 @dataclass(frozen=True)
 class InputView:
-    """The output is always a view of the node input at position `input`."""
+    """The output is always a view of the node input at position `input`, with
+    `layout`.
+
+    The emitter builds the view, and the handle gives it `layout`, so the layout rule
+    runs only here. With the `check_layouts` option, the generated code verifies at run
+    time that the view's strides match it."""
 
     input: int
-    mapping: ViewMapping
+    layout: Layout
 
 
 @dataclass(frozen=True)
@@ -178,17 +161,19 @@ class InputViewOutput:
     """The handle of an `InputView` output."""
 
     destination: OutputDestination
-    storage: InputView
-    #: the view's layout, as the planner computed it
+    #: the declared layout, for the inputs' layouts the code is generated for
     layout: Layout
 
     @property
     def dtype(self) -> str:
         return self.destination.dtype
 
-    def emit(self, codegen: Codegen, inputs: list[EmitterInput]) -> Array:
-        """Build the view and make it the result."""
-        view = self.storage.mapping.apply(codegen, inputs).with_layout(self.layout)
+    def view(self, array: Array) -> Array:
+        """Make `array`, a view of the declared input, the result.
+
+        It gets the declared layout (checked at run time with `check_layouts`)."""
+        view = array.with_layout(self.layout)
+        codegen = self.destination.codegen
         if codegen.check_layouts:
             check_strides(codegen, view, self.layout, "a view")
         return self.destination.assign(view)
@@ -277,20 +262,6 @@ def destinations(outputs: list) -> list[OutputDestination | None]:
     return [None if output is None else output.destination for output in outputs]
 
 
-def emit_input_views(
-    op, node: Apply, codegen: Codegen, inputs: list, outputs: list
-) -> None:
-    """The emitter of an op whose outputs are all `InputView`s: register it as
-    `llvm_emit.register(SomeOp, emit_input_views)`."""
-    for output in outputs:
-        if not isinstance(output, InputViewOutput):
-            raise TypeError(
-                f"{op}: emit_input_views needs InputView outputs, got "
-                f"{type(output).__name__}"
-            )
-        output.emit(codegen, inputs)
-
-
 __all__ = [
     "EmitterInput",
     "EmitterOutput",
@@ -302,11 +273,9 @@ __all__ = [
     "NewBufferOutput",
     "OutputStorage",
     "ScalarOutput",
-    "ViewMapping",
     "ViewOrCopy",
     "ViewOrCopyOutput",
     "destinations",
-    "emit_input_views",
     "has_emitter",
     "llvm_emit",
     "llvm_outputs",
