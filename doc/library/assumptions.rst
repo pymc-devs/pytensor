@@ -32,6 +32,8 @@ Inspecting assumptions
 
 .. autofunction:: pytensor.assumptions.check_assumption
 
+.. autofunction:: pytensor.assumptions.get_assumption_value
+
 .. autoclass:: pytensor.assumptions.AssumptionFeature
    :members: get, check
 

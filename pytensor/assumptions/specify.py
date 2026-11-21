@@ -1,9 +1,10 @@
 from collections.abc import Sequence
+from typing import Any
 
 from pytensor.assumptions.core import (
     KEY_REGISTRY,
     AssumptionKey,
-    FactState,
+    OrthogonalFact,
     register_universal_assumption,
 )
 from pytensor.compile.ops import TypeCastingOp
@@ -15,23 +16,24 @@ from pytensor.tensor.basic import as_tensor_variable
 class SpecifyAssumptions(TypeCastingOp):
     """No-op that declares structural assumptions on a tensor for use by graph rewrites.
 
-    ``assumptions`` is a tuple of ``(AssumptionKey, FactState)`` pairs sorted by key
-    name. Declaring a fact therefore requires holding the key itself, and constructing
-    a key registers it, so a graph cannot carry an assumption the system has never
-    heard of. Two instances with the same fact set compare equal via ``__props__``, so
-    PyTensor's graph merge collapses duplicates.
+    ``assumptions`` is a tuple of ``(AssumptionKey, value)`` pairs sorted by key
+    name, each value converted with :meth:`AssumptionKey.coerce`. Declaring a fact therefore
+    requires holding the key itself, and constructing a key registers it, so a graph
+    cannot carry an assumption the system has never heard of. Two instances with the
+    same fact set compare equal via ``__props__``, so PyTensor's graph merge collapses
+    duplicates.
 
     Parameters
     ----------
-    assumptions : dict mapping AssumptionKey to FactState
-        The facts to declare.
+    assumptions : dict mapping AssumptionKey to value
+        The facts to declare, a :class:`FactState` for each boolean key.
     """
 
     __props__ = ("assumptions",)
 
-    assumptions: tuple[tuple[AssumptionKey, FactState], ...]
+    assumptions: tuple[tuple[AssumptionKey, Any], ...]
 
-    def __init__(self, assumptions: dict[AssumptionKey, FactState]):
+    def __init__(self, assumptions: dict[AssumptionKey, Any]):
         super().__init__()
         passed_by_name = [
             key for key in assumptions if not isinstance(key, AssumptionKey)
@@ -43,14 +45,13 @@ class SpecifyAssumptions(TypeCastingOp):
                 f"with assume()."
             )
         self.assumptions = tuple(
-            (key, FactState(state))
+            (key, key.coerce(state))
             for key, state in sorted(assumptions.items(), key=lambda kv: kv[0].name)
         )
 
     def __str__(self):
         facts = ", ".join(
-            key.name if state is FactState.TRUE else f"!{key.name}"
-            for key, state in self.assumptions
+            key.format_fact(key.name, state) for key, state in self.assumptions
         )
         return f"{type(self).__name__}{{{facts}}}"
 
@@ -77,7 +78,7 @@ def specify_assumption_rule(key, op, feature, fgraph, node, input_states):
     ``diagonal=False`` on something proved diagonal)."""
     for declared_key, state in op.assumptions:
         if declared_key == key:
-            return [FactState.join(state, input_states[0])]
+            return [key.join(state, input_states[0])]
     return [input_states[0]]
 
 
@@ -88,19 +89,20 @@ def assume(
     upper_triangular: bool | None = None,
     symmetric: bool | None = None,
     positive_definite: bool | None = None,
-    orthogonal: bool | None = None,
+    orthogonal: bool | OrthogonalFact | set[OrthogonalFact] | None = None,
     selection: bool | None = None,
     permutation: bool | None = None,
     unique_indices: bool | None = None,
     tridiagonal: bool | None = None,
     unit_magnitude: bool | None = None,
-    **assumptions: bool | None,
+    **assumptions: Any,
 ):
     """Attach structural assumptions to a symbolic tensor.
 
     Returns a tensor identical to *x* at runtime but carrying the declared assumptions so that
-    graph rewrites can exploit them. Each keyword may be ``True`` (assert the property holds),
-    ``False`` (assert it does not hold), or ``None`` (no assertion).
+    graph rewrites can exploit them. Each boolean keyword may be ``True`` (assert the property
+    holds), ``False`` (assert it does not hold), or ``None`` (no assertion). A key that carries
+    a value takes that value, or ``None``.
 
     Parameters
     ----------
@@ -116,8 +118,10 @@ def assume(
         Assert that *x* is (or is not) symmetric.
     positive_definite : bool, optional
         Assert that *x* is (or is not) positive-definite.
-    orthogonal : bool, optional
+    orthogonal : bool, {"columns", "rows", "not_orthogonal"} or set of them, optional
         Assert that *x* is (or is not) orthogonal. For complex *x* this means unitary.
+        ``"columns"`` or ``"rows"`` asserts only that side is orthonormal, and
+        ``"not_orthogonal"`` is the same as ``False``.
     selection : bool, optional
         Assert that *x* is (or is not) a selection matrix
     permutation : bool, optional
@@ -132,9 +136,10 @@ def assume(
         Assert that *x* is (or is not) tridiagonal.
     unit_magnitude : bool, optional
         Assert that every element of *x* has absolute value one.
-    **assumptions : bool, optional
+    **assumptions : bool or value, optional
         Assumptions registered by downstream libraries, passed by key name, e.g.
-        ``time_varying=True``.
+        ``time_varying=True``. A key that carries a value takes it in the form its
+        :meth:`AssumptionKey.declare` accepts.
 
     Returns
     -------
@@ -178,7 +183,7 @@ def assume(
         )
 
     declared = {
-        KEY_REGISTRY[name]: FactState.TRUE if value else FactState.FALSE
+        KEY_REGISTRY[name]: KEY_REGISTRY[name].declare(value)
         for name, value in (core_values | assumptions).items()
         if value is not None
     }

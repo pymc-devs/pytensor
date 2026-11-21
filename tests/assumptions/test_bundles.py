@@ -67,19 +67,31 @@ def test_prepend_decides_which_rule_answers(prepend, expected):
     assert af.get(expanded, TOEPLITZ) is expected
 
 
-@pytest.mark.parametrize("key", MATRIX_KEYS, ids=lambda k: k.name)
 @pytest.mark.parametrize(
-    "op_type",
-    [DimShuffle, Reshape, SpecifyShape, JoinDims, SplitDims, Alloc, IncSubtensor],
-    ids=lambda op: op.__name__,
+    "key, op_type",
+    [
+        pytest.param(key, op_type, id=f"{op_type.__name__}-{key.name}")
+        for op_type in [
+            DimShuffle,
+            Reshape,
+            SpecifyShape,
+            JoinDims,
+            SplitDims,
+            Alloc,
+            IncSubtensor,
+        ]
+        for key in MATRIX_KEYS
+        if key.value_type is FactState or op_type is not IncSubtensor
+    ],
 )
 def test_core_matrix_keys_carry_the_bundled_rules(key, op_type):
     """The bundle stays in step with what the built-in matrix properties register.
 
     ``Subtensor`` is excluded: ``SELECTION`` registers its own rule there instead of the
-    shared one, so that Op is deliberately not uniform across the built-in keys.
+    shared one, so that Op is deliberately not uniform across the built-in keys. The
+    bundle gives valued keys no ``IncSubtensor`` rule, so those pairs are excluded too.
     """
-    probe = AssumptionKey("probe")
+    probe = type(key)("probe")
     register_matrix_property_rules(probe)
 
     bundled = set(ASSUMPTION_INFER_REGISTRY[(probe, op_type)])

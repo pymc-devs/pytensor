@@ -17,11 +17,11 @@ def reshape_propagates_matrix_property(
     in_shape = node.inputs[0].type.shape
     out_shape = node.outputs[0].type.shape
     if len(in_shape) < 2 or len(out_shape) < 2:
-        return [FactState.UNKNOWN]
+        return [key.unknown]
     in_core = in_shape[-2:]
     out_core = out_shape[-2:]
     if None in in_core or None in out_core or in_core != out_core:
-        return [FactState.UNKNOWN]
+        return [key.unknown]
     return [input_states[0]]
 
 

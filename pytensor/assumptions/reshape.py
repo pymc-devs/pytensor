@@ -10,7 +10,7 @@ def join_dims_propagates_matrix_property(
     core_start = node.inputs[0].type.ndim - 2
     if op.start_axis + op.n_axes <= core_start:
         return [input_states[0]]
-    return [FactState.UNKNOWN]
+    return [key.unknown]
 
 
 def split_dims_propagates_matrix_property(
@@ -20,7 +20,7 @@ def split_dims_propagates_matrix_property(
     is not one of the trailing two (core) axes."""
     if op.axis < node.inputs[0].type.ndim - 2:
         return [input_states[0]]
-    return [FactState.UNKNOWN]
+    return [key.unknown]
 
 
 for _key in MATRIX_KEYS:

@@ -376,6 +376,19 @@ def test_unitary_dot_conjugate_transpose_to_eye():
     result.assert_graph(*rewrite_graph([eye, eye, x @ x.mT], include=passes))
 
 
+def test_one_orthonormal_side_gives_eye_only_on_that_side():
+    x = pt.matrix("x", shape=(5, 3))
+    y = pt.matrix("y", shape=(3, 5))
+    Q, _ = pt.linalg.qr(x, mode="economic")
+    wide = assume(y, orthogonal="rows")
+    outs = [Q.mT @ Q, Q @ Q.mT, wide @ wide.mT, wide.mT @ wide]
+
+    passes = ("canonicalize", "ShapeOpt")
+    result = RewriteTester([x, y], outs, include=passes)
+    expected = [pt.eye(3), Q @ Q.mT, pt.eye(3), wide.mT @ wide]
+    result.assert_graph(*rewrite_graph(expected, include=passes))
+
+
 class TestSelectionDotToIndexing:
     n = 6
     idx_val = np.array([0, 2, 5, 1])

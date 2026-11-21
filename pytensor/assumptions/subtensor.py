@@ -85,4 +85,5 @@ def incsubtensor_propagates_matrix_property(
 
 
 for _key in MATRIX_KEYS:
-    register_assumption(_key, IncSubtensor)(incsubtensor_propagates_matrix_property)
+    if _key.value_type is FactState:
+        register_assumption(_key, IncSubtensor)(incsubtensor_propagates_matrix_property)

@@ -44,10 +44,10 @@ def dimshuffle_propagates_matrix_property(
     Matrix transpose, which swaps the core axes, is handled per-key."""
     input_ndim = op.input_ndim
     if input_ndim < 2:
-        return [FactState.UNKNOWN]
+        return [key.unknown]
     if tuple(op.new_order[-2:]) == (input_ndim - 2, input_ndim - 1):
         return [input_states[0]]
-    return [FactState.UNKNOWN]
+    return [key.unknown]
 
 
 for _key in MATRIX_KEYS:

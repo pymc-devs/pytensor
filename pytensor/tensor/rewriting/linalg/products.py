@@ -7,7 +7,9 @@ from pytensor.assumptions import (
     PERMUTATION,
     SELECTION,
     check_assumption,
+    get_assumption_value,
 )
+from pytensor.assumptions.core import ORTHONORMAL_COLUMNS, ORTHONORMAL_ROWS
 from pytensor.assumptions.dimshuffle import conjugate_transpose_input
 from pytensor.assumptions.selection import column_selection_index
 from pytensor.graph.rewriting.basic import (
@@ -236,20 +238,21 @@ def expm_of_diag(fgraph, node):
 @register_stabilize
 @node_rewriter([Dot, blockwise_of(Dot)])
 def orthogonal_dot_transpose_to_eye(fgraph, node):
-    """Replace X @ X.H -> eye and X.H @ X -> eye when X is orthogonal.
+    """Replace X @ X.H -> eye when X has orthonormal rows, and X.H @ X -> eye when X has
+    orthonormal columns.
 
-    X is unitary for complex X. For real X, X.H is X.T.
+    X.H is the conjugate transpose, so for real X it is X.T.
     """
     a, b = node.inputs
 
     if conjugate_transpose_input(b) is a:
-        X, size = a, a.shape[-2]
+        X, size, side = a, a.shape[-2], ORTHONORMAL_ROWS
     elif conjugate_transpose_input(a) is b:
-        X, size = b, b.shape[-1]
+        X, size, side = b, b.shape[-1], ORTHONORMAL_COLUMNS
     else:
         return None
 
-    if not check_assumption(fgraph, X, ORTHOGONAL):
+    if side not in get_assumption_value(fgraph, X, ORTHOGONAL):
         return None
 
     [out] = node.outputs
