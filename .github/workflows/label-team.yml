@@ -1,0 +1,27 @@
+name: Label team PRs and issues
+
+on:
+  # Fork PRs need a writable token to add labels. This job only uses event
+  # metadata and never checks out or runs PR code.
+  pull_request_target:  # zizmor: ignore[dangerous-triggers]
+    types: [opened, reopened]
+  issues:
+    types: [opened, reopened]
+
+permissions: {}
+
+jobs:
+  label:
+    if: >-
+      github.repository == 'pymc-devs/pytensor' &&
+      (github.event.issue.author_association == 'MEMBER' ||
+       github.event.pull_request.author_association == 'MEMBER')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Apply team label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/labels" --raw-field 'labels[]=team' --silent
