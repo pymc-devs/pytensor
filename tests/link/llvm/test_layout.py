@@ -26,7 +26,7 @@ rng = np.random.default_rng(3)
 
 
 def view_layout(out, *ins):
-    """The layout `llvm_layout` declares for `out` given its node's input layouts."""
+    """The layout of `out` given its node's input layouts (from `llvm_outputs`)."""
     node = out.owner
     ins = list(ins) + [None] * (len(node.inputs) - len(ins))
     return node_outputs(node, ins)[node.outputs.index(out)].layout
@@ -183,7 +183,7 @@ def test_layout_check_catches_a_wrong_claim():
     x = pt.dmatrix("x")
     node = pt.exp(x).owner
     m = ir.Module("wrong_claim")
-    nf = build_node_function(m, node, "node", in_layouts=[C(2)])
+    nf = build_node_function(m, node, "node", input_layouts=[C(2)])
     build_kernel_wrapper(m, nf, "kernel", check_layouts=True)
     c = m.compile()
     v = rng.normal(size=(3, 4))
@@ -199,10 +199,10 @@ def test_specialized_signature_passes_fewer_strides():
     from pytensor.link.llvm.codegen import node_signature
 
     any_ = node_signature(node)
-    c = node_signature(node, in_layouts=[C(2)])
+    c = node_signature(node, input_layouts=[C(2)])
     assert len(any_.inputs[0].stride_axes) == 2 and c.inputs[0].stride_axes == ()
     sl = node_signature(
-        node, in_layouts=[Layout.make((None, None), (0, 1), (DYNAMIC, PACKED))]
+        node, input_layouts=[Layout.make((None, None), (0, 1), (DYNAMIC, PACKED))]
     )
     assert sl.inputs[0].stride_axes == (0,)
 
@@ -259,7 +259,7 @@ def _blocks(node, lays):
     from pytensor.link.llvm.codegen.node import build_node_function
 
     m = pir.Module("t")
-    build_node_function(m, node, "node", in_layouts=lays)
+    build_node_function(m, node, "node", input_layouts=lays)
     labels = [
         ln.split(":")[0]
         for ln in m.ir().splitlines()
@@ -332,19 +332,23 @@ def test_elemwise_output_follows_its_inputs():
 
 
 def test_declared_outputs():
-    from pytensor.link.llvm.codegen.signature import OutputMode
+    from pytensor.link.llvm.codegen.interface import InputView, NewBuffer
+    from pytensor.link.llvm.codegen.signature import Passing
 
     x = pt.dmatrix("x")
     (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
     assert (
-        o.mode is OutputMode.RETURNED
-        and o.aliases == ()
+        isinstance(o.storage, NewBuffer)
+        and o.passing is Passing.CALLEE_SLOT
+        and o.aliased_inputs == ()
         and str(o.layout) == "[P0, P1]"
     )
     (o,) = node_outputs((pt.exp(x.T)).owner, [None])
     assert o.layout == C(2)
     (o,) = node_outputs(x.T.owner, [C(2)])
-    assert o.mode is OutputMode.RETURNED and o.aliases == (0,) and o.layout == T2
+    assert isinstance(o.storage, InputView)
+    assert o.passing is Passing.CALLEE_SLOT
+    assert o.aliased_inputs == (0,) and o.layout == T2
 
 
 def test_provided_layouts_are_binding():
@@ -369,11 +373,18 @@ def test_provided_layouts_are_binding():
         assert r.flags.c_contiguous
 
 
-def test_view_layout_is_checked_when_generating():
+def test_view_layout_is_checked_at_run_time():
+    """A view's layout comes from its mapping; `check_layouts` verifies the claim."""
+    from dataclasses import dataclass
+
     from pytensor.graph.basic import Apply
     from pytensor.graph.op import Op
-    from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-    from pytensor.link.llvm.codegen.node import build_node_function
+    from pytensor.link.llvm.codegen.interface import (
+        InputView,
+        emit_input_views,
+        llvm_emit,
+        llvm_outputs,
+    )
 
     class BadTranspose(Op):
         """Claims its view is C-contiguous, but returns the transpose."""
@@ -386,26 +397,43 @@ def test_view_layout_is_checked_when_generating():
         def perform(self, node, inputs, out):
             out[0][0] = inputs[0].T
 
-    @llvm_layout.register(BadTranspose)
-    def _(op, node, in_layouts):
-        return [C(2)]
+    @dataclass(frozen=True)
+    class WrongClaim:
+        def layout(self, source):
+            return C(2)
 
-    @llvm_emit.register(BadTranspose)
-    def _(op, node, cx, inputs, outputs):
-        x = inputs[0]
-        lay = Layout.make([None, None], (1, 0), (PACKED, PACKED))
-        outputs[0].view(x.view(x.data, x.shape[::-1], x.strides[::-1], lay))
+        def apply(self, codegen, inputs):
+            x = inputs[0]
+            return x.view(x.data, x.shape[::-1], x.strides[::-1])
+
+    @llvm_outputs.register(BadTranspose)
+    def _(op, node, input_layouts):
+        return [InputView(0, WrongClaim())]
+
+    llvm_emit.register(BadTranspose, emit_input_views)
 
     x = pt.dmatrix("x")
     node = BadTranspose()(x).owner
-    with pytest.raises(ValueError, match="declared"):
-        build_node_function(ir.Module("bad"), node, "node", in_layouts=[C(2)])
+    v = rng.normal(size=(3, 4))
+    for check in (False, True):
+        m = ir.Module("bad")
+        nf = build_node_function(
+            m, node, "node", input_layouts=[C(2)], check_layouts=check
+        )
+        build_kernel_wrapper(m, nf, "kernel")
+        c = m.compile()
+        outputs = [(np.dtype("float64"), 2)]
+        if check:
+            with pytest.raises(Exception, match="layout check: a view"):
+                ir.call_kernel(c.address("kernel"), [v], outputs)
+        else:
+            ir.call_kernel(c.address("kernel"), [v], outputs)  # not caught
 
 
 def test_kernels_choose_their_output_layouts():
     """Rust kernels are made for their inputs' layouts and choose their outputs':
     a sort follows its input's memory order, faer works column-major."""
-    from pytensor.link.llvm.codegen.signature import OutputMode
+    from pytensor.link.llvm.codegen.signature import Passing
     from pytensor.link.llvm.kernels.rust import rust_kernel, rust_kernel_outputs
 
     def declared(out, in_layouts):
@@ -417,10 +445,10 @@ def test_kernels_choose_their_output_layouts():
     for lay in [C(2), T2]:
         assert declared(pt.sort(x), [lay]).layout == lay
     o = declared(pt.sort(x), [None])
-    assert o.mode is OutputMode.RETURNED and o.layout == C(2)
+    assert o.passing is Passing.CALLEE_SLOT and o.layout == C(2)
     a = pt.tensor("a", shape=(3, 4))
     o = declared(pt.dot(a, a.T), None)
-    assert o.mode is OutputMode.PROVIDED and o.layout == T2
+    assert o.passing is Passing.CALLER_BUFFER and o.layout == T2
     # and the outputs are made so
     mode = CHECKED.clone(link_kwargs={"input_layout": "c"})
     f = pytensor.function([x], [pt.linalg.inv(x), pt.sort(x.T)], mode=mode)

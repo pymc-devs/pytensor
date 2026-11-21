@@ -7,9 +7,8 @@ just a graph of steps. All of them are run the same way:
 1. `cg.graph_function(inputs, outputs, in_layouts)` decides how every node of the graph
    runs (generated code, or a call of a kernel) and returns a `GraphFunction`.
 2. `GraphFunction.emit_call(cg, inputs, outputs)` emits the code that runs the graph.
-   It is called like an emitter (see interface.py): it gets the values of the inputs
-   and one `NodeOutput` per output, and the `NodeOutput` decides where the output's
-   memory comes from.
+   It gets the values of the inputs and one `OutputDestination` per output, which
+   decides where the output's memory comes from (see destination.py).
 
 `build_graph_function` wraps this into a function of its own: the program's top level.
 """
@@ -23,6 +22,10 @@ import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.analysis.liveness import temporary_lives
+from pytensor.link.llvm.codegen.destination import (
+    ProvidedDestination,
+    SlotDestination,
+)
 from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
@@ -35,9 +38,8 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     unpack,
 )
-from pytensor.link.llvm.codegen.interface import ProvidedOutput, SlotOutput
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
-from pytensor.link.llvm.codegen.signature import Output, OutputMode, Signature
+from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     Slot,
@@ -49,7 +51,7 @@ from pytensor.link.llvm.codegen.types import (
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.codegen.interface import NodeOutput
+    from pytensor.link.llvm.codegen.destination import OutputDestination
     from pytensor.link.llvm.planner import PlannedGraph
 
 
@@ -93,18 +95,18 @@ class GraphFunction:
         return [r.node for r in self.planned.steps]
 
     def emit_call(
-        self, cg, inputs: list, outputs: list[NodeOutput | None], profile=None
+        self, cg, inputs: list, outputs: list[OutputDestination | None], profile=None
     ) -> tuple[frozenset, tuple[dict, int]]:
         """Emit the code that runs the graph, into the function `cg` is building.
 
         Nodes with generated code are inlined; the others become calls of their
-        kernels. This works like an emitter (see interface.py):
+        kernels.
 
         * `inputs`: one value per graph input: an `Array` for a tensor (its layout must
           imply the layout the graph was prepared for), an IR value for a ScalarType,
           or None for a value without data. Inputs that are constants may be None.
-        * `outputs`: one `NodeOutput` per graph output, or None for a value without
-          data.
+        * `outputs`: one `OutputDestination` per graph output, or None for a value
+          without data.
 
         How each output gets its memory:
 
@@ -113,7 +115,7 @@ class GraphFunction:
           there directly.
         * If the node allocates the memory itself, and the output offers its slot
           (`offer_slot`), the node allocates directly into that slot.
-        * Otherwise the output's `view` (or `set`, for a scalar) is called with the
+        * Otherwise the output's `assign` (or `set`, for a scalar) is called with the
           result after the graph has run.
 
         Every output's `finish` is called last, after all outputs were produced. Until
@@ -141,11 +143,11 @@ class GraphFunction:
             o = self.produced_by.get(vid)
             if out is None or o is None:
                 continue
-            if o.mode is OutputMode.PROVIDED:
-                a = out.allocate([b.i64(n) for n in o.repr.shape])
+            if o.passing is Passing.CALLER_BUFFER:
+                a = out.allocate([b.i64(n) for n in o.representation.shape])
                 allocated[k] = a
                 targets.setdefault(vid, Target(array=a, layout=a.layout))
-            elif o.mode is OutputMode.RETURNED and not o.aliases:
+            elif o.passing is Passing.CALLEE_SLOT and not o.aliased_inputs:
                 offered = out.offer_slot()
                 if offered is not None:
                     slots[k] = Target(slot=offered[0], layout=offered[1])
@@ -178,7 +180,7 @@ class GraphFunction:
                 if not (vid in written and targets[vid].array is allocated[k]):
                     copy(cg, v, allocated[k])
             elif isinstance(v, Array):
-                out.view(v)
+                out.assign(v)
             else:
                 out.set(v)
         for out in outputs:
@@ -218,12 +220,12 @@ def build_graph_function(
     `temporaries`) and where the array constants are in the link table
     (`constants`)."""
     in_reprs = [repr_of(t, lay) for t, lay in zip(in_types, in_layouts, strict=True)]
-    for r in [*in_reprs, *(o.repr for o in outputs)]:
+    for r in [*in_reprs, *(o.representation for o in outputs)]:
         if isinstance(r, ScalarRepr):
             raise NotImplementedError("ScalarType values can't cross the boundary")
     for o in outputs:
-        if o.mode not in (OutputMode.PROVIDED, OutputMode.RETURNED) or o.aliases:
-            raise NotImplementedError(f"function outputs can't be {o.mode}")
+        if not o.is_tensor or o.aliased_inputs:
+            raise NotImplementedError(f"function outputs can't be {o}")
     sig = Signature(tuple(in_reprs), tuple(outputs))
     fn = module.function(name, sig.param_types(), ir.i32, debug_name=name)
     b = fn.builder()
@@ -244,10 +246,10 @@ def build_graph_function(
         a = unpack(b, r, next(params))
         a.base, a.writable = pos, False
         inputs.append(a)
-    outs: list[NodeOutput | None] = [
-        ProvidedOutput(cg, unpack(b, o.repr, v))
-        if o.mode is OutputMode.PROVIDED
-        else SlotOutput.for_output(cg, v, o)
+    outs: list[OutputDestination | None] = [
+        ProvidedDestination(cg, unpack(b, o.representation, v))
+        if o.passing is Passing.CALLER_BUFFER
+        else SlotDestination.for_output(cg, v, o)
         for o, v in zip(outputs, params, strict=True)
     ]
     # (temporaries are freed before the function returns)
@@ -304,14 +306,15 @@ def fits(t: Target | None, o: Output) -> bool:
     slot's."""
     if t is None or t.layout is None:
         return False
-    shape, size = o.repr.shape, itemsize(o.repr.dtype)
-    if o.mode is OutputMode.PROVIDED:
-        return t.array is not None and t.layout.implies(o.layout, shape, size)
+    tensor = o.tensor
+    shape, size = tensor.shape, itemsize(tensor.dtype)
+    if o.passing is Passing.CALLER_BUFFER:
+        return t.array is not None and t.layout.implies(tensor.layout, shape, size)
     return (
-        o.mode is OutputMode.RETURNED
-        and not o.aliases
+        o.passing is Passing.CALLEE_SLOT
+        and not o.aliased_inputs
         and t.slot is not None
-        and o.layout.implies(t.layout, shape, size)
+        and tensor.layout.implies(t.layout, shape, size)
     )
 
 
@@ -323,11 +326,12 @@ def temporaries_of(cg, steps, targets, kept) -> tuple[dict, tuple[dict, int]]:
     still needed after the last step (the outputs). Returns what `Codegen.temporaries`
     returns."""
     sizes = {
-        vid: int(np.prod(o.repr.shape, dtype=np.int64)) * itemsize(o.repr.dtype)
+        vid: int(np.prod(o.representation.shape, dtype=np.int64))
+        * itemsize(o.representation.dtype)
         for r in steps
         for vid, o in zip(r.outputs, r.signature.outputs, strict=True)
-        if o.mode is OutputMode.PROVIDED
-        and o.repr.static
+        if o.passing is Passing.CALLER_BUFFER
+        and o.representation.static
         and not fits(targets.get(vid), o)
     }
     return cg.temporaries(sizes, temporary_lives(steps, sizes, kept))
@@ -427,7 +431,7 @@ def emit_steps(
         in_place = {
             j: targets[vid].array
             for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True))
-            if o.mode is OutputMode.PROVIDED
+            if o.passing is Passing.CALLER_BUFFER
             and vid not in written
             and fits(targets.get(vid), o)
         }
@@ -439,7 +443,7 @@ def emit_steps(
             # an allocated value with a slot target: allocated straight into it if the
             # node allocates it in a layout the slot takes
             return (
-                o.mode is OutputMode.RETURNED
+                o.passing is Passing.CALLEE_SLOT
                 and vid not in written
                 and fits(targets.get(vid), o)
             )
@@ -447,7 +451,7 @@ def emit_steps(
         temporaries = {
             j
             for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True))
-            if o.mode is OutputMode.RETURNED and not into_slot(vid, o)
+            if o.passing is Passing.CALLEE_SLOT and not into_slot(vid, o)
         }
         if node is None:
             nf = build_call_function(module, f"{name}_n{n}", nsig, kernel, cg.links)
@@ -456,9 +460,10 @@ def emit_steps(
                 module,
                 node,
                 f"{name}_n{n}",
-                temporary_outputs=frozenset(temporaries),
-                in_layouts=step.in_layouts,
+                scratch_outputs=frozenset(temporaries),
+                input_layouts=step.in_layouts,
                 parallel=cg.parallel,
+                check_layouts=cg.check_layouts,
                 kernel=kernel,
                 links=cg.links,
                 planner=cg.planner,
@@ -481,26 +486,31 @@ def emit_steps(
             args.append(pack(b, rep, v))
         reads = []  # (vid, slot, how)
         for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True)):
-            if o.mode is OutputMode.ABSENT:
+            if o.is_absent:
                 continue
-            if o.mode is OutputMode.PROVIDED:
+            if o.passing is Passing.CALLER_BUFFER:
                 if j in in_place:
                     a = in_place[j]
                     written.add(vid)
                 else:
+                    representation = o.representation
                     lay = (
-                        o.layout if o.layout.fully_packed(o.repr.shape) else None
+                        o.layout
+                        if o.layout.fully_packed(representation.shape)
+                        else None
                     )  # (C implies any)
-                    shape = list(o.repr.shape)
+                    shape = list(representation.shape)
                     if memory is not None and vid in memory:
                         dims = [b.i64(m) for m in shape]
-                        a = packed_array(b, o.repr.dtype, memory[vid], dims, lay)
+                        a = packed_array(
+                            b, representation.dtype, memory[vid], dims, lay
+                        )
                     else:
-                        a = cg.temporary(o.repr.dtype, shape, lay)
+                        a = cg.temporary(representation.dtype, shape, lay)
                 vals[vid] = a
-                args.append(pack(b, o.repr, a))
-            elif o.mode is OutputMode.SCALAR:
-                slot = b.alloca(o.repr.ir_type)
+                args.append(pack(b, o.representation, a))
+            elif o.is_scalar:
+                slot = b.alloca(o.representation.ir_type)
                 args.append(slot)
                 reads.append((vid, slot, "scalar", o))
             else:
@@ -508,10 +518,11 @@ def emit_steps(
                     slot = targets[vid].slot
                     written.add(vid)
                 else:
-                    slot = b.alloca(slot_type(o.repr.ndim))
-                    b.store(b.zero(slot_type(o.repr.ndim)), slot)
+                    ndim = o.representation.ndim
+                    slot = b.alloca(slot_type(ndim))
+                    b.store(b.zero(slot_type(ndim)), slot)
                     if kernel is not None:
-                        owned.append((slot, o.repr.ndim))
+                        owned.append((slot, ndim))
                 args.append(slot)
                 # a temporary of a generated node is scratch memory it took (or a view)
                 how = "scratch" if kernel is None and j in temporaries else "array"
@@ -533,20 +544,27 @@ def emit_steps(
             b.ret(rc)
         for vid, slot, how, o in reads:
             if how == "scalar":
-                vals[vid] = b.load(o.repr.ir_type, slot)
+                vals[vid] = b.load(o.representation.ir_type, slot)
             else:
+                representation = o.representation
                 vals[vid] = read_slot(
-                    b, slot, o.repr.dtype, list(o.repr.shape), lays.get(vid)
+                    b,
+                    slot,
+                    representation.dtype,
+                    list(representation.shape),
+                    lays.get(vid),
                 )
-                if o.aliases:
-                    sources = [vals[present[a]] for a in o.aliases]
-                    _maybe_view(b, vals[vid], sources, slot, o.repr.ndim)
+                if o.aliased_inputs:
+                    sources = [vals[present[a]] for a in nsig.alias_arguments(o)]
+                    _maybe_view(b, vals[vid], sources, slot, representation.ndim)
                 if how == "scratch":
-                    # (`SlotOutput.temporary`: the owner is the scratch memory)
+                    # (`SlotDestination.in_scratch_memory`: the owner is the scratch)
                     cg.free_later(
                         b.load(
                             ir.ptr,
-                            b.field_ptr(slot_type(o.repr.ndim), slot, Slot.OWNER),
+                            b.field_ptr(
+                                slot_type(representation.ndim), slot, Slot.OWNER
+                            ),
                         )
                     )
     return written, owned

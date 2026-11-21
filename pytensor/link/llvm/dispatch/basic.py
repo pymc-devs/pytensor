@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pytensor.link.llvm.analysis.layout import Layout, same_layout
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     c_array,
@@ -16,8 +16,14 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    InputView,
+    ViewOrCopy,
+    llvm_emit,
+    llvm_outputs,
+)
 from pytensor.link.llvm.codegen.types import ir, is_float
+from pytensor.link.llvm.dispatch.shape import SameView
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
 from pytensor.tensor.shape import Reshape, Shape, Shape_i
@@ -151,10 +157,10 @@ def _(op, node, cg, inputs, outputs):
         out.store(b, cast(b, v, dt, out_dtype), i)
 
 
-@llvm_layout.register(Reshape)
-def _(op, node, in_layouts):
+@llvm_outputs.register(Reshape)
+def _(op, node, input_layouts):
     # a view of a C-contiguous input, else a C-contiguous copy: C either way
-    return [Layout.c(node.outputs[0].type.ndim)]
+    return [ViewOrCopy((0,), Layout.c(node.outputs[0].type.ndim))]
 
 
 @llvm_emit.register(Reshape)
@@ -192,8 +198,7 @@ def _(op, node, cg, inputs, outputs):
         out.view(x.view(x.data, shape, strides, Layout.c(len(shape))))
         return []
 
-    def fresh():
-        # (C-contiguous, as declared)
+    def copied():
         _copy_reshaped(cg, x, out.allocate(shape))
         return []
 
@@ -201,9 +206,9 @@ def _(op, node, cg, inputs, outputs):
     if c == 1:
         view()
     elif c == 0:
-        fresh()
+        copied()
     else:
-        b.if_else(contig, view, fresh)
+        b.if_else(contig, view, copied)
 
 
 def _copy_reshaped(cg, src: Array, dst: Array):
@@ -256,17 +261,17 @@ def _(op, node, cg, inputs, outputs):
         )
 
 
-@llvm_layout.register(CheckAndRaise)
-def _(op, node, in_layouts):
-    return [same_layout(node, in_layouts[0])]
+@llvm_outputs.register(CheckAndRaise)
+def _(op, node, input_layouts):
+    return [InputView(0, SameView(node))]
 
 
 @llvm_emit.register(CheckAndRaise)
-def _(op, node, cg, inputs, outputs):
-    b = cg.b
-    for c, var in zip(inputs[1:], node.inputs[1:], strict=True):
-        v = _scalar(b, c)
-        dt = var.type.dtype
-        ok = v if dt == "bool" else cast(b, v, dt, "bool")
-        cg.check(ok, op.msg or "Assertion failed")
-    outputs[0].view(inputs[0])
+def _(op, node, codegen, inputs, outputs):
+    builder = codegen.b
+    for condition, var in zip(inputs[1:], node.inputs[1:], strict=True):
+        value = _scalar(builder, condition)
+        dtype = var.type.dtype
+        ok = value if dtype == "bool" else cast(builder, value, dtype, "bool")
+        codegen.check(ok, op.msg or "Assertion failed")
+    outputs[0].emit(codegen, inputs)

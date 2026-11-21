@@ -30,7 +30,7 @@ from pytensor.link.llvm.codegen.emit import (
     size,
     store,
 )
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import NewBuffer, llvm_emit, llvm_outputs
 from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.link.llvm.dispatch.elemwise import identity_value
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
@@ -153,14 +153,14 @@ def _register():
     def _(op, node, cg, inputs, outputs):
         emit_fused(op, node, cg, inputs, outputs)
 
-    @llvm_layout.register(FusedElemwise)
-    def _(op, node, in_layouts):
+    @llvm_outputs.register(FusedElemwise)
+    def _(op, node, input_layouts):
         # generated as one loop (`planner.fusable`), else an OpFromGraph
         try:
             fused_spec(op, node)
         except NotImplementedError:
-            return llvm_layout.dispatch(OpFromGraph)(op, node, in_layouts)
-        return [None] * len(node.outputs)
+            return llvm_outputs.dispatch(OpFromGraph)(op, node, input_layouts)
+        return [NewBuffer() for _ in node.outputs]
 
 
 def emit_fused(op, node, cg, inputs, outputs):

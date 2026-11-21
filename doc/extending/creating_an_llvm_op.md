@@ -571,8 +571,9 @@ without looking at its strides, so a wrong claim gives wrong results, not an err
   aren't, and the C API rejects them.
 * Numba kernels allocate their outputs in the layout of the value they produce.
 
-These layouts are binding: whatever runs a node gives its outputs the layouts its
-`llvm_layout` declares. A compiled function's graph has them,
+These layouts are binding: whatever runs a node gives its outputs the layouts that
+follow from its `llvm_outputs` (section "Declaring where an output's memory comes
+from" below). A compiled function's graph has them,
 `f.maker.fgraph.llvm_layout(var)`, and `infer_layouts` shows what the backend derives
 for a graph:
 
@@ -625,7 +626,9 @@ from pytensor.link.llvm.codegen.node import build_node_function
 
 node = cummax(x).owner
 any_strides = build_node_function(ir.Module("any"), node, "node")
-contiguous = build_node_function(ir.Module("c"), node, "node", in_layouts=[Layout.c(1)])
+contiguous = build_node_function(
+    ir.Module("c"), node, "node", input_layouts=[Layout.c(1)]
+)
 
 assert any_strides.signature.inputs[0].stride_axes == (
     0,
@@ -667,13 +670,33 @@ For loops that visit every element of several arrays, `for_each` in `codegen/emi
 does exactly this: it picks a flat loop when the layouts allow it, a nest when they
 rule it out, and generates both with a check when they leave it open.
 
+### Declaring where an output's memory comes from
+
+Every output has a *storage*: where its memory comes from. The op declares it with
+`llvm_outputs(op, node, input_layouts)`, which returns one of these per output:
+
+| storage | meaning | the emitter gets | and calls |
+|---|---|---|---|
+| `NewBuffer(layout=None)` | new memory, C-contiguous or packed in `layout` | `NewBufferOutput` | `allocate(shape)` |
+| `InputView(input, mapping)` | always a view of one input | `InputViewOutput` | `emit(cg, inputs)` |
+| `ViewOrCopy(inputs, layout)` | a view of one of `inputs`, or new memory | `ViewOrCopyOutput` | `view(array)` or `allocate(shape)` |
+| `InPlaceUpdate(input)` | the input, with changes | `InPlaceOutput` | `buffer()` or `buffer_holding_input()` |
+
+ScalarType outputs get a `ScalarOutput` (`set(value)`), and outputs without data get
+None. The default is `NewBuffer()`, which was right for `CumMax`, or `ViewOrCopy` with
+nothing known about the layout for an output the op's `view_map` lists.
+
+The declaration is the only place these decisions are made. The planner derives each
+output's layout and how it is passed from it, and the emitter's handle only offers what
+was declared: an emitter can't return a view of an output declared as new memory.
+
 ### Views
 
-Whether an output may share memory with an input is not something the implementation
-declares. It is a property of the op: PyTensor's `view_map`. `view_map = {0: [0]}` says
-output 0 may be a view of input 0, and the backend plans accordingly: it keeps the
-input's memory alive as long as the output is used, and it never hands the op memory
-to write that output into.
+Whether an output may share memory with an input is a property of the op: PyTensor's
+`view_map`. `view_map = {0: [0]}` says output 0 may be a view of input 0, and the
+backend plans accordingly: it keeps the input's memory alive as long as the output is
+used, and it never hands the op memory to write that output into. A storage that says
+an output is a view must agree with the `view_map`.
 
 Here is an op with a view: a vector backwards.
 
@@ -697,35 +720,89 @@ class Reverse(Op):
 reverse = Reverse()
 ```
 
-An output that may be a view is filled in one of two ways, and the emitter chooses
-freely, even when the code runs:
+A view is described by a `ViewMapping`: an object with two methods that describe the
+same view twice. `layout(source)` says, before the program runs, what is known about
+the view's strides given its input's layout. `apply(cg, inputs)` builds the view in
+generated code, from the input with `x.view(data, shape, strides)` or `x.at(...)`, which
+remember where they come from. The handle gives the view the layout `layout` computed,
+so the emitter never repeats it.
 
-* `outputs[k].view(array)`: the result is `array`, which lies in an input's memory. It
-  is handed over as a view where the output may be one (the `view_map` lists that
-  input), else copied. `array` must come from the input: build it with `x.view(data,
-  shape, strides, layout)`, or with `x.at(...)`, which remember where they come from.
-* `outputs[k].allocate(shape)` allocates instead, as for any other output. An op
-  that only sometimes can return a view (a reshape of a non-contiguous array) does
-  this in a branch.
-
-Which one happens is not the emitter's business: the same emitter is right when the
-output's memory is provided by the caller (then `view` copies into it).
+The stride of a reversed vector is minus the stride of the input, so if the one is
+known, so is the other:
 
 ```python
-@llvm_emit.register(Reverse)
-def _(op, node, cg, inputs, outputs):
-    b = cg.b
-    (x,) = inputs
-    (n,) = x.shape
-    (stride,) = x.strides
-    # the last element (the first, for an empty vector: stay inside the array)
-    last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
-    outputs[0].view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)]))
+from dataclasses import dataclass
+
+from pytensor.link.llvm.analysis.layout import itemsize_of, shape_of
+from pytensor.link.llvm.codegen.interface import (
+    InputView,
+    emit_input_views,
+    llvm_outputs,
+)
 
 
+@dataclass(frozen=True)
+class ReversedView:
+    node: Apply
+
+    def layout(self, source: Layout) -> Layout:
+        var = self.node.inputs[0]
+        stride = source.static_stride(0, shape_of(var), itemsize_of(var))
+        return Layout.make(
+            shape_of(self.node.outputs[0]),
+            (0,),
+            (DYNAMIC if stride is None else -stride,),
+        )
+
+    def apply(self, cg, inputs):
+        b = cg.b
+        (x,) = inputs
+        (n,) = x.shape
+        (stride,) = x.strides
+        # the last element (the first, for an empty vector: stay inside the array)
+        last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
+        return x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)])
+
+
+@llvm_outputs.register(Reverse)
+def _(op, node, input_layouts):
+    return [InputView(0, ReversedView(node))]
+
+
+llvm_emit.register(Reverse, emit_input_views)
+```
+
+An op whose outputs are all views needs no emitter of its own: `emit_input_views`
+builds each one. An emitter that does more (a check first, as `SpecifyShape` does)
+calls `outputs[k].emit(cg, inputs)` itself. Whether the view is handed on as a view or
+copied (into memory a caller provides, say) is not the emitter's business.
+
+```python
 r = pytensor.function([x], cummax(reverse(x)), mode=STRICT)
 np.testing.assert_array_equal(r(values), [4.0, 5.0, 5.0, 5.0, 5.0])
+
+CHECKED = STRICT.clone(link_kwargs={"input_layout": "c", "check_layouts": True})
+r = pytensor.function([x], cummax(reverse(x)), mode=CHECKED)
+np.testing.assert_array_equal(r(values), [4.0, 5.0, 5.0, 5.0, 5.0])
+np.testing.assert_array_equal(
+    r(values[::2]), [4.0, 4.0, 4.0]
+)  # not contiguous: copied on the way in
+print(r.maker.linker.program.dump())
 ```
+
+```text
+  0    (%0) -> (%1)  Reverse {C}
+  1    (%1) -> (%2)  CumMax {[-8]}  [release %1]
+```
+
+`CumMax` runs backwards over the input with a constant stride of -8 bytes, with no copy
+in between. `Layout.dynamic(ndim)` is always a correct `layout`, and never a fast one.
+The backend's own view mappings are in the modules of their ops (`DimShuffleView`,
+`SubtensorView`), with their layout rules in `analysis/layout.py`.
+
+Some ops can only sometimes return a view: a reshape of a non-contiguous array copies.
+They declare `ViewOrCopy`, with the layout both cases have, and their emitter calls
+`view(array)` or `allocate(shape)`, possibly in two branches of the generated code.
 
 Inputs are only read; writing one is caught while generating:
 
@@ -757,19 +834,16 @@ implementation to do what its op declares.
 The other thing an op says about memory is `destroy_map`: `{0: [0]}` means computing
 output 0 invalidates input 0. PyTensor's inplace rewrites put such ops into a graph
 where it is safe, and they are an offer, not an obligation: an implementation that
-ignores `destroy_map` and produces new memory is correct.
+ignores `destroy_map` and declares `NewBuffer` is correct.
 
-The planner decides, node by node, whether a node may overwrite an input: when the
-graph was checked for it (it has PyTensor's `DestroyHandler`, as every graph that went
-through the inplace rewrites has) and nothing else can see the memory (the value is not
-a constant and shares no memory with the node's other inputs). The emitter then gets
-that input with `writable` set: it may write it, and return it, or a view of it, with
-`view` for an output the op destroys it for. Otherwise the input is read-only like any
-other, so the emitter decides at most whether to use what it is given.
-
-Many results are "the input, with a few changes". `overwrite_or_copy(cg, out, x)` gives
-memory for the output that already holds the values of `x`: `x` itself where it is
-writable, else a copy.
+Many results are "the input, with a few changes". Such an output is declared
+`InPlaceUpdate(input)`. Its result goes into the input's buffer when the op destroys
+that input and the planner allows it: when the graph was checked for it (it has
+PyTensor's `DestroyHandler`, as every graph that went through the inplace rewrites has)
+and nothing else can see the memory (the value is not a constant and shares no memory
+with the node's other inputs). Otherwise it goes into new memory. The emitter doesn't
+need to know which: `buffer_holding_input()` returns memory for the output that already
+holds the input's values, the input itself or a copy.
 
 ```python
 class ZeroFirst(Op):
@@ -792,14 +866,18 @@ class ZeroFirst(Op):
         output_storage[0][0] = x
 
 
-from pytensor.link.llvm.codegen.interface import overwrite_or_copy
+from pytensor.link.llvm.codegen.interface import InPlaceUpdate
+
+
+@llvm_outputs.register(ZeroFirst)
+def _(op, node, input_layouts):
+    return [InPlaceUpdate(0)]
 
 
 @llvm_emit.register(ZeroFirst)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
-    (x,) = inputs
-    out = overwrite_or_copy(cg, outputs[0], x)
+    out = outputs[0].buffer_holding_input()
     with b.if_(b.sgt(out.shape[0], 0)):
         out.store(b, 0.0, 0)
 
@@ -808,11 +886,11 @@ z = pytensor.function([x], ZeroFirst()(x), mode=STRICT)
 np.testing.assert_array_equal(z(values), [0.0, *values[1:]])
 ```
 
-This emitter is right for both versions of the op. `ZeroFirst()` destroys nothing: its
-input is never writable, and it copies. `ZeroFirst(inplace=True)` writes over its input
-where the planner lets it. An emitter that reads each element before writing it can also
-use the writable input as its output's memory directly (`outputs[k].view(x)`, then write
-it), which is what Elemwise does.
+This is right for both versions of the op. `ZeroFirst()` destroys nothing, so its
+output is always new memory, a copy of the input. `ZeroFirst(inplace=True)` writes over
+its input where the planner lets it. An emitter that reads each element before writing
+it uses `buffer()` instead: the input's buffer, or new memory without the copy. That is
+what Elemwise does. (`reuses_input` says which, for an emitter that wants to know.)
 
 A rewrite would normally put `ZeroFirst(inplace=True)` into the graph. Here we build
 such a graph by hand:
@@ -839,84 +917,28 @@ over an input, the result must be correct when the output and that input are the
 memory. Reading other inputs is always safe: an input that might overlap them isn't
 writable.
 
-### Declaring the layout of an output
+### New memory in another order
 
-`llvm_layout(op, node, in_layouts)` returns the layout of each output, whether it is a
-view or new memory. The defaults are C-contiguous for new memory, which was right for
-`CumMax`, and `DYNAMIC` for an output that may be a view, which is always true and
-never fast. The `CumMax` after `Reverse` above was generated for an unknown stride.
+`NewBuffer(layout)` asks for new memory in another order than C: `Elemwise` declares the
+memory order of its inputs, so that an operation on transposed matrices gives a
+transposed result instead of a strided loop. For new memory the layout must be packed.
 
-An op that returns a view should say what it knows. The stride of a reversed vector is
-minus the stride of the input, so if the one is known, so is the other:
+### Guards against wrong declarations
 
-```python
-from pytensor.link.llvm.codegen.interface import llvm_layout
-from pytensor.link.llvm.analysis.layout import itemsize_of, shape_of
-
-
-def reverse_layout(node, x: Layout) -> Layout:
-    var = node.inputs[0]
-    stride = x.static_stride(0, shape_of(var), itemsize_of(var))
-    return Layout.make(
-        shape_of(node.outputs[0]), (0,), (DYNAMIC if stride is None else -stride,)
-    )
-
-
-@llvm_layout.register(Reverse)
-def _(op, node, in_layouts):
-    return [reverse_layout(node, in_layouts[0])]
-```
-
-A declared layout is binding, so the emitter must now produce it: the view it hands
-over carries the same layout.
-
-```python
-@llvm_emit.register(Reverse)
-def _(op, node, cg, inputs, outputs):
-    b = cg.b
-    (x,) = inputs
-    (n,) = x.shape
-    (stride,) = x.strides
-    last = b.select(b.sgt(n, 0), b.mul(b.sub(n, 1), stride, nsw=True), 0)
-    layout = reverse_layout(node, x.layout)
-    outputs[0].view(x.view(b.gep_bytes(x.data, last), [n], [b.neg(stride)], layout))
-```
-
-The layout function is shared by the declaration and the emitter, which is how the
-backend's own view ops are written (`subtensor_layout`, `dimshuffle_layout` in
-`analysis/layout.py`).
-
-```python
-CHECKED = STRICT.clone(link_kwargs={"input_layout": "c", "check_layouts": True})
-r = pytensor.function([x], cummax(reverse(x)), mode=CHECKED)
-np.testing.assert_array_equal(r(values), [4.0, 5.0, 5.0, 5.0, 5.0])
-np.testing.assert_array_equal(
-    r(values[::2]), [4.0, 4.0, 4.0]
-)  # not contiguous: copied on the way in
-print(r.maker.linker.program.dump())
-```
-
-```text
-  0    (%0) -> (%1)  Reverse {C}
-  1    (%1) -> (%2)  CumMax {[-8]}  [release %1]
-```
-
-`CumMax` now runs backwards over the input with a constant stride of -8 bytes, with no
-copy in between.
-
-`llvm_layout` is also how an op asks for new memory in another order than C: `Elemwise`
-declares the memory order of its inputs, so that an operation on transposed matrices
-gives a transposed result instead of a strided loop. For new memory the layout must be
-packed.
-
-Two things guard against wrong declarations:
-
-* `view` compares the layout of the array it is given with the declaration, while
-  generating. An emitter that forgets the layout is caught:
+* A `ViewOrCopy` view must have the declared layout: `view` compares the array's layout
+  with the declaration while generating. An emitter that forgets the layout is caught:
 
   ```python
+  from pytensor.link.llvm.codegen.interface import ViewOrCopy
+
+
   class Forgetful(Reverse):
       pass
+
+
+  @llvm_outputs.register(Forgetful)
+  def _(op, node, input_layouts):
+      return [ViewOrCopy((0,), ReversedView(node).layout(input_layouts[0]))]
 
 
   @llvm_emit.register(Forgetful)
@@ -931,9 +953,9 @@ Two things guard against wrong declarations:
 
 * The linker option `check_layouts=True` (or `PYTENSOR_LLVM_CHECK_LAYOUTS=1`) makes
   every generated step verify, when it runs, that its arguments have the layouts it
-  was generated for. It costs a few comparisons per step. Use it in the tests of any
-  op with its own `llvm_layout`: it catches a layout that is declared consistently
-  but is not what the code produces.
+  was generated for, and that every `InputView` has the layout its mapping claims. It
+  costs a few comparisons per step. Use it in the tests of any op with its own view
+  mapping: it catches a `layout` that doesn't match what `apply` builds.
 
 ## 6. Temporary memory
 
@@ -1148,8 +1170,9 @@ belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/dispatch
 2. Scalar ops go into `dispatch/scalar.py`, with their cost in `SCALAR_COSTS` in
    `analysis/work.py`; distributions into the `SAMPLERS` table of `dispatch/random.py`.
 3. Register `llvm_work` in `analysis/work.py` if one unit per output element is far off, and
-   `llvm_layout` next to the emitter if an output is a view (its layout function goes
-   into `analysis/layout.py`).
+   `llvm_outputs` next to the emitter if an output is a view, an in-place update, or
+   new memory in another order than C (a view's layout rule goes into
+   `analysis/layout.py`).
 4. Add a test to `tests/link/llvm/test_ops.py` that compiles with
    `numba_fallback=False` and compares with numpy, over the dtypes, with a strided
    input and with static and unknown shapes; for a view, also with
@@ -1168,9 +1191,11 @@ Things that commonly go wrong:
   this costs nothing when the input is contiguous.
 * **A temporary inside a loop.** Each request is new memory until the step ends. Ask
   once, before the loop.
-* **Writing an input.** Inputs are only read, except one the op destroys and the
-  planner lets the node overwrite (`writable`); `overwrite_or_copy` handles both cases.
+* **Writing an input.** Inputs are only read. Declare `InPlaceUpdate` and use
+  `buffer_holding_input()`, which gives the input where the planner lets the node
+  overwrite it and a copy otherwise.
 * **Declaring more than is true.** A layout is trusted. Declare `DYNAMIC` for whatever
   the op can't guarantee.
-* **Leaving an output unset.** Every output must be allocated or set (`view`, `set` for
-  a scalar); the backend raises when a node function ends with an output never set.
+* **Leaving an output unset.** Every output must be produced through its handle
+  (`allocate`, `emit`, `view`, `buffer`, or `set` for a scalar); the backend raises when
+  a node function ends with an output never set.

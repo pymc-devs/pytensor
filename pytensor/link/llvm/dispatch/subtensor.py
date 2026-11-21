@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from pytensor.link.llvm.analysis.layout import subtensor_layout
+from dataclasses import dataclass
+
+from pytensor.graph.basic import Apply
+from pytensor.link.llvm.analysis.layout import Layout, subtensor_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
+    Codegen,
     cast,
     checked_index,
     for_each,
@@ -13,9 +17,11 @@ from pytensor.link.llvm.codegen.emit import (
     view_layout,
 )
 from pytensor.link.llvm.codegen.interface import (
+    InPlaceUpdate,
+    InputView,
+    emit_input_views,
     llvm_emit,
-    llvm_layout,
-    overwrite_or_copy,
+    llvm_outputs,
 )
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add
@@ -89,23 +95,38 @@ def _entries(op, node, inputs, first):
     return unflatten_index_variables(values, op.idx_list)
 
 
-@llvm_emit.register(Subtensor)
-def _(op, node, cg, inputs, outputs):
-    view = index(cg, inputs[0], _entries(op, node, inputs, 1))
-    view.layout = subtensor_layout(op, node, inputs[0].layout)
-    outputs[0].view(view)
+@dataclass(frozen=True)
+class SubtensorView:
+    """The input indexed by slices and integers."""
+
+    op: Subtensor
+    node: Apply
+
+    def layout(self, source: Layout) -> Layout:
+        return subtensor_layout(self.op, self.node, source)
+
+    def apply(self, codegen: Codegen, inputs: list) -> Array:
+        return index(codegen, inputs[0], _entries(self.op, self.node, inputs, 1))
 
 
-@llvm_layout.register(Subtensor)
-def _(op, node, in_layouts):
-    return [subtensor_layout(op, node, in_layouts[0])]
+@llvm_outputs.register(Subtensor)
+def _(op, node, input_layouts):
+    return [InputView(0, SubtensorView(op, node))]
+
+
+llvm_emit.register(Subtensor, emit_input_views)
+
+
+@llvm_outputs.register(IncSubtensor)
+def _(op, node, input_layouts):
+    return [InPlaceUpdate(0)]
 
 
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
-    x, y = inputs[0], inputs[1]
-    out = overwrite_or_copy(cg, outputs[0], x)
+    y = inputs[1]
+    out = outputs[0].buffer_holding_input()
     view = index(cg, out, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type

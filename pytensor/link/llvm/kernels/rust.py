@@ -6,7 +6,7 @@ no Rust kernel; `in_layouts` are the inputs' layouts (analysis/layout.py; None w
 unknown). Each kernel is made for its inputs' layouts and the number of axes of its
 outputs (`made_for`), and chooses the layouts of its outputs then
 (`Kernel::output_layouts`, in Rust next to the kernel; the counterpart of
-`node_outputs` for generated code). Whether an output is provided or allocated is
+`llvm_outputs` for generated code). Whether an output is provided or allocated is
 decided here (`fresh_mode`). `rust_kernel_outputs` reads both back.
 """
 
@@ -17,8 +17,7 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.signature import Output, OutputMode
-from pytensor.link.llvm.codegen.types import repr_of
+from pytensor.link.llvm.codegen.signature import Output, Passing
 from pytensor.tensor.math import Dot
 
 
@@ -62,13 +61,12 @@ def rust_kernel_outputs(kernel, node) -> list[Output]:
     """What `kernel` declares about the outputs of `node` (it chose their layouts when
     it was made for its inputs' layouts), as the `Output`s of a signature: new memory,
     provided or allocated by the kernel."""
-    outs = []
-    for o, (mode, spec) in zip(node.outputs, kernel.outputs(), strict=True):
-        shape = tuple(None if s is None else int(s) for s in o.type.shape)
-        r = repr_of(o.type, Layout.from_spec(spec, shape))
-        mode = OutputMode.PROVIDED if mode == "provided" else OutputMode.RETURNED
-        outs.append(Output(r, mode))
-    return outs
+    outputs = []
+    for var, (mode, spec) in zip(node.outputs, kernel.outputs(), strict=True):
+        shape = tuple(None if s is None else int(s) for s in var.type.shape)
+        passing = Passing.CALLER_BUFFER if mode == "provided" else Passing.CALLEE_SLOT
+        outputs.append(Output.new_buffer(var, Layout.from_spec(spec, shape), passing))
+    return outputs
 
 
 @rust_kernel.register(Dot)
@@ -351,26 +349,26 @@ def _register_more():
 _register_more()
 
 
-def _declare_layouts():
-    """The layouts of the outputs of an op with a Rust kernel are the kernel's choice:
-    `llvm_layout` says what the kernel declares for the inputs' layouts, so that the
+def _declare_outputs():
+    """The outputs of an op with a Rust kernel are new memory in the layouts the
+    kernel chooses for the inputs' layouts; `llvm_outputs` declares them so that the
     planner binds the outputs to them. (Where no kernel applies, e.g. for another
     dtype, the default: what a numba kernel then allocates.)"""
     from pytensor.link.llvm.analysis.layout import shape_of
-    from pytensor.link.llvm.codegen.interface import llvm_layout
+    from pytensor.link.llvm.codegen.interface import NewBuffer, llvm_outputs
 
-    def declared(op, node, in_layouts):
-        kernel = rust_kernel(op, node, in_layouts)
+    def declared(op, node, input_layouts):
+        kernel = rust_kernel(op, node, input_layouts)
         if kernel is None:
-            return [None] * len(node.outputs)
+            return llvm_outputs.dispatch(object)(op, node, input_layouts)
         return [
-            Layout.from_spec(spec, shape_of(o))
-            for o, (_, spec) in zip(node.outputs, kernel.outputs(), strict=True)
+            NewBuffer(Layout.from_spec(spec, shape_of(var)))
+            for var, (_, spec) in zip(node.outputs, kernel.outputs(), strict=True)
         ]
 
     for cls in rust_kernel.registry:
         if cls is not object:
-            llvm_layout.register(cls, declared)
+            llvm_outputs.register(cls, declared)
 
 
-_declare_layouts()
+_declare_outputs()

@@ -1,334 +1,313 @@
 """What an op registers to have its code generated, and what its emitter gets.
 
-An op registers
+An op registers two functions:
 
-* `llvm_emit(op, node, cg, inputs, outputs)`: emits the code of a node (required);
-* `llvm_layout(op, node, in_layouts)`: the layouts of its outputs, where the default
-  isn't right (see there).
+* `llvm_outputs(op, node, input_layouts)` declares the storage of each output: where
+  its memory comes from (`OutputStorage`). Optional; the default is new memory, or a
+  possible view of the inputs listed in the op's `view_map`.
+* `llvm_emit(op, node, codegen, inputs, outputs)` emits the node's code.
 
-The emitter gets
+The storage declaration is the single source of truth about an output. The planner
+derives the output's layout and how it is passed from it, and the emitter gets a handle
+that matches it:
 
-* `cg`: the `Codegen` of the function being built (`cg.b` is the IR builder);
-* `inputs`, one per node input:
+=================  =====================  =========================================
+storage            handle                 the emitter
+=================  =====================  =========================================
+`NewBuffer`        `NewBufferOutput`      `allocate(shape)`, then writes the result
+`InputView`        `InputViewOutput`      `emit(codegen, inputs)`, or registers
+                                          `emit_input_views` as its emitter
+`ViewOrCopy`       `ViewOrCopyOutput`     `view(array)` or `allocate(shape)`
+`InPlaceUpdate`    `InPlaceOutput`        `buffer()` or `buffer_holding_input()`
+(ScalarType)       `ScalarOutput`         `set(value)`
+(no data)          None
+=================  =====================  =========================================
 
-  - an `Array` for a tensor: the caller's memory, read-only, unless the op destroys
-    that input (its `destroy_map`) and the planner lets it: then `writable` is set, and
-    the emitter may write it and return it (or a view of it) for an output the op
-    destroys it for (`overwrite_or_copy`);
-  - an `ir.Value` for a ScalarType value;
-  - None for a value without data (a random generator).
+The emitter's inputs are, per node input, an `Array` for a tensor (read-only unless an
+`InPlaceUpdate` output may reuse it), an `ir.Value` for a ScalarType value, or None for
+a value without data (a random generator). Constants the planner folds into the code
+arrive the same way.
 
-  Constants the planner folds into the code arrive the same way;
-* `outputs`, one per node output: a `NodeOutput` (None for a value without data). The
-  emitter produces each of them, with
-
-  - `out.allocate(shape)`: memory to write the result into (in the output's layout);
-  - `out.view(a)`: the result is `a`, which lies in an input's memory: a view where
-    the output may be one (`view_map`, or the writable input the op destroys for it),
-    else a copy (it returns which);
-  - `out.set(value)`: the value of a ScalarType output.
-
-  Where the memory comes from (the caller's, a new buffer, a unit's temporary) is not
-  the emitter's business.
+Ops that produce their outputs by running an inner graph (Scan, Blockwise, compiled
+units) hand on each handle's `destination` (see `destination.py`).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import singledispatch
+from typing import TYPE_CHECKING, Protocol
 
+from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    Codegen,
-    copy,
-    load,
-    packed_array,
-    read_slot,
-    size,
-)
-from pytensor.link.llvm.codegen.types import Slot, ir, itemsize, slot_type
+from pytensor.link.llvm.codegen.emit import Array, Codegen, check_strides, copy
+from pytensor.link.llvm.codegen.types import ir
+
+
+if TYPE_CHECKING:
+    from pytensor.graph.basic import Apply
+    from pytensor.link.llvm.codegen.destination import (
+        OutputDestination,
+        ScalarDestination,
+    )
+
+
+#: What an emitter gets for one node input.
+EmitterInput = Array | ir.Value | None
+
+
+# ------------------------------------------------------------------ storage
+
+
+class ViewMapping(Protocol):
+    """How a view is made from its input, once for the planner and once for codegen.
+
+    Both methods describe the same view: `layout` is what the planner relies on before
+    the program runs, and `apply` builds the view in generated code. Keeping them in
+    one object keeps them next to each other; with the `check_layouts` option, the
+    generated code also verifies at run time that the view's strides match `layout`.
+    """
+
+    def layout(self, source: Layout) -> Layout:
+        """Return the view's layout, given the layout of the input it views."""
+        ...
+
+    def apply(self, codegen: Codegen, inputs: list[EmitterInput]) -> Array:
+        """Build the view from the node's inputs.
+
+        The returned array's layout doesn't matter: the handle replaces it with
+        `layout(...)`."""
+        ...
+
+
+@dataclass(frozen=True)
+class NewBuffer:
+    """The output is written into new memory, packed in `layout`.
+
+    None means C-contiguous. A layout that isn't packed means any strides: the memory
+    is then allocated C-contiguous, which must imply it."""
+
+    layout: Layout | None = None
+
+
+@dataclass(frozen=True)
+class InputView:
+    """The output is always a view of the node input at position `input`."""
+
+    input: int
+    mapping: ViewMapping
+
+
+@dataclass(frozen=True)
+class ViewOrCopy:
+    """The output is a view of one of `inputs` or new memory, decided by the emitter
+    (possibly at run time). Both have `layout`."""
+
+    inputs: tuple[int, ...]
+    layout: Layout
+
+
+@dataclass(frozen=True)
+class InPlaceUpdate:
+    """The output is the node input at position `input`, with changes.
+
+    It is written into the input's buffer when the op destroys that input for this
+    output (`destroy_map`), their types match, and the planner allows it; the output
+    then has the input's layout, where new memory can have it too
+    (`new_memory_layout`). Otherwise it is new C-contiguous memory."""
+
+    input: int
+
+
+OutputStorage = NewBuffer | InputView | ViewOrCopy | InPlaceUpdate
 
 
 @singledispatch
-def llvm_emit(op, node, cg: Codegen, inputs: list, outputs: list) -> None:
-    """Emit the code of `node` (see the module's docstring). Raise NotImplementedError
-    for a node it can't handle: something else runs it then."""
+def llvm_outputs(op, node: Apply, input_layouts: list[Layout | None]) -> list:
+    """Declare the storage of each output of `node`, given its inputs' layouts.
+
+    Return one `OutputStorage` per output; entries for outputs that aren't tensors are
+    ignored. The default is `NewBuffer()` (C-contiguous), or `ViewOrCopy` with nothing
+    known about the layout for an output the op's `view_map` says may be a view.
+    """
+    parents = op_view_parents(op, node)
+    storage: list[OutputStorage] = []
+    for output, output_parents in zip(node.outputs, parents, strict=True):
+        viewed = tuple(i for i, var in enumerate(node.inputs) if var in output_parents)
+        if viewed and hasattr(output.type, "ndim"):
+            storage.append(ViewOrCopy(viewed, Layout.dynamic(output.type.ndim)))
+        else:
+            storage.append(NewBuffer())
+    return storage
+
+
+@singledispatch
+def llvm_emit(op, node: Apply, codegen: Codegen, inputs: list, outputs: list) -> None:
+    """Emit the code of `node` (see the module's docstring).
+
+    Raise NotImplementedError for a node it can't handle: something else runs it
+    then."""
     raise NotImplementedError(f"No LLVM backend implementation for {op}")
 
 
-@singledispatch
-def llvm_layout(op, node, in_layouts) -> list:
-    """The layout (analysis/layout.py) of each output of `node`, given the inputs'
-    layouts (None for inputs that aren't tensors). None for an output: the default.
-
-    The default is C-contiguous for an output in new memory, and nothing known
-    (DYNAMIC) for one that may be a view. Ops register their own to say what a view's
-    layout is (DimShuffle, Subtensor, ...) or in which memory order they want their
-    output (Elemwise: its inputs').
-
-    A layout is binding: whatever runs the node gives the output this layout. New memory
-    is provided or allocated in it (it must then be packed; one that isn't means "any
-    strides": C-contiguous memory is used). A view must have it (`NodeOutput.view`
-    checks), and so must memory a may-be-view output allocates instead (a Reshape that
-    copies declares C for both). An output the op may write over an input has that
-    input's layout instead (`signature.node_outputs`)."""
-    return [None] * len(node.outputs)
+def has_emitter(op) -> bool:
+    """Is an emitter registered for the type of `op`?"""
+    return llvm_emit.dispatch(type(op)) is not llvm_emit.dispatch(object)
 
 
-# ------------------------------------------------------------------ outputs
-
-
-class NodeOutput:
-    """An output of the node being emitted (see the module's docstring)."""
-
-    cg: Codegen
-    dtype: str
-
-    def allocate(self, shape: list) -> Array:
-        """Memory of `shape` for the result, in the output's layout."""
-        raise NotImplementedError
-
-    def view(self, a: Array) -> Array:
-        """The result is `a`, which lies in an input's memory: a view of it where this
-        output may be one, else a copy. Returns the output's array: `a`, or the copy."""
-        mine = self.allocate(a.shape)
-        copy(self.cg, a, mine)
-        return mine
-
-    def set(self, value) -> None:
-        raise TypeError("set() is for ScalarType outputs; tensors are allocated")
-
-    def finish(self) -> None:
-        """Called when the emitter is done."""
-
-    def offer_slot(self):
-        """Let whoever produces the result allocate it directly into this output's slot.
-
-        `GraphFunction.emit_call` asks this. If the node that computes the result
-        allocates new memory anyway (a kernel, or an output whose shape is only known
-        at run time), it can put that memory straight into this slot instead of
-        allocating its own and copying it over.
-
-        Returns `(slot, layout)`: the slot to allocate into, and a layout the new memory
-        must imply. Returns None if this output doesn't accept that (the default).
-        When the slot was used, the caller then calls `slot_filled()`."""
-        return None
-
-    def slot_filled(self) -> None:
-        """The result was allocated into the slot from `offer_slot()`: the output is
-        done."""
+# ------------------------------------------------------------------ handles
 
 
 @dataclass
-class ProvidedOutput(NodeOutput):
-    """Memory the caller provides, with the caller's strides."""
+class NewBufferOutput:
+    """The handle of a `NewBuffer` output."""
 
-    cg: Codegen
-    array: Array
+    destination: OutputDestination
 
     @property
-    def dtype(self):
-        return self.array.dtype
+    def dtype(self) -> str:
+        return self.destination.dtype
 
-    def allocate(self, shape: list) -> Array:
-        return self.array
-
-
-@dataclass
-class SlotOutput(NodeOutput):
-    """An output returned through a slot: memory it allocates, or a view of an input it
-    may alias."""
-
-    cg: Codegen
-    slot: ir.Value
-    dtype: str
-    ndim: int
-    #: the node inputs it may be a view of (the op's view_map; an input it may
-    #: overwrite)
-    aliases: tuple = ()
-    #: allocate in temporary memory instead of a runtime buffer (a temporary inside a
-    #: compiled unit): the slot's owner is then the scratch memory, which the unit
-    #: frees (`emit_steps`; null for a view)
-    temporary: bool = False
-    #: the (packed) layout `allocate` produces; default C-contiguous
-    layout: Layout | None = None
-    #: the layout the output must have (`view` checks that a view has it)
-    declared: Layout | None = None
-    #: (scope, noalias scopes) for the memory `allocate` returns (`Builder.mark_array`)
-    alias: tuple | None = None
-    done: bool = False
-
-    @classmethod
-    def for_output(cls, cg, slot, o, aliases=(), **kwargs) -> SlotOutput:
-        """The `SlotOutput` for `o`, a RETURNED output of a function's signature.
-
-        New memory is allocated in the output's declared layout if that layout says
-        exactly where every element goes (it is packed); otherwise it is allocated
-        C-contiguous, which then implies the declared layout. `aliases`: the positions
-        of the node inputs the output may be a view of."""
-        packed = o.layout.fully_packed(o.repr.shape)
-        return cls(
-            cg,
-            slot,
-            o.repr.dtype,
-            o.repr.ndim,
-            aliases=aliases,
-            layout=o.layout if packed else None,
-            declared=o.layout,
-            **kwargs,
-        )
-
-    def offer_slot(self):
-        # A temporary output lives in scratch memory that the surrounding unit frees.
-        # Memory a kernel allocated into the slot would not be freed that way.
-        if self.temporary or self.declared is None:
-            return None
-        return self.slot, self.declared
-
-    def slot_filled(self) -> None:
-        self.done = True
-
-    def allocate(self, shape: list) -> Array:
-        """A fresh buffer of `shape` in the slot's layout (packed; default C); the slot
-        owns it. An output that may be a view can always allocate instead (a reshape of
-        a non-contiguous array does): the owner it sets tells the caller."""
-        cg, b = self.cg, self.cg.b
-        if self.temporary:
-            # read by the unit after this node's function returned, which frees it
-            a = cg.temporary(self.dtype, shape, self.layout, escapes=True)
-            self._write(a.data, a.shape, a.strides)
-            b.store(a.data, b.field_ptr(slot_type(self.ndim), self.slot, Slot.OWNER))
-        else:
-            nbytes = b.mul(size(b, shape), itemsize(self.dtype), nsw=True)
-            owner = b.field_ptr(slot_type(self.ndim), self.slot, Slot.OWNER)
-            data = b.rt_alloc(cg.ctx, nbytes, owner)
-            cg.check(b.ne(data, b.null()), None)
-            a = packed_array(b, self.dtype, data, shape, self.layout)
-            self._write(data, shape, a.strides)
-        if self.alias is not None:
-            b.mark_array(a.data, *self.alias)
-        self.done = True
-        return a
-
-    def view(self, a: Array) -> Array:
-        if a.base not in self.aliases or a.dtype != self.dtype:
-            return super().view(a)
-        if self.declared is not None:
-            shape = a.static_shape()
-            if not a.layout.implies(self.declared, shape, itemsize(self.dtype)):
-                raise ValueError(
-                    f"the view has layout {a.layout.describe(shape)}, but the output "
-                    f"is declared {self.declared.describe(shape)} (llvm_layout)"
-                )
-        if a.base_if is None:
-            self.set_view(a)
-            return a
-
-        # Only the run time knows whether `a` really lies in the input's memory: if it
-        # does, pass it on as a view, else copy it into new memory.
-        def copied():
-            NodeOutput.view(self, a)
-
-        self.cg.b.if_else(a.base_if, lambda: self.set_view(a), copied)
-        # (both the view and the copy have the declared layout)
-        declared = self.declared or Layout.dynamic(self.ndim)
-        return read_slot(self.cg.b, self.slot, self.dtype, a.static_shape(), declared)
-
-    def set_view(self, a: Array) -> None:
-        """Put `a` into the slot as it is: the caller knows it is a view the output may
-        be (a unit, which checks at run time)."""
-        self._write(a.data, a.shape, a.strides)
-        self.done = True
-
-    def finish(self) -> None:
-        if not self.done:
-            raise ValueError("an output was never set")
-
-    # ---- for code that works on the slot itself (Scan)
-
-    def data(self):
-        """The data pointer in the slot (null until set)."""
-        b = self.cg.b
-        return b.load(ir.ptr, b.field_ptr(slot_type(self.ndim), self.slot, Slot.DATA))
-
-    def owner(self):
-        """The buffer reference in the slot (null for views)."""
-        b = self.cg.b
-        return b.load(ir.ptr, b.field_ptr(slot_type(self.ndim), self.slot, Slot.OWNER))
-
-    def read(self) -> Array:
-        """The array in the slot (after `allocate`), in the slot's layout."""
-        lay = self.layout if self.layout is not None else Layout.c(self.ndim)
-        return read_slot(self.cg.b, self.slot, self.dtype, [None] * self.ndim, lay)
-
-    def set_length(self, axis, n):
-        """Shorten axis `axis` of the array in the slot to `n` (i64) -- a view of the
-        same memory with the same strides."""
-        b = self.cg.b
-        lp = b.field_ptr(slot_type(self.ndim), self.slot, Slot.LENGTHS)
-        b.store(n, b.gep(ir.i64, lp, axis))
-
-    def _write(self, data, shape, strides):
-        b = self.cg.b
-        t = slot_type(self.ndim)
-        b.store(data, b.field_ptr(t, self.slot, Slot.DATA))
-        lp = b.field_ptr(t, self.slot, Slot.LENGTHS)
-        sp = b.field_ptr(t, self.slot, Slot.STRIDES)
-        for a in range(self.ndim):
-            b.store(shape[a], b.gep(ir.i64, lp, a))
-            b.store(strides[a], b.gep(ir.i64, sp, a))
+    def allocate(self, shape: list[ir.Value]) -> Array:
+        """Return new memory of `shape` for the result, in the declared layout."""
+        return self.destination.allocate(shape)
 
 
 @dataclass
-class ScalarOutput(NodeOutput):
-    """A ScalarType output, stored through a pointer: `set` it, or compute it into
-    the 0-d array `allocate([])` gives."""
+class InputViewOutput:
+    """The handle of an `InputView` output."""
 
-    cg: Codegen
-    ptr: ir.Value
-    dtype: str
-    array: Array | None = None
-    done: bool = False
+    destination: OutputDestination
+    storage: InputView
+    #: the view's layout, as the planner computed it
+    layout: Layout
 
-    def set(self, value) -> None:
-        self.cg.b.store(value, self.ptr)
-        self.done = True
+    @property
+    def dtype(self) -> str:
+        return self.destination.dtype
 
-    def allocate(self, shape: list) -> Array:
-        if shape:
-            raise ValueError("a ScalarType output has no axes")
-        self.array = self.cg.temporary(self.dtype, [])
-        return self.array
-
-    def view(self, a: Array) -> Array:
-        self.set(load(self.cg.b, self.dtype, a.data))
-        return a
-
-    def finish(self) -> None:
-        if self.array is not None:
-            self.set(load(self.cg.b, self.dtype, self.array.data))
-        if not self.done:
-            raise ValueError("an output was never set")
+    def emit(self, codegen: Codegen, inputs: list[EmitterInput]) -> Array:
+        """Build the view and make it the result."""
+        view = self.storage.mapping.apply(codegen, inputs).with_layout(self.layout)
+        if codegen.check_layouts:
+            check_strides(codegen, view, self.layout, "a view")
+        return self.destination.assign(view)
 
 
-def overwrite_or_copy(cg, out: NodeOutput, x: Array) -> Array:
-    """Memory holding the values of `x` for the result of `out`, to update: `x` itself
-    where the op may destroy it (the output is then `x`), else a copy of it in the
-    output's memory."""
-    if x.writable:
-        return out.view(x)
-    a = out.allocate(x.shape)
-    copy(cg, x, a)
-    return a
+@dataclass
+class ViewOrCopyOutput:
+    """The handle of a `ViewOrCopy` output."""
+
+    destination: OutputDestination
+    layout: Layout
+
+    @property
+    def dtype(self) -> str:
+        return self.destination.dtype
+
+    def view(self, array: Array) -> Array:
+        """Make `array`, a view of one of the declared inputs, the result.
+
+        Its layout must imply the declared one."""
+        return self.destination.assign(array)
+
+    def allocate(self, shape: list[ir.Value]) -> Array:
+        """Return new memory of `shape` for the result, in the declared layout."""
+        return self.destination.allocate(shape)
+
+
+@dataclass
+class InPlaceOutput:
+    """The handle of an `InPlaceUpdate` output."""
+
+    destination: OutputDestination
+    #: the node input the output may reuse
+    input: Array
+
+    @property
+    def dtype(self) -> str:
+        return self.destination.dtype
+
+    @property
+    def reuses_input(self) -> bool:
+        """Does the result go into the input's buffer? (Decided by the planner.)"""
+        return self.input.writable
+
+    def buffer(self) -> Array:
+        """Return memory for the result: the input's buffer, still holding the input,
+        if it is reused, else new uninitialized memory."""
+        if self.reuses_input:
+            return self.destination.assign(self.input)
+        return self.destination.allocate(self.input.shape)
+
+    def buffer_holding_input(self) -> Array:
+        """Return memory for the result that holds the input's values: the input's
+        buffer if it is reused, else a copy of the input."""
+        if self.reuses_input:
+            return self.destination.assign(self.input)
+        result = self.destination.allocate(self.input.shape)
+        copy(self.destination.codegen, self.input, result)
+        return result
+
+
+@dataclass
+class ScalarOutput:
+    """The handle of a ScalarType output."""
+
+    destination: ScalarDestination
+
+    @property
+    def dtype(self) -> str:
+        return self.destination.dtype
+
+    def set(self, value: ir.Value) -> None:
+        """Make `value` the result."""
+        self.destination.set(value)
+
+
+#: What an emitter gets for one node output (None for a value without data).
+EmitterOutput = (
+    NewBufferOutput | InputViewOutput | ViewOrCopyOutput | InPlaceOutput | ScalarOutput
+)
+
+
+def destinations(outputs: list) -> list[OutputDestination | None]:
+    """Return the destination of each handle in `outputs`, for an op that hands its
+    outputs on to an inner graph (`GraphFunction.emit_call`)."""
+    return [None if output is None else output.destination for output in outputs]
+
+
+def emit_input_views(
+    op, node: Apply, codegen: Codegen, inputs: list, outputs: list
+) -> None:
+    """The emitter of an op whose outputs are all `InputView`s: register it as
+    `llvm_emit.register(SomeOp, emit_input_views)`."""
+    for output in outputs:
+        if not isinstance(output, InputViewOutput):
+            raise TypeError(
+                f"{op}: emit_input_views needs InputView outputs, got "
+                f"{type(output).__name__}"
+            )
+        output.emit(codegen, inputs)
 
 
 __all__ = [
-    "NodeOutput",
-    "ProvidedOutput",
+    "EmitterInput",
+    "EmitterOutput",
+    "InPlaceOutput",
+    "InPlaceUpdate",
+    "InputView",
+    "InputViewOutput",
+    "NewBuffer",
+    "NewBufferOutput",
+    "OutputStorage",
     "ScalarOutput",
-    "SlotOutput",
+    "ViewMapping",
+    "ViewOrCopy",
+    "ViewOrCopyOutput",
+    "destinations",
+    "emit_input_views",
+    "has_emitter",
     "llvm_emit",
-    "llvm_layout",
-    "overwrite_or_copy",
+    "llvm_outputs",
 ]

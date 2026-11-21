@@ -2,89 +2,119 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from pytensor.compile.ops import DeepCopyOp, ViewOp
-from pytensor.link.llvm.analysis.layout import dimshuffle_layout, same_layout
-from pytensor.link.llvm.codegen.emit import Array, cast, copy
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.graph.basic import Apply
+from pytensor.link.llvm.analysis.layout import Layout, dimshuffle_layout, same_layout
+from pytensor.link.llvm.codegen.emit import Array, Codegen, cast, copy
+from pytensor.link.llvm.codegen.interface import (
+    InputView,
+    emit_input_views,
+    llvm_emit,
+    llvm_outputs,
+)
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.shape import SpecifyShape
 
 
-@llvm_layout.register(DimShuffle)
-def _(op, node, in_layouts):
-    return [dimshuffle_layout(op, node, in_layouts[0])]
+@dataclass(frozen=True)
+class DimShuffleView:
+    """The input with its axes reordered, length-1 axes dropped or added."""
+
+    op: DimShuffle
+    node: Apply
+
+    def layout(self, source: Layout) -> Layout:
+        return dimshuffle_layout(self.op, self.node, source)
+
+    def apply(self, codegen: Codegen, inputs: list) -> Array:
+        builder = codegen.b
+        source: Array = inputs[0]
+        input_shape = self.node.inputs[0].type.shape
+        for axis in self.op.drop:
+            if input_shape[axis] is None:
+                codegen.check(
+                    builder.eq(source.shape[axis], builder.i64(1)),
+                    f"DimShuffle: cannot drop axis {axis} of length other than 1",
+                )
+        shape, strides = [], []
+        for entry in self.op.new_order:
+            if entry == "x":
+                shape.append(builder.i64(1))
+                strides.append(builder.i64(0))
+            else:
+                shape.append(source.shape[entry])
+                strides.append(source.strides[entry])
+        return source.view(source.data, shape, strides)
 
 
-@llvm_layout.register(ViewOp)
-@llvm_layout.register(SpecifyShape)
-def _(op, node, in_layouts):
-    return [same_layout(node, in_layouts[0])]
+@dataclass(frozen=True)
+class SameView:
+    """The input itself (ViewOp, SpecifyShape after its checks)."""
+
+    node: Apply
+
+    def layout(self, source: Layout) -> Layout:
+        return same_layout(self.node, source)
+
+    def apply(self, codegen: Codegen, inputs: list) -> Array:
+        source: Array = inputs[0]
+        # The output's type may know lengths the input's doesn't.
+        builder = codegen.b
+        shape = [
+            length if static is None else builder.i64(static)
+            for length, static in zip(
+                source.shape, self.node.outputs[0].type.shape, strict=True
+            )
+        ]
+        return source.view(source.data, shape, source.strides)
 
 
-@llvm_emit.register(DimShuffle)
-def _(op, node, cg, inputs, outputs):
-    b = cg.b
-    x = inputs[0]
-    for a in (a for a in op.drop if node.inputs[0].type.shape[a] is None):
-        cg.check(
-            b.eq(x.shape[a], b.i64(1)),
-            f"DimShuffle: cannot drop axis {a} of length other than 1",
-        )
-    shape, strides = [], []
-    for o in op.new_order:
-        if o == "x":
-            shape.append(b.i64(1))
-            strides.append(b.i64(0))
-        else:
-            shape.append(x.shape[o])
-            strides.append(x.strides[o])
-    # the view's layout follows from the input's (the same rule `llvm_layout` uses)
-    outputs[0].view(
-        x.view(x.data, shape, strides, dimshuffle_layout(op, node, x.layout))
-    )
+@llvm_outputs.register(DimShuffle)
+def _(op, node, input_layouts):
+    return [InputView(0, DimShuffleView(op, node))]
 
 
-@llvm_emit.register(ViewOp)
-def _(op, node, cg, inputs, outputs):
-    outputs[0].view(inputs[0])
+@llvm_outputs.register(ViewOp)
+@llvm_outputs.register(SpecifyShape)
+def _(op, node, input_layouts):
+    return [InputView(0, SameView(node))]
+
+
+llvm_emit.register(DimShuffle, emit_input_views)
+llvm_emit.register(ViewOp, emit_input_views)
 
 
 @llvm_emit.register(SpecifyShape)
-def _(op, node, cg, inputs, outputs):
+def _(op, node, codegen, inputs, outputs):
     """Check the given lengths (None inputs: unconstrained axes), then a view."""
-    b = cg.b
-    x = inputs[0]
-    for a, (n, var) in enumerate(zip(inputs[1:], node.inputs[1:], strict=True)):
-        if n is None:
+    builder = codegen.b
+    source = inputs[0]
+    for axis, (length, var) in enumerate(zip(inputs[1:], node.inputs[1:], strict=True)):
+        if length is None:
             continue
-        want = cast(
-            b,
-            n.load(b).value if isinstance(n, Array) else n,
-            var.type.dtype,
-            "int64",
+        value = length.load(builder).value if isinstance(length, Array) else length
+        expected = cast(builder, value, var.type.dtype, "int64")
+        codegen.check(
+            builder.eq(source.shape[axis], expected),
+            f"SpecifyShape: axis {axis} has the wrong length",
         )
-        cg.check(b.eq(x.shape[a], want), f"SpecifyShape: axis {a} has the wrong length")
-    # the output's type may know lengths the input's doesn't: its layout is declared for those
-    shape = [
-        n if s is None else b.i64(s)
-        for n, s in zip(x.shape, node.outputs[0].type.shape, strict=True)
-    ]
-    outputs[0].view(x.view(x.data, shape, x.strides, same_layout(node, x.layout)))
+    outputs[0].emit(codegen, inputs)
 
 
 @llvm_emit.register(DeepCopyOp)
-def _(op, node, cg, inputs, outputs):
-    x = inputs[0]
-    copy(cg, x, outputs[0].allocate(x.shape))
+def _(op, node, codegen, inputs, outputs):
+    source = inputs[0]
+    copy(codegen, source, outputs[0].allocate(source.shape))
 
 
 @llvm_emit.register(ScalarFromTensor)
-def _(op, node, cg, inputs, outputs):
-    x = inputs[0]
-    outputs[0].set(x.load(cg.b).value)
+def _(op, node, codegen, inputs, outputs):
+    outputs[0].set(inputs[0].load(codegen.b).value)
 
 
 @llvm_emit.register(TensorFromScalar)
-def _(op, node, cg, inputs, outputs):
-    outputs[0].allocate([]).store(cg.b, inputs[0])
+def _(op, node, codegen, inputs, outputs):
+    outputs[0].allocate([]).store(codegen.b, inputs[0])

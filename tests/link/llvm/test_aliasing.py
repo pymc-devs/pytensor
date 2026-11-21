@@ -21,12 +21,22 @@ from pytensor.link.llvm.analysis.liveness import (  # noqa: E402
     place_temporaries,
 )
 from pytensor.link.llvm.codegen.emit import Array, load, unknown_layout  # noqa: E402
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout  # noqa: E402
-from pytensor.link.llvm.codegen.signature import OutputMode, node_outputs  # noqa: E402
+from pytensor.link.llvm.codegen.interface import (  # noqa: E402
+    ViewOrCopy,
+    llvm_emit,
+    llvm_outputs,
+)
+from pytensor.link.llvm.codegen.signature import (  # noqa: E402
+    Output,
+    Passing,
+    Signature,
+    node_outputs,
+)
+from pytensor.link.llvm.codegen.types import TensorRepr  # noqa: E402
 
 
 STRICT = get_mode("LLVM").clone(link_kwargs={"numba_fallback": False})
-P, R = OutputMode.PROVIDED, OutputMode.RETURNED
+P, R = Passing.CALLER_BUFFER, Passing.CALLEE_SLOT
 
 
 # ------------------------------------------------------------------ what the op says
@@ -36,29 +46,33 @@ def test_how_an_output_comes_to_be_follows_from_the_op_and_the_type():
     x = pt.matrix("x")
     static = pt.tensor("s", shape=(3, 4))
     (o,) = node_outputs(pt.exp(static).owner)
-    assert o.mode is P and o.aliases == ()  # new memory of a known size: provided
+    assert o.passing is P and o.aliased_inputs == ()  # new memory of a known size
     (o,) = node_outputs(pt.exp(x).owner)
-    assert o.mode is R and o.aliases == ()  # new memory: the kernel allocates
+    assert o.passing is R and o.aliased_inputs == ()  # new memory: the node allocates
     (o,) = node_outputs(x.T.owner, [Layout.c(2)])
     assert (
-        o.mode is R and o.aliases == (0,) and str(o.layout) == "[P0, P1]"
-    )  # may be a view
+        o.passing is R and o.aliased_inputs == (0,) and str(o.layout) == "[P0, P1]"
+    )  # a view
     (o,) = node_outputs(static.T.owner)
-    assert o.mode is R and o.aliases == (0,)  # ... also with a static shape
+    assert o.passing is R and o.aliased_inputs == (0,)  # ... also with a static shape
 
 
 # ------------------------------------------------------------------ memory planning
 
 
-def step(inputs, outputs, modes, aliases=None):
-    """A step as `analysis.liveness` sees it: arguments, outputs, their modes and aliases
-    (argument positions)."""
+def step(inputs, outputs, passings, aliases=None):
+    """A step as `analysis.liveness` sees it: arguments, outputs, how they are passed
+    and the arguments they may be views of."""
     aliases = aliases or [()] * len(outputs)
-    outs = [SimpleNamespace(mode=m, aliases=a) for m, a in zip(modes, aliases)]
+    representation = TensorRepr("float64", (8,), Layout.c(1))
+    outs = [
+        Output(representation, None, passing, a)
+        for passing, a in zip(passings, aliases, strict=True)
+    ]
     return SimpleNamespace(
         arguments=inputs,
         outputs=outputs,
-        signature=SimpleNamespace(outputs=outs),
+        signature=Signature((), tuple(outs)),
     )
 
 
@@ -127,21 +141,20 @@ class Pick(Op):
         output_storage[0][0] = a if flag else b
 
 
-@llvm_layout.register(Pick)
-def _(op, node, in_layouts):
-    _, a, b = in_layouts
-    return [a.join(b, (None,), 8)]  # what both views have
+@llvm_outputs.register(Pick)
+def _(op, node, input_layouts):
+    _, a, b = input_layouts
+    return [ViewOrCopy((1, 2), a.join(b, (None,), 8))]  # what both views have
 
 
 @llvm_emit.register(Pick)
-def _(op, node, cg, inputs, outputs):
-    b = cg.b
+def _(op, node, codegen, inputs, outputs):
+    builder = codegen.b
     flag, x, y = inputs
-    layout = x.layout.join(y.layout, (None,), 8)
-    with b.if_(b.ne(load(b, flag.dtype, flag.data), 0)):
-        outputs[0].view(x.view(x.data, x.shape, x.strides, layout))
-    with b.else_():
-        outputs[0].view(y.view(y.data, y.shape, y.strides, layout))
+    with builder.if_(builder.ne(load(builder, flag.dtype, flag.data), 0)):
+        outputs[0].view(x)
+    with builder.else_():
+        outputs[0].view(y)
 
 
 pick = Pick()
@@ -151,7 +164,7 @@ def test_an_output_may_alias_several_inputs():
     flag = pt.scalar("flag", dtype="int8")
     x, y = pt.vector("x"), pt.vector("y")
     (o,) = node_outputs(pick(flag, x, y).owner)
-    assert o.mode is R and o.aliases == (1, 2)
+    assert o.passing is R and o.aliased_inputs == (1, 2)
 
     xv, yv = np.arange(5.0), -np.arange(3.0)
     # As the graph's output: a copy (the caller's arrays aren't handed back). PyTensor's
@@ -182,7 +195,7 @@ def test_an_output_may_alias_several_inputs():
     assert "may be (a view of) %" in dump and dump.count("Pick") == 1
 
 
-def test_a_view_is_copied_where_the_output_cant_be_one():
+def test_an_emitter_only_returns_views_the_op_declares():
     class Passes(Op):
         def __init__(self, view):
             if view:
@@ -195,18 +208,23 @@ def test_a_view_is_copied_where_the_output_cant_be_one():
             output_storage[0][0] = inputs[0][::2]
 
     @llvm_emit.register(Passes)
-    def _(op, node, cg, inputs, outputs):
+    def _(op, node, codegen, inputs, outputs):
         (x,) = inputs
-        outputs[0].view(x.view(x.data, [cg.b.i64(2)], [cg.b.mul(x.strides[0], 2)]))
+        stride = codegen.b.mul(x.strides[0], 2)
+        outputs[0].view(x.view(x.data, [codegen.b.i64(2)], [stride]))
 
     x = pt.vector("x", shape=(4,))
     v = np.arange(4.0)
-    for view in (True, False):
-        op = Passes(view)
-        (o,) = node_outputs(op(x).owner)
-        assert (o.aliases == (0,)) is view
-        f = pytensor.function([x], op(x) + 1, mode=STRICT)
-        np.testing.assert_array_equal(f(v), v[::2] + 1)
+    # with a view_map, the default storage is a view (or a copy)
+    (o,) = node_outputs(Passes(True)(x).owner)
+    assert o.aliased_inputs == (0,)
+    f = pytensor.function([x], Passes(True)(x) + 1, mode=STRICT)
+    np.testing.assert_array_equal(f(v), v[::2] + 1)
+    # without one, it is new memory, and the emitter has no view to return
+    (o,) = node_outputs(Passes(False)(x).owner)
+    assert o.aliased_inputs == ()
+    with pytest.raises(AttributeError, match="view"):
+        pytensor.function([x], Passes(False)(x) + 1, mode=STRICT)
 
 
 def test_inputs_are_read_only():

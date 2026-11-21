@@ -1,6 +1,6 @@
 """Tasks that overwrite an input: what the op destroys (`destroy_map`), where the
-planner sees that nothing else reads the memory (the input is `writable`) and the
-emitter does."""
+planner sees that nothing else reads the memory (the input is `writable`), and what the
+op declares (`InPlaceUpdate`)."""
 
 import numpy as np
 import pytest
@@ -23,13 +23,15 @@ from pytensor_llvm import ir
 from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
 from pytensor.link.llvm.codegen.emit import for_each, load, store
 from pytensor.link.llvm.codegen.interface import (
+    InPlaceUpdate,
+    NewBuffer,
     llvm_emit,
-    overwrite_or_copy,
+    llvm_outputs,
 )
 from pytensor.link.llvm.codegen.node import build_node_function
 from pytensor.link.llvm.codegen.signature import (
-    OutputMode,
-    destroyed_input,
+    Passing,
+    can_update_in_place,
     node_outputs,
 )
 from pytensor.link.llvm.program import Options, build_program
@@ -39,7 +41,7 @@ from tests.link.llvm.test_aliasing import step
 
 # (fused, a chain of Elemwise is one loop and has nothing to overwrite)
 MODE = get_mode("LLVM").excluding("fusion")
-P, R = OutputMode.PROVIDED, OutputMode.RETURNED
+P, R = Passing.CALLER_BUFFER, Passing.CALLEE_SLOT
 
 
 def compiled(inputs, outputs, mode=MODE):
@@ -140,16 +142,18 @@ def test_layouts_are_checked_with_overwriting():
 
 def test_an_output_may_be_the_input_it_overwrites():
     x = pt.matrix("x")
-    assert destroyed_input(pt.exp(x).owner, 0) is None
+    assert not can_update_in_place(pt.exp(x).owner, 0, 0)
     inplace = (
         pytensor.function([x], pt.exp(x * 2), mode=MODE).maker.fgraph.outputs[0].owner
     )
     assert inplace.op.destroy_map == {0: [0]}
-    assert destroyed_input(inplace, 0) == 0
+    assert can_update_in_place(inplace, 0, 0)
     (o,) = node_outputs(inplace, writable={0})
-    assert o.mode is R and o.aliases == (0,)
+    assert isinstance(o.storage, InPlaceUpdate)
+    assert o.passing is R and o.aliased_inputs == (0,)
     (o,) = node_outputs(inplace)
-    assert o.mode is R and o.aliases == ()  # without the planner's word: new memory
+    # without the planner's word: new memory
+    assert o.passing is R and o.aliased_inputs == ()
 
 
 class Halve(Op):
@@ -178,13 +182,24 @@ def _halve(cg, out):
     )
 
 
+@llvm_outputs.register(Halve)
+def _(op, node, input_layouts):
+    return [InPlaceUpdate(0)]
+
+
 @llvm_emit.register(Halve)
-def _(op, node, cg, inputs, outputs):
-    _halve(cg, overwrite_or_copy(cg, outputs[0], inputs[0]))
+def _(op, node, codegen, inputs, outputs):
+    _halve(codegen, outputs[0].buffer_holding_input())
 
 
 class HalveCopying(Halve):
-    """The same, into new memory: its emitter ignores that it may overwrite x."""
+    """The same, into new memory: it declares a new buffer although it may overwrite
+    x."""
+
+
+@llvm_outputs.register(HalveCopying)
+def _(op, node, input_layouts):
+    return [NewBuffer()]
 
 
 @llvm_emit.register(HalveCopying)
@@ -200,7 +215,7 @@ def _(op, node, cg, inputs, outputs):
     )
 
 
-def test_the_emitter_decides_whether_to_overwrite():
+def test_the_op_declares_whether_to_overwrite():
     x = pt.matrix("x")
     for op in [Halve(), HalveCopying()]:
         f, stats = validated([x], [op(x * 2)])

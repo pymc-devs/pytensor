@@ -24,7 +24,13 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    InPlaceOutput,
+    InPlaceUpdate,
+    NewBuffer,
+    llvm_emit,
+    llvm_outputs,
+)
 from pytensor.link.llvm.codegen.types import check_dtype
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.elemwise import CAReduce, Elemwise
@@ -55,31 +61,36 @@ def broadcast_shape(cg, node, inputs):
     return shape
 
 
-@llvm_layout.register(Elemwise)
-def _(op, node, in_layouts):
-    """The memory order most inputs are packed in (C if there is none): then all
-    operands share one order and the loop is flat. Elemwise on transposed inputs gives
-    a transposed output instead of a strided loop."""
-    layouts = []
-    for o in node.outputs:
-        shape = tuple(None if s is None else int(s) for s in o.type.shape)
-        order = common_order(in_layouts, shape)
-        layouts.append(
-            None if order is None else Layout.make(shape, order, [PACKED] * len(shape))
-        )
-    return layouts
+@llvm_outputs.register(Elemwise)
+def _(op, node, input_layouts):
+    """Outputs in `inplace_pattern` update their input. The others are new memory, in
+    the memory order most inputs are packed in (C if there is none): then all operands
+    share one order and the loop is flat. Elemwise on transposed inputs gives a
+    transposed output instead of a strided loop."""
+    storage = []
+    for k, output in enumerate(node.outputs):
+        if k in op.inplace_pattern:
+            storage.append(InPlaceUpdate(op.inplace_pattern[k]))
+            continue
+        shape = tuple(None if s is None else int(s) for s in output.type.shape)
+        order = common_order(input_layouts, shape)
+        if order is None:
+            storage.append(NewBuffer())
+        else:
+            storage.append(NewBuffer(Layout.make(shape, order, [PACKED] * len(shape))))
+    return storage
 
 
 @llvm_emit.register(Elemwise)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     shape = broadcast_shape(cg, node, inputs)
-    # every element is read before it is written: an output can be the memory of an
-    # input it may overwrite
-    outs = []
-    for k, o in enumerate(outputs):
-        x = inputs[op.inplace_pattern[k]] if k in op.inplace_pattern else None
-        outs.append(o.view(x) if x is not None and x.writable else o.allocate(shape))
+    # Every element is read before it is written, so an output can be the memory of
+    # the input it updates.
+    outs = [
+        output.buffer() if isinstance(output, InPlaceOutput) else output.allocate(shape)
+        for output in outputs
+    ]
     in_dtypes = [check_dtype(v.type.dtype) for v in node.inputs]
     out_dtypes = [check_dtype(v.type.dtype) for v in node.outputs]
     # inputs that are one element for the whole loop are read once, before it

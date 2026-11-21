@@ -9,14 +9,15 @@ zeroed. nit-sot buffers whose rows have no static shape are allocated by the fir
 iteration.
 
 A state's buffer is the outer buffer itself when the Scan may destroy it (`inplace`,
-not for while-loops); else a new one, into which only the initial rows are copied.
+not for while-loops: its output is then an `InPlaceUpdate`); else a new one, into which
+only the initial rows are copied.
 
 Every iteration runs the inner graph, the loop body (`Codegen.graph_function`). Nodes
 we generate are inlined, the others are calls of their Rust or numba kernels. The body
 is specialized for the layouts of what the loop passes it: rows of the sequences, rows
 of the buffers, and the non-sequences.
 
-Each output of the body has a `NodeOutput` that says where it goes: `_StateRow` (a row
+Each output of the body has an `OutputDestination` that says where it goes: `_StateRow` (a row
 of a state's buffer), `_NitSotRow` (a row of a nit-sot buffer) or `_UntracedState`.
 An output is written directly into its row, unless the iteration also reads that row.
 That only happens in short circular buffers, and is decided once, before the loop. Then
@@ -33,6 +34,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pytensor.link.llvm.analysis.layout import Layout, remove_axis
+from pytensor.link.llvm.codegen.destination import (
+    OutputDestination,
+    ScalarDestination,
+    SlotDestination,
+)
 from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
@@ -45,11 +51,13 @@ from pytensor.link.llvm.codegen.emit import (
     store,
 )
 from pytensor.link.llvm.codegen.interface import (
-    NodeOutput,
-    ScalarOutput,
-    SlotOutput,
+    InPlaceOutput,
+    InPlaceUpdate,
+    NewBuffer,
+    ViewOrCopy,
+    destinations,
     llvm_emit,
-    llvm_layout,
+    llvm_outputs,
 )
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, value_type
 
@@ -57,12 +65,25 @@ from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, value_type
 def register():
     from pytensor.scan.op import Scan
 
-    @llvm_layout.register(Scan)
-    def _(op, node, in_layouts):
-        # buffers allocated by the loop, C-contiguous (as the Rust kernel's)
-        return [
-            None if is_absent(o.type) else Layout.c(o.type.ndim) for o in node.outputs
-        ]
+    @llvm_outputs.register(Scan)
+    def _(op, node, input_layouts):
+        # An untraced state may be its initial value (`view_map`: for zero steps), and
+        # is returned in a slot, which the loop reallocates if the state's shape
+        # changes. A traced state's buffer updates its initial buffer where the Scan
+        # destroys it. The others are allocated by the loop, C-contiguous (as the Rust
+        # kernel's).
+        storage = []
+        for k, output in enumerate(node.outputs):
+            if k in op.view_map:
+                inputs = tuple(op.view_map[k])
+                storage.append(ViewOrCopy(inputs, Layout.c(output.type.ndim)))
+            elif k in op.destroy_map:
+                storage.append(InPlaceUpdate(op.destroy_map[k][0]))
+            elif is_absent(output.type):
+                storage.append(NewBuffer())
+            else:
+                storage.append(NewBuffer(Layout.c(output.type.ndim)))
+        return storage
 
     @llvm_emit.register(Scan)
     def _(op, node, cg, inputs, outputs):
@@ -76,7 +97,7 @@ def register():
 class _StateBuffer:
     """The buffer of a traced state (mit-mot, mit-sot, sit-sot): the outer output."""
 
-    output: NodeOutput
+    output: OutputDestination
     buffer: Array
     #: rows before the one iteration 0 reads as tap 0 (the initial values)
     lookback: int
@@ -133,12 +154,12 @@ class _NitSotBuffer:
     written circularly), one more if `n_rows` is 0 (trimmed after the loop), so that
     every iteration has a row to write."""
 
-    output: SlotOutput
+    output: SlotDestination
     #: the length the output has (i64, >= 0)
-    n_rows: object
+    n_rows: ir.Value
     #: the rows the buffer has: `max(n_rows, 1)`; iteration `i` writes row
     #: `i % stored_rows`
-    stored_rows: object
+    stored_rows: ir.Value
     #: None: the rows have no static shape, the first iteration allocates it
     buffer: Array | None
     row_ndim: int
@@ -243,11 +264,14 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
         reads = [int(t) for t in reads]
         lookback = -min(min(reads, default=0), 0)
         is_mit_mot = k < info.n_mit_mot
-        if init.writable:
-            # the outer buffer itself, if the output may be it
-            buffer = out.view(init)
+        if isinstance(out, InPlaceOutput):
+            # the outer buffer itself, if the planner lets the Scan reuse it
+            buffer = out.buffer()
+            reused = out.reuses_input
         else:
             buffer = out.allocate(list(init.shape))
+            reused = False
+        if not reused:
             if is_mit_mot:
                 copy(cg, init, buffer)
             else:
@@ -257,7 +281,7 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
                 copy(cg, _row_range(b, init, 0, n), _row_range(b, buffer, 0, n))
         states.append(
             _StateBuffer(
-                output=out,
+                output=out.destination,
                 buffer=buffer,
                 lookback=lookback,
                 read_taps=reads,
@@ -295,7 +319,7 @@ def _allocate_nit_sot_buffers(cg, op, node, inputs, outputs) -> list[_NitSotBuff
     return nit_sots
 
 
-def _copy_untraced_states(cg, op, inputs, outputs) -> list[SlotOutput | None]:
+def _copy_untraced_states(cg, op, inputs, outputs) -> list[SlotDestination | None]:
     """The untraced states, copied into their outputs (None: no data, a random
     generator). Each iteration's output replaces them; an output of another shape is
     reallocated, so they are read from the slot in every iteration."""
@@ -323,14 +347,14 @@ def _check_shape(cg, shape, row_shape, message):
 
 
 @dataclass
-class _StateRow(NodeOutput):
+class _StateRow(OutputDestination):
     """Where the body writes a new value of a traced state (one of its write taps).
 
     The value goes into its row of the state's buffer. If the iteration may also read
     that row (`_StateBuffer.write_in_place`), the value is written to memory aside
     instead, and copied into the row when the iteration is done (`finish`)."""
 
-    cg: Codegen
+    codegen: Codegen
     row: Array
     #: i1: may the value be written directly into the row?
     in_place: ir.Value
@@ -344,7 +368,7 @@ class _StateRow(NodeOutput):
         return self.row.dtype
 
     def allocate(self, shape: list) -> Array:
-        cg = self.cg
+        cg = self.codegen
         message = "Scan: a body output has another shape than its rows"
         _check_shape(cg, shape, self.row.shape, message)
         known = self.in_place.const_int
@@ -361,23 +385,23 @@ class _StateRow(NodeOutput):
             raise ValueError("an output was never set")
         if self.target is self.row:
             return
-        b = self.cg.b
+        b = self.codegen.b
         if self.in_place.const_int == 0:
-            copy(self.cg, self.target, self.row)
+            copy(self.codegen, self.target, self.row)
             return
         with b.if_(b.not_(self.in_place)):
-            copy(self.cg, self.target, self.row)
+            copy(self.codegen, self.target, self.row)
 
 
 @dataclass
-class _NitSotRow(NodeOutput):
+class _NitSotRow(OutputDestination):
     """Where the body writes a nit-sot output: its row of the nit-sot buffer.
 
     If the rows have no static shape, the buffer doesn't exist before the loop: the
     first iteration allocates it, with rows of the shape of its output. The outputs of
     all later iterations must have the same shape."""
 
-    cg: Codegen
+    codegen: Codegen
     nit: _NitSotBuffer
     #: the iteration, and the row it writes to
     i: ir.Value
@@ -389,14 +413,14 @@ class _NitSotRow(NodeOutput):
         return self.nit.output.dtype
 
     def allocate(self, shape: list) -> Array:
-        b, nit = self.cg.b, self.nit
+        b, nit = self.codegen.b, self.nit
         buffer = nit.buffer
         if buffer is None:
             with b.if_(b.eq(self.i, 0)):
                 nit.output.allocate([nit.stored_rows, *shape])
             buffer = nit.output.read()
         _check_shape(
-            self.cg,
+            self.codegen,
             shape,
             buffer.shape[1:],
             "Scan: nit-sot body outputs have different shapes",
@@ -410,14 +434,14 @@ class _NitSotRow(NodeOutput):
 
 
 @dataclass
-class _UntracedState(NodeOutput):
+class _UntracedState(OutputDestination):
     """Where the body writes the next value of an untraced state.
 
     The value goes into temporary memory. It replaces the state when the iteration is
     done (`finish`): until then the iteration may still read the current value."""
 
-    cg: Codegen
-    out: SlotOutput
+    codegen: Codegen
+    out: SlotDestination
     current: Array
     value: Array | None = None
 
@@ -426,16 +450,16 @@ class _UntracedState(NodeOutput):
         return self.out.dtype
 
     def allocate(self, shape: list) -> Array:
-        self.value = self.cg.temporary(self.out.dtype, shape)
+        self.value = self.codegen.temporary(self.out.dtype, shape)
         return self.value
 
     def finish(self) -> None:
         if self.value is None:
             raise ValueError("an output was never set")
-        _replace_untraced_state(self.cg, self.out, self.current, self.value)
+        _replace_untraced_state(self.codegen, self.out, self.current, self.value)
 
 
-def _replace_untraced_state(cg, out: SlotOutput, current: Array, src: Array):
+def _replace_untraced_state(cg, out: SlotDestination, current: Array, src: Array):
     """Make `src` the untraced state: copied into its memory, or into new memory if
     its shape differs."""
     b = cg.b
@@ -506,8 +530,9 @@ def emit_scan(op, node, cg, inputs, outputs):
         )
     non_sequences = op.outer_non_seqs(inputs)
     states = _allocate_state_buffers(cg, op, inputs, outputs)
-    nit_sots = _allocate_nit_sot_buffers(cg, op, node, inputs, outputs)
-    untraced = _copy_untraced_states(cg, op, inputs, outputs)
+    # (nit-sot outputs and untraced states are worked on in their slots)
+    nit_sots = _allocate_nit_sot_buffers(cg, op, node, inputs, destinations(outputs))
+    untraced = _copy_untraced_states(cg, op, inputs, destinations(outputs))
 
     # the inner inputs and outputs, per kind (in the order of `states`' taps)
     state_reads_at = [
@@ -534,7 +559,7 @@ def emit_scan(op, node, cg, inputs, outputs):
         body_layouts[k] = _row_layout(s.buffer)
     for k, out in zip(untraced_in_at, untraced, strict=True):
         if out is not None:
-            body_layouts[k] = out.layout or Layout.c(out.ndim)
+            body_layouts[k] = out.allocation_layout or Layout.c(out.ndim)
     for k, a in zip(op.inner_non_seqs(ins), non_sequences, strict=True):
         if isinstance(a, Array):
             body_layouts[k] = a.layout
@@ -590,13 +615,15 @@ def emit_scan(op, node, cg, inputs, outputs):
                     args[k_in] = current
                     results[k_out] = _UntracedState(cg, out, current)
             if info.as_while:
-                cond = ScalarOutput(cg, b.alloca(value_type(cond_dtype)), cond_dtype)
+                cond = ScalarDestination(
+                    cg, b.alloca(value_type(cond_dtype)), cond_dtype
+                )
                 results[-1] = cond
 
             body.emit_call(cg, args, results)
 
             if info.as_while:
-                value = b.load(value_type(cond_dtype), cond.ptr)
+                value = b.load(value_type(cond_dtype), cond.pointer)
                 stop = b.ne(cast(b, value, cond_dtype, "int8"), 0)
         next_rows = counters.advance(b, rows)
         if info.as_while:

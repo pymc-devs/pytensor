@@ -6,15 +6,29 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pytensor.link.llvm.codegen.destination import (
+    OutputDestination,
+    ProvidedDestination,
+    ScalarDestination,
+    SlotDestination,
+)
 from pytensor.link.llvm.codegen.emit import Codegen, c_array, constant, store, unpack
 from pytensor.link.llvm.codegen.interface import (
-    ProvidedOutput,
+    EmitterInput,
+    EmitterOutput,
+    InPlaceOutput,
+    InPlaceUpdate,
+    InputView,
+    InputViewOutput,
+    NewBufferOutput,
     ScalarOutput,
-    SlotOutput,
+    ViewOrCopy,
+    ViewOrCopyOutput,
     llvm_emit,
 )
 from pytensor.link.llvm.codegen.signature import (
-    OutputMode,
+    Output,
+    Passing,
     Signature,
     node_signature,
     skipped_inputs,
@@ -66,85 +80,96 @@ def build_node_function(
     module,
     node,
     name: str,
-    temporary_outputs=frozenset(),
+    scratch_outputs=frozenset(),
     folded=None,
-    in_layouts=None,
+    input_layouts=None,
     provided=None,
     parallel=True,
     kernel=None,
     links=None,
     planner=None,
     writable=frozenset(),
+    check_layouts=False,
 ) -> NodeFunction:
-    """The LLVM function of one node, always inlined.
+    """Build the LLVM function of one node, always inlined.
 
-    * `temporary_outputs`: allocated outputs that are temporaries of a compiled unit;
-      they go into temporary memory instead of runtime buffers;
+    * `scratch_outputs`: positions of the outputs that are temporaries of a compiled
+      unit: they go into the unit's scratch memory instead of runtime buffers;
     * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
-    * `kernel`: a `Kernel` implementing the node (a Rust kernel, a numba kernel):
-      the function calls it (call.py), through an entry of `links`, the
-      link table that is the config of the kernel being generated. Code nested in the
-      node (a Scan's loop body, a Blockwise's core) links its kernels there too;
+    * `input_layouts`, `provided`, `writable`: see `node_signature`;
+    * `kernel`: a `Kernel` implementing the node (a Rust or numba kernel). The function
+      calls it (call.py) through an entry of `links`, the link table that is the
+      config of the kernel being generated. Code nested in the node (a Scan's loop
+      body, a Blockwise's core) links its kernels there too;
     * `planner`: decides how the nodes of inner graphs run (a Scan's loop body, a
       Blockwise's core: `Codegen.graph_function`);
-    * `writable`: positions of the inputs the node may overwrite (`node_outputs`).
+    * `check_layouts`: verify views' layouts at run time (`Codegen.check_layouts`).
     """
     folded = folded or {}
-    sig = node_signature(
+    signature = node_signature(
         node,
         frozenset(folded),
-        in_layouts,
+        input_layouts,
         provided,
         kernel.outputs if kernel is not None else None,
         writable,
     )
-    fn = module.function(
+    function = module.function(
         name,
-        sig.param_types(),
+        signature.param_types(),
         ir.i32,
         inline=ir.Inline.Always,
         debug_name=debug_name(node),
     )
-    b = fn.builder()
-    params = iter(fn.params)
+    builder = function.builder()
+    params = iter(function.params)
     ctx, config = next(params), next(params)
-    cg = Codegen(
-        b,
+    codegen = Codegen(
+        builder,
         ctx,
         config,
         parallel=parallel,
+        check_layouts=check_layouts,
         links=links,
         planner=planner,
         module=module,
         name=name,
     )
-    scopes = _AliasScopes(b, name, node, sig, folded, writable)
-    inputs = _inputs(cg, node, sig, folded, writable, params, scopes)
-    outputs = _outputs(cg, node, sig, folded, temporary_outputs, params, scopes)
+    scopes = _AliasScopes(builder, name, node, signature, folded, writable)
+    inputs = _inputs(codegen, node, signature, folded, writable, params, scopes)
+    destinations = _destinations(codegen, signature, scratch_outputs, params, scopes)
     # (the op's scratch memory is freed before the function returns)
-    with cg.scratch_scope(function=True):
+    with codegen.scratch_scope(function=True):
         if kernel is not None:
             from pytensor.link.llvm.codegen.call import call_destroying
 
             if links is None:
                 raise ValueError("a node function calling a kernel needs a links")
-            ins = [
-                (a, getattr(var.type, "dtype", None))
-                for a, var in zip(inputs, node.inputs, strict=True)
+            kernel_inputs = [
+                (array, getattr(var.type, "dtype", None))
+                for array, var in zip(inputs, node.inputs, strict=True)
             ]
-            call_destroying(cg, kernel, links.link_kernel(kernel), ins, outputs)
+            call_destroying(
+                codegen, kernel, links.link_kernel(kernel), kernel_inputs, destinations
+            )
         else:
-            llvm_emit(node.op, node, cg, inputs, outputs)
-            if not b.terminated:
-                for k, out in enumerate(outputs):
-                    if out is not None:
+            handles = [
+                None if destination is None else _handle(destination, output, inputs)
+                for destination, output in zip(
+                    destinations, signature.outputs, strict=True
+                )
+            ]
+            llvm_emit(node.op, node, codegen, inputs, handles)
+            if not builder.terminated:
+                for k, destination in enumerate(destinations):
+                    if destination is not None:
                         try:
-                            out.finish()
+                            destination.finish()
                         except ValueError as e:
                             raise ValueError(f"{node.op}: output {k}: {e}") from None
-    if not b.terminated:
-        b.ret(0)
-    return NodeFunction(fn, sig, links)
+    if not builder.terminated:
+        builder.ret(0)
+    return NodeFunction(function, signature, links)
 
 
 class _AliasScopes:
@@ -152,96 +177,116 @@ class _AliasScopes:
     new memory, an input it may overwrite) overlaps no other array of the function;
     inputs that are only read may overlap each other."""
 
-    def __init__(self, b, name, node, sig, folded, writable):
-        self.b = b
-        b.alias_domain(name)
-        args = _argument_positions(node, folded)
+    def __init__(self, builder, name, node, signature, folded, writable):
+        self.builder = builder
+        builder.alias_domain(name)
+        arguments = _argument_positions(node, folded)
         tensors = [
-            pos
-            for pos, r in zip(args, sig.inputs, strict=True)
-            if isinstance(r, TensorRepr)
+            position
+            for position, representation in zip(
+                arguments, signature.inputs, strict=True
+            )
+            if isinstance(representation, TensorRepr)
         ]
-        self.read_only = [f"i{pos}" for pos in tensors if pos not in writable]
-        self.written = [f"i{pos}" for pos in tensors if pos in writable] + [
-            f"o{j}"
-            for j, o in enumerate(sig.outputs)
-            if o.mode in (OutputMode.PROVIDED, OutputMode.RETURNED)
+        self.read_only: list[str] = [f"i{k}" for k in tensors if k not in writable]
+        self.written: list[str] = [f"i{k}" for k in tensors if k in writable] + [
+            f"o{j}" for j, output in enumerate(signature.outputs) if output.is_tensor
         ]
 
-    def mark(self, data, scope):
+    def mark(self, data, scope: str) -> None:
         """Mark the memory at `data` as the array `scope`."""
         if scope in self.read_only:
-            self.b.mark_array(data, scope, self.written)
+            self.builder.mark_array(data, scope, self.written)
         else:
-            self.b.mark_array(data, scope, self.others(scope))
+            self.builder.mark_array(data, scope, self.others(scope))
 
-    def others(self, scope):
+    def others(self, scope: str) -> list[str]:
         return self.read_only + [w for w in self.written if w != scope]
 
 
 def _argument_positions(node, folded) -> list[int]:
-    """The node input each argument is."""
+    """Return the node input position of each argument."""
     skipped = skipped_inputs(node, folded)
-    return [pos for pos in range(len(node.inputs)) if pos not in skipped]
+    return [k for k in range(len(node.inputs)) if k not in skipped]
 
 
-def _inputs(cg, node, sig, folded, writable, params, scopes) -> list:
-    """What the emitter gets for each input (interface.py)."""
-    b = cg.b
-    reprs = iter(sig.inputs)
-    inputs = []
-    for pos, var in enumerate(node.inputs):
-        dtype = getattr(var.type, "dtype", None)
+def _inputs(codegen, node, signature, folded, writable, params, scopes) -> list:
+    """Return what the emitter gets for each input (interface.py)."""
+    builder = codegen.b
+    representations = iter(signature.inputs)
+    inputs: list[EmitterInput] = []
+    for position, var in enumerate(node.inputs):
+        dtype: str = getattr(var.type, "dtype", "")
         if is_absent(var.type):
             inputs.append(None)
-        elif pos in folded:
-            value = constant(b, dtype, folded[pos])
+        elif position in folded:
+            value = constant(builder, dtype, folded[position])
             if isinstance(repr_of(var.type), ScalarRepr):
                 inputs.append(value)
             else:
-                slot = b.alloca(memory_type(dtype))
-                store(b, dtype, value, slot)
-                inputs.append(c_array(dtype, slot, [], []))
+                memory = builder.alloca(memory_type(dtype))
+                store(builder, dtype, value, memory)
+                inputs.append(c_array(dtype, memory, [], []))
         else:
-            r, v = next(reprs), next(params)
-            if isinstance(r, ScalarRepr):
-                inputs.append(v)
+            representation, param = next(representations), next(params)
+            if isinstance(representation, ScalarRepr):
+                inputs.append(param)
                 continue
-            a = unpack(b, r, v)
-            a.base, a.writable = pos, pos in writable
-            scopes.mark(a.data, f"i{pos}")
-            inputs.append(a)
+            array = unpack(builder, representation, param)
+            array.base, array.writable = position, position in writable
+            scopes.mark(array.data, f"i{position}")
+            inputs.append(array)
     return inputs
 
 
-def _outputs(cg, node, sig, folded, temporary_outputs, params, scopes) -> list:
-    """What the emitter gets for each output (interface.py)."""
-    b = cg.b
-    args = _argument_positions(node, folded)
-    outputs = []
-    for j, o in enumerate(sig.outputs):
-        if o.mode is OutputMode.ABSENT:
-            outputs.append(None)
+def _destinations(
+    codegen, signature: Signature, scratch_outputs, params, scopes
+) -> list[OutputDestination | None]:
+    """Return where each output goes, from its parameter."""
+    destinations: list[OutputDestination | None] = []
+    for j, output in enumerate(signature.outputs):
+        if output.is_absent:
+            destinations.append(None)
             continue
-        v = next(params)
-        if o.mode is OutputMode.SCALAR:
-            outputs.append(ScalarOutput(cg, v, o.repr.dtype))
-        elif o.mode is OutputMode.PROVIDED:
-            a = unpack(b, o.repr, v)
-            scopes.mark(a.data, f"o{j}")
-            outputs.append(ProvidedOutput(cg, a))
+        param = next(params)
+        representation = output.representation
+        if isinstance(representation, ScalarRepr):
+            destinations.append(ScalarDestination(codegen, param, representation.dtype))
+        elif output.passing is Passing.CALLER_BUFFER:
+            array = unpack(codegen.b, output.tensor, param)
+            scopes.mark(array.data, f"o{j}")
+            destinations.append(ProvidedDestination(codegen, array))
         else:
-            outputs.append(
-                SlotOutput.for_output(
-                    cg,
-                    v,
-                    o,
-                    aliases=tuple(args[i] for i in o.aliases),
-                    temporary=j in temporary_outputs,
-                    alias=(f"o{j}", scopes.others(f"o{j}")),
+            destinations.append(
+                SlotDestination.for_output(
+                    codegen,
+                    param,
+                    output,
+                    aliased_inputs=output.aliased_inputs,
+                    in_scratch_memory=j in scratch_outputs,
+                    alias_scopes=(f"o{j}", scopes.others(f"o{j}")),
                 )
             )
-    return outputs
+    return destinations
+
+
+def _handle(
+    destination: OutputDestination, output: Output, inputs: list
+) -> EmitterOutput:
+    """Return what the emitter gets for `output`: the handle matching its storage."""
+    if isinstance(destination, ScalarDestination):
+        return ScalarOutput(destination)
+    storage = output.storage
+    layout = output.layout
+    assert layout is not None
+    match storage:
+        case InputView():
+            return InputViewOutput(destination, storage, layout)
+        case ViewOrCopy():
+            return ViewOrCopyOutput(destination, layout)
+        case InPlaceUpdate(input=input):
+            return InPlaceOutput(destination, inputs[input])
+    return NewBufferOutput(destination)
 
 
 __all__ = ["NodeFunction", "build_node_function", "debug_name"]

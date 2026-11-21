@@ -38,7 +38,7 @@ class Kernel:
     address: int
     #: the kernel's config (`const void* config` of the kernel ABI)
     config: int
-    #: what it produces, per node output (`Output`s, `aliases` counting node inputs)
+    #: what it produces, per node output (`Output`s)
     outputs: list
     description: str = ""
     keepalive: object = None
@@ -120,19 +120,22 @@ def linked(cg, index: int):
 def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> None:
     """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, dtype) pairs) and
-    `outputs` (`ProvidedOutput`, `SlotOutput`, or None).
+    `outputs` (`ProvidedDestination`, `SlotDestination`, or None).
 
     Allocated and view outputs land in their output slots, owner included, also when the
     call fails (the caller releases them); a failure returns its code (the kernel set
     the message). The kernel's scratch is released after the call."""
+    from pytensor.link.llvm.codegen.destination import (
+        ProvidedDestination,
+        SlotDestination,
+    )
     from pytensor.link.llvm.codegen.emit import Array, store
-    from pytensor.link.llvm.codegen.interface import ProvidedOutput, SlotOutput
 
     b = cg.b
     pa = ptarray_type()
     i64 = ir.i64
-    # per argument: (data, shape ptr, strides ptr, ndim, dtype, SlotOutput or None)
-    args_of: list[tuple[object, object, object, int, str, SlotOutput | None]] = []
+    # per argument: (data, shape ptr, strides ptr, ndim, dtype, slot or None)
+    args_of: list[tuple[object, object, object, int, str, SlotDestination | None]] = []
     n_inputs = 0
 
     def storage(values):
@@ -163,7 +166,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     for o in outputs:
         if o is None:
             continue
-        if isinstance(o, ProvidedOutput):
+        if isinstance(o, ProvidedDestination):
             a = o.array
             args_of.append(
                 (
@@ -175,7 +178,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
                     None,
                 )
             )
-        elif isinstance(o, SlotOutput):
+        elif isinstance(o, SlotDestination):
             st = slot_type(o.ndim)
             args_of.append(
                 (
@@ -250,10 +253,13 @@ def build_call_function(
     code runs a kernel that isn't a node's (a compiled unit, a separately compiled
     node), and nodes the planner gives a kernel. `index`: the kernel's entry
     in `links` (default: linked here). Returns a `NodeFunction`."""
+    from pytensor.link.llvm.codegen.destination import (
+        ProvidedDestination,
+        SlotDestination,
+    )
     from pytensor.link.llvm.codegen.emit import Codegen, unpack
-    from pytensor.link.llvm.codegen.interface import ProvidedOutput, SlotOutput
     from pytensor.link.llvm.codegen.node import NodeFunction
-    from pytensor.link.llvm.codegen.signature import OutputMode
+    from pytensor.link.llvm.codegen.signature import Passing
 
     fn = module.function(
         name,
@@ -269,15 +275,22 @@ def build_call_function(
     inputs = [unpack(b, r, next(params)) for r in signature.inputs]
     for pos, a in enumerate(inputs):
         a.base, a.writable = pos, False
-    outputs = []
-    for o in signature.outputs:
-        if o.mode is OutputMode.ABSENT:
+    outputs: list = []
+    for output in signature.outputs:
+        if output.is_absent:
             outputs.append(None)
-        elif o.mode is OutputMode.PROVIDED:
-            outputs.append(ProvidedOutput(cg, unpack(b, o.repr, next(params))))
+        elif output.passing is Passing.CALLER_BUFFER:
+            array = unpack(b, output.representation, next(params))
+            outputs.append(ProvidedDestination(cg, array))
         else:
             outputs.append(
-                SlotOutput(cg, next(params), o.repr.dtype, o.repr.ndim, o.aliases)
+                SlotDestination(
+                    cg,
+                    next(params),
+                    output.representation.dtype,
+                    output.representation.ndim,
+                    signature.alias_arguments(output),
+                )
             )
     if index is None:
         index = links.link_kernel(kernel)

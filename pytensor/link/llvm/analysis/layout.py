@@ -19,12 +19,12 @@ its strides. They come from how a value is produced:
 
 * memory the planner provides (arena, fresh outputs) and buffers that generated code,
   Rust kernels and Scan allocate are C-contiguous;
-* views get theirs from their input's (the op's `llvm_layout`, with the helpers below);
+* views get theirs from their input's (the op's view mapping, with the rules below);
 * numba kernels allocate their outputs packed, in the order asked for (default C);
 * graph inputs are DYNAMIC unless checked.
 
-How each output comes to be, and with which layout, is declared per op by
-`llvm_layout` (codegen/interface.py). What it declares is binding: the `LayoutFeature`
+Where each output's memory comes from, and so its layout, is declared per op by
+`llvm_outputs` (codegen/interface.py). What follows from it is binding: the `LayoutFeature`
 of the graph holds the layout of every value (`node_outputs`), and the planner makes
 whatever runs a node give its outputs those layouts.
 """
@@ -338,7 +338,7 @@ def remove_axis(layout: Layout, axis, shape, itemsize) -> Layout:
 
 
 # ------------------------------------------------------------------ layouts of views
-# (used by the ops' `llvm_layout`, next to their emitters)
+# (used by the ops' view mappings, next to their emitters)
 
 
 def same_layout(node, x: Layout) -> Layout:

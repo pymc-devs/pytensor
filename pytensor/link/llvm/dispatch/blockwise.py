@@ -22,8 +22,9 @@ from dataclasses import dataclass
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.link.llvm.analysis.layout import itemsize_of, remove_axis, shape_of
 from pytensor.link.llvm.analysis.work import llvm_work
+from pytensor.link.llvm.codegen.destination import OutputDestination, SlotDestination
 from pytensor.link.llvm.codegen.emit import Array, Codegen, size
-from pytensor.link.llvm.codegen.interface import NodeOutput, llvm_emit
+from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.signature import known_layouts
 from pytensor.link.llvm.codegen.types import repr_of
 from pytensor.tensor.basic import constant
@@ -170,16 +171,16 @@ def _at(b, a, index):
 
 
 @dataclass
-class _BatchRow(NodeOutput):
+class _BatchRow(OutputDestination):
     """Where an iteration writes output `k` of the core: the row of the Blockwise's
     output `out` at the current batch index.
 
     The whole output is allocated before the loop (`whole`) if its shape is known then.
     Otherwise only the core knows the shape, and the first iteration allocates it."""
 
-    cg: Codegen
+    codegen: Codegen
     k: int
-    out: NodeOutput
+    out: OutputDestination
     whole: Array | None
     batch: list
     index: list
@@ -188,19 +189,21 @@ class _BatchRow(NodeOutput):
     row: Array | None = None
 
     @property
-    def dtype(self):
+    def dtype(self) -> str:  # type: ignore[override]
         return self.out.dtype
 
     def allocate(self, shape: list) -> Array:
-        b = self.cg.b
+        b = self.codegen.b
         whole = self.whole
         if whole is None:
+            # (only an output slot has no shape before the core ran)
+            assert isinstance(self.out, SlotDestination)
             with b.if_(b.eq(self.i, 0)):
                 self.out.allocate([*self.batch, *shape])
-            whole = self.out.read()  # type: ignore[attr-defined]
+            whole = self.out.read()
         self.row = _at(b, whole, self.index)
         for m, length in zip(shape, self.row.shape, strict=True):
-            self.cg.check(
+            self.codegen.check(
                 b.eq(m, length),
                 f"Blockwise: core output {self.k} doesn't have the expected shape",
             )
@@ -257,7 +260,7 @@ def _(op, node, cg, inputs, outputs):
                 for x, bcast in zip(inputs, broadcast, strict=True)
             ]
             rows = [
-                _BatchRow(inner, k, out, known.get(k), batch, index, i)
+                _BatchRow(inner, k, out.destination, known.get(k), batch, index, i)
                 for k, out in enumerate(outputs)
             ]
             core.emit_call(inner, args, rows)

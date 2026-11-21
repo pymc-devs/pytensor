@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from pytensor.graph.basic import Constant
@@ -71,6 +71,10 @@ class Array:
     def with_strides(self, shape, strides, layout=None):
         """The same memory with other lengths/strides (e.g. a broadcast view)."""
         return self.view(self.data, shape, strides, layout)
+
+    def with_layout(self, layout: Layout) -> Array:
+        """Return the same array, claiming `layout` for its strides."""
+        return replace(self, layout=layout)
 
     def view(self, data, shape, strides, layout=None) -> Array:
         """An array in the same memory: `data` points into it. It belongs to the same
@@ -467,6 +471,9 @@ class Codegen:
     stack_bytes: int = 0
     #: may loops run in parallel (`Options.parallel`)?
     parallel: bool = True
+    #: verify at run time that views have the layouts the planner relies on
+    #: (`Options.check_layouts`)
+    check_layouts: bool = False
     #: the link table of the kernel being generated (call.py); None: it calls nothing
     links: LinkTable | None = None
     #: Decides how the nodes of an inner graph run (generated code or a kernel), for
@@ -834,6 +841,31 @@ def copy(cg, src: Array, dst: Array):
     for_each(b, dst.shape, [src, dst], body, cg.par(1.0))
 
 
+def check_strides(codegen: Codegen, array: Array, layout: Layout, what: str) -> None:
+    """Fail at run time unless the strides of `array` satisfy `layout`.
+
+    Length-1 axes and empty arrays don't count, as in numpy's contiguity rules. `what`
+    names the array in the error message."""
+    builder = codegen.b
+    expected = layout.stride_values(
+        builder, itemsize(array.dtype), array.shape, dict(enumerate(array.strides))
+    )
+    matches = builder.const_bool(True)
+    empty = builder.const_bool(False)
+    for length, actual, wanted in zip(
+        array.shape, array.strides, expected, strict=True
+    ):
+        irrelevant = builder.eq(length, 1)
+        matches = builder.and_(
+            matches, builder.or_(irrelevant, builder.eq(actual, wanted))
+        )
+        empty = builder.or_(empty, builder.eq(length, 0))
+    codegen.check(
+        builder.or_(matches, empty),
+        f"layout check: {what} doesn't have layout {layout}",
+    )
+
+
 __all__ = [
     "Array",
     "Codegen",
@@ -842,6 +874,7 @@ __all__ = [
     "advance",
     "c_array",
     "cast",
+    "check_strides",
     "checked_index",
     "constant",
     "copy",

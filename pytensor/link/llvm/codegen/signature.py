@@ -1,5 +1,10 @@
 """How a node's function is called: the representation of each argument, and how each
-output comes to be (`Signature`)."""
+output is passed (`Signature`).
+
+`node_outputs` turns what an op declares about its outputs (`llvm_outputs`) into the
+`Output`s of its function: their layouts and how they are passed. This is the only
+place where those rules live.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,14 @@ from dataclasses import dataclass, replace
 
 from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    InPlaceUpdate,
+    InputView,
+    NewBuffer,
+    OutputStorage,
+    ViewOrCopy,
+    llvm_outputs,
+)
 from pytensor.link.llvm.codegen.types import (
     NoneRepr,
     ScalarRepr,
@@ -19,203 +31,291 @@ from pytensor.link.llvm.codegen.types import (
 )
 
 
-class OutputMode(enum.Enum):
-    #: the caller provides the memory (with its own strides)
-    PROVIDED = "provided"
-    #: the function returns the array through a slot: memory it allocated (it hands
-    #: over one reference), or a view of an input the output may alias
-    RETURNED = "returned"
-    #: a ScalarType output, stored through a pointer
-    SCALAR = "scalar"
-    #: no value (a random generator token): no argument
-    ABSENT = "absent"
+Representation = TensorRepr | ScalarRepr | NoneRepr
+
+
+class Passing(enum.Enum):
+    """How a tensor output is passed to the function that produces it."""
+
+    #: The caller passes memory to write into, with its own strides.
+    CALLER_BUFFER = "caller buffer"
+    #: The function fills an output slot: with memory it allocated (handing over one
+    #: reference), or with a view of an input the output may alias.
+    CALLEE_SLOT = "callee slot"
 
 
 @dataclass(frozen=True)
 class Output:
-    repr: TensorRepr | ScalarRepr | NoneRepr
-    mode: OutputMode
-    #: the inputs the output may be a view of (RETURNED; none: it is new memory)
-    aliases: tuple = ()
+    """One output of a function: what it is, where its memory comes from, and how it is
+    passed. For a ScalarType output (stored through a pointer) or one without data
+    (no argument), only `representation` is set."""
+
+    representation: Representation
+    storage: OutputStorage | None = None
+    passing: Passing | None = None
+    #: Positions of the node inputs the result may be a view of.
+    aliased_inputs: tuple[int, ...] = ()
+
+    @classmethod
+    def new_buffer(cls, var, layout: Layout | None, passing: Passing) -> Output:
+        """Return the output for `var` in new memory of `layout` (a kernel's output)."""
+        if is_absent(var.type):
+            return cls(NoneRepr())
+        return cls(repr_of(var.type, layout), NewBuffer(layout), passing)
 
     @property
-    def layout(self):
-        """The output's layout (None for scalars). For PROVIDED it is the memory the
-        op asks for (the provider may give it other memory, see `with_layout`); for
-        RETURNED it is what the result has, a view or new memory."""
-        return getattr(self.repr, "layout", None)
+    def tensor(self) -> TensorRepr:
+        """The representation of a tensor output (TypeError for other outputs)."""
+        if not isinstance(self.representation, TensorRepr):
+            raise TypeError(f"not a tensor output: {self.representation}")
+        return self.representation
 
-    def with_layout(self, layout: Layout):
-        """The same output with another layout (e.g. the memory actually provided)."""
-        return replace(self, repr=TensorRepr(self.repr.dtype, self.repr.shape, layout))
+    @property
+    def is_tensor(self) -> bool:
+        return isinstance(self.representation, TensorRepr)
+
+    @property
+    def is_scalar(self) -> bool:
+        return isinstance(self.representation, ScalarRepr)
+
+    @property
+    def is_absent(self) -> bool:
+        return isinstance(self.representation, NoneRepr)
+
+    @property
+    def layout(self) -> Layout | None:
+        """The output's layout (None for non-tensors).
+
+        Passed in a caller buffer, it is the memory the op asks for (the caller may
+        provide other memory, see `with_layout`). Passed in a slot, it is what the
+        result has, a view or new memory."""
+        return getattr(self.representation, "layout", None)
+
+    def with_layout(self, layout: Layout) -> Output:
+        """Return the same output with another layout (the memory actually provided)."""
+        representation = self.tensor
+        return replace(
+            self,
+            representation=TensorRepr(
+                representation.dtype, representation.shape, layout
+            ),
+        )
 
     @property
     def ir_type(self):
-        if self.mode is OutputMode.PROVIDED:
-            return self.repr.ir_type
+        """The type of the output's parameter: the array itself for a caller buffer,
+        else a pointer (to the slot, or to the scalar)."""
+        if self.passing is Passing.CALLER_BUFFER:
+            return self.tensor.ir_type
         return ir.ptr
 
 
 @dataclass(frozen=True)
 class Signature:
-    """The arguments of a node's function: `inputs` (representations, one per argument),
-    `outputs` (one per node output; ABSENT ones have no argument)."""
+    """The parameters of a node's function: `inputs` (one representation per input
+    argument) and `outputs` (one per node output; those without data have no
+    parameter)."""
 
-    inputs: tuple
+    inputs: tuple[Representation, ...]
     outputs: tuple[Output, ...]
+    #: For each node input, its argument position; None for inputs that aren't
+    #: arguments (folded constants, values without data). None: the inputs are the
+    #: arguments, in order.
+    argument_of_input: tuple[int | None, ...] | None = None
 
-    def param_types(self):
-        outs = [o.ir_type for o in self.outputs if o.mode is not OutputMode.ABSENT]
-        return [ir.ptr, ir.ptr, *(r.ir_type for r in self.inputs), *outs]
+    def param_types(self) -> list:
+        input_types = [r.ir_type for r in self.inputs if not isinstance(r, NoneRepr)]
+        output_types = [o.ir_type for o in self.outputs if not o.is_absent]
+        return [ir.ptr, ir.ptr, *input_types, *output_types]
 
     @property
-    def has_scalars(self):
+    def has_scalars(self) -> bool:
         return any(isinstance(r, ScalarRepr) for r in self.inputs) or any(
-            isinstance(o.repr, ScalarRepr) for o in self.outputs
+            o.is_scalar for o in self.outputs
         )
 
-
-def destroyed_input(node, k: int) -> int | None:
-    """The input output `k` may be written over: one the op destroys for it
-    (`destroy_map`) that has its type (dtype, number of axes, broadcastable ones)."""
-    out = node.outputs[k]
-    for i in node.op.destroy_map.get(k, ()):
-        t = node.inputs[i].type
-        if (
-            isinstance(repr_of(t), TensorRepr)
-            and isinstance(repr_of(out.type), TensorRepr)
-            and t.dtype == out.type.dtype
-            and t.broadcastable == out.type.broadcastable
-        ):
-            return i
-    return None
+    def alias_arguments(self, output: Output) -> tuple[int, ...]:
+        """Return the argument positions of the inputs `output` may be a view of."""
+        if self.argument_of_input is None:
+            return output.aliased_inputs
+        arguments = []
+        for position in output.aliased_inputs:
+            argument = self.argument_of_input[position]
+            if argument is None:
+                raise NotImplementedError("a view of a folded constant")
+            arguments.append(argument)
+        return tuple(arguments)
 
 
-def new_output(var, layout=None) -> Output:
-    """An output in new memory: SCALAR, PROVIDED for static shapes, else RETURNED; in
-    `layout` (default C-contiguous). ABSENT for values without data."""
-    r = repr_of(var.type)
-    if isinstance(r, NoneRepr):
-        return Output(r, OutputMode.ABSENT)
-    if isinstance(r, ScalarRepr):
-        return Output(r, OutputMode.SCALAR)
-    lay = layout if layout is not None else Layout.c(var.type.ndim)
-    return Output(
-        repr_of(var.type, lay), OutputMode.PROVIDED if r.static else OutputMode.RETURNED
-    )
+# ------------------------------------------------------------------ resolution
 
 
-def known_layouts(node, in_layouts) -> list:
-    """`in_layouts` with DYNAMIC for tensors whose layout isn't known."""
-    if in_layouts is None:
-        in_layouts = [None] * len(node.inputs)
+def known_layouts(node, input_layouts) -> list[Layout | None]:
+    """Return `input_layouts`, with DYNAMIC for tensors whose layout isn't known."""
+    if input_layouts is None:
+        input_layouts = [None] * len(node.inputs)
     return [
-        lay
-        if lay is not None or not hasattr(i.type, "ndim")
-        else Layout.dynamic(i.type.ndim)
-        for i, lay in zip(node.inputs, in_layouts, strict=True)
+        layout
+        if layout is not None or not hasattr(var.type, "ndim")
+        else Layout.dynamic(var.type.ndim)
+        for var, layout in zip(node.inputs, input_layouts, strict=True)
     ]
 
 
-def node_outputs(node, in_layouts=None, writable=frozenset()) -> list[Output]:
-    """How each output of `node` comes to be when its code is generated. This follows
-    from the output's type, from `llvm_layout`, and from the inputs the output may be a
-    view of (`op_view_parents`: the op's `view_map`, or for an OpFromGraph, whatever
-    its inner graph may pass through).
+def can_update_in_place(node, output: int, input: int) -> bool:
+    """May `node`'s output at position `output` be written into the input at position
+    `input`?
 
-    An output the op's generated code may write over an input (`destroyed_input`) has
-    that input's layout, where new memory can have it too (`new_memory_layout`): it is
-    the input's memory or new memory, as its emitter decides. It may be the input's
-    memory only if the input is `writable` (positions the planner lets the node
-    overwrite). (Ops without generated code run as kernels, which write their outputs
-    into new memory.)"""
-    op = node.op
-    in_layouts = known_layouts(node, in_layouts)
-    layouts = llvm_layout(op, node, in_layouts)
-    parents = op_view_parents(op, node)
-    generated = llvm_emit.dispatch(type(op)) is not llvm_emit.dispatch(object)
-    outs = []
-    for k, (o, lay) in enumerate(zip(node.outputs, layouts, strict=True)):
-        aliases: tuple = ()
-        if isinstance(repr_of(o.type), TensorRepr):
-            aliases = tuple(i for i, var in enumerate(node.inputs) if var in parents[k])
-            i = destroyed_input(node, k) if generated else None
-            if i is not None:
-                lay = new_memory_layout(in_layouts[i], o.type)
-                if i in writable and i not in aliases:
-                    aliases = (*aliases, i)
-        if not aliases:
-            outs.append(new_output(o, lay))
-            continue
-        if lay is None:
-            lay = Layout.dynamic(o.type.ndim)
-        outs.append(Output(repr_of(o.type, lay), OutputMode.RETURNED, aliases))
-    return outs
+    The op must destroy that input for this output (`destroy_map`), and both must be
+    tensors of the same dtype and broadcastable axes."""
+    if input not in node.op.destroy_map.get(output, ()):
+        return False
+    in_type, out_type = node.inputs[input].type, node.outputs[output].type
+    return (
+        isinstance(repr_of(in_type), TensorRepr)
+        and isinstance(repr_of(out_type), TensorRepr)
+        and in_type.dtype == out_type.dtype
+        and in_type.broadcastable == out_type.broadcastable
+    )
 
 
-def skipped_inputs(node, folded=frozenset()):
-    """Input positions that aren't arguments: folded constants and None inputs."""
+def node_outputs(
+    node, input_layouts=None, writable: frozenset[int] = frozenset()
+) -> list[Output]:
+    """Return the `Output` of each output of `node`, from what its op declares
+    (`llvm_outputs`).
+
+    `input_layouts`: the layout of each input (None where unknown). `writable`: the
+    positions of the inputs the planner lets the node overwrite; an `InPlaceUpdate`
+    output may only be its input's memory if that input is writable."""
+    input_layouts = known_layouts(node, input_layouts)
+    declared = llvm_outputs(node.op, node, input_layouts)
+    return [
+        _resolve(node, position, storage, input_layouts, writable)
+        for position, storage in enumerate(declared)
+    ]
+
+
+def _resolve(
+    node,
+    position: int,
+    storage: OutputStorage,
+    input_layouts: list[Layout | None],
+    writable: frozenset[int],
+) -> Output:
+    var = node.outputs[position]
+    representation = repr_of(var.type)
+    if not isinstance(representation, TensorRepr):
+        return Output(representation)
+
+    # new memory of a static size is provided by the caller
+    new_memory = Passing.CALLER_BUFFER if representation.static else Passing.CALLEE_SLOT
+
+    match storage:
+        case NewBuffer(layout=layout):
+            if layout is None:
+                layout = Layout.c(var.type.ndim)
+            return Output(repr_of(var.type, layout), storage, new_memory)
+        case InputView(input=input, mapping=mapping):
+            _check_view(node, position, (input,))
+            source = input_layouts[input]
+            if source is None:
+                raise ValueError(f"{node.op}: output {position} views a non-tensor")
+            layout = mapping.layout(source)
+            return Output(
+                repr_of(var.type, layout), storage, Passing.CALLEE_SLOT, (input,)
+            )
+        case ViewOrCopy(inputs=inputs, layout=layout):
+            _check_view(node, position, inputs)
+            return Output(
+                repr_of(var.type, layout), storage, Passing.CALLEE_SLOT, inputs
+            )
+        case InPlaceUpdate(input=input):
+            if not can_update_in_place(node, position, input):
+                # the op doesn't destroy the input for this output: new memory
+                layout = Layout.c(var.type.ndim)
+                return Output(repr_of(var.type, layout), storage, new_memory)
+            layout = new_memory_layout(input_layouts[input], var.type)
+            if input in writable:
+                return Output(
+                    repr_of(var.type, layout), storage, Passing.CALLEE_SLOT, (input,)
+                )
+            return Output(repr_of(var.type, layout), storage, new_memory)
+    raise TypeError(f"{node.op}: output {position}: not an OutputStorage: {storage!r}")
+
+
+def _check_view(node, position: int, inputs: tuple[int, ...]) -> None:
+    """Fail unless the graph knows output `position` may be a view of `inputs`."""
+    parents = op_view_parents(node.op, node)[position]
+    for input in inputs:
+        if node.inputs[input] not in parents:
+            raise ValueError(
+                f"{node.op}: output {position} is declared a view of input {input}, "
+                "but the op's view_map doesn't say so"
+            )
+
+
+# ------------------------------------------------------------------ signatures
+
+
+def skipped_inputs(node, folded=frozenset()) -> frozenset[int]:
+    """Return the positions of the inputs that aren't arguments: folded constants and
+    values without data."""
     return frozenset(folded) | {
-        k for k, i in enumerate(node.inputs) if is_absent(i.type)
+        k for k, var in enumerate(node.inputs) if is_absent(var.type)
     }
 
 
 def node_signature(
     node,
     folded=frozenset(),
-    in_layouts=None,
+    input_layouts=None,
     provided=None,
-    declared=None,
-    writable=frozenset(),
+    outputs=None,
+    writable: frozenset[int] = frozenset(),
 ) -> Signature:
-    """`folded`: positions of inputs that are constants folded into the code (not
-    arguments). None inputs aren't arguments either.
+    """Return the signature of the function of `node`.
 
-    `in_layouts`: the `Layout` of each input; outputs as `node_outputs` gives them, with
-    `aliases` counting the function's arguments.
-    The declared layout of a PROVIDED output is binding: whoever provides the memory
-    provides it in that layout. `provided[k]` replaces the declaration, for a caller
-    that generates a function for memory it fixes (tests writing into a slice).
-    `declared`: the outputs instead (a kernel's, see call.py; `aliases` counting the
-    node's inputs). `writable`: see `node_outputs`."""
-    folded = skipped_inputs(node, folded)
-    if in_layouts is None:
-        in_layouts = [None] * len(node.inputs)
+    * `folded`: positions of the inputs that are constants folded into the code;
+    * `input_layouts`: the layout of each input;
+    * `provided`: per output, a layout replacing the declared one of a caller buffer
+      (for a caller that fixes the memory, e.g. a test writing into a slice);
+    * `outputs`: the outputs, instead of what `node_outputs` gives (a kernel's);
+    * `writable`: see `node_outputs`.
+    """
+    skipped = skipped_inputs(node, folded)
+    if input_layouts is None:
+        input_layouts = [None] * len(node.inputs)
     inputs = tuple(
-        repr_of(i.type, lay)
-        for k, (i, lay) in enumerate(zip(node.inputs, in_layouts, strict=True))
-        if k not in folded
+        repr_of(var.type, layout)
+        for k, (var, layout) in enumerate(zip(node.inputs, input_layouts, strict=True))
+        if k not in skipped
     )
-
-    def arg_index(pos):
-        # position among the function's (non-folded) inputs
-        if pos in folded:
-            raise NotImplementedError("a view of a folded constant")
-        return pos - sum(1 for p in folded if p < pos)
-
-    outputs = []
-    for k, o in enumerate(
-        declared if declared is not None else node_outputs(node, in_layouts, writable)
-    ):
+    argument_of_input = [
+        None if k in skipped else k - sum(1 for s in skipped if s < k)
+        for k in range(len(node.inputs))
+    ]
+    if outputs is None:
+        outputs = node_outputs(node, input_layouts, writable)
+    resolved = []
+    for k, output in enumerate(outputs):
         if (
-            o.mode is OutputMode.PROVIDED
+            output.passing is Passing.CALLER_BUFFER
             and provided is not None
             and provided[k] is not None
         ):
-            o = o.with_layout(provided[k])
-        if o.aliases:
-            o = Output(o.repr, o.mode, tuple(arg_index(pos) for pos in o.aliases))
-        outputs.append(o)
-    return Signature(inputs, tuple(outputs))
+            output = output.with_layout(provided[k])
+        resolved.append(output)
+    return Signature(inputs, tuple(resolved), tuple(argument_of_input))
 
 
 __all__ = [
     "Output",
-    "OutputMode",
+    "Passing",
+    "Representation",
     "Signature",
-    "destroyed_input",
+    "can_update_in_place",
     "known_layouts",
-    "new_output",
     "node_outputs",
     "node_signature",
     "skipped_inputs",

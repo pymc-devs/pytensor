@@ -14,8 +14,8 @@ none of its own.
   to be, and their layouts). The result is a `PlannedGraph`: the graph's `Step`s, in
   order.
 
-The layouts of the outputs are not a choice: they are the binding ones (what
-`llvm_layout` declares, `node_outputs`), and what runs a node must give its outputs
+The layouts of the outputs are not a choice: they are the binding ones (what follows
+from `llvm_outputs`, `node_outputs`), and what runs a node must give its outputs
 layouts that imply them (`conforms`). A Rust kernel that doesn't is not used.
 
 The program's graph (`Planner.program`) and graphs inside generated code
@@ -44,18 +44,24 @@ from pytensor.link.llvm.analysis.layout import (
     shape_of,
 )
 from pytensor.link.llvm.codegen.call import Kernel, LinkTable
-from pytensor.link.llvm.codegen.interface import llvm_emit
+from pytensor.link.llvm.codegen.interface import has_emitter
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.node import build_node_function
 from pytensor.link.llvm.codegen.signature import (
     Output,
-    OutputMode,
+    Passing,
     Signature,
     node_outputs,
     node_signature,
     skipped_inputs,
 )
-from pytensor.link.llvm.codegen.types import ScalarRepr, ir, is_absent, repr_of
+from pytensor.link.llvm.codegen.types import (
+    ScalarRepr,
+    TensorRepr,
+    ir,
+    is_absent,
+    repr_of,
+)
 from pytensor.link.llvm.dispatch.blockwise import (
     blockwise_core,
     blockwise_core_layouts,
@@ -424,7 +430,7 @@ class Planner:
             node,
             frozenset(),
             in_layouts,
-            declared=None if kernel is None else kernel.outputs,
+            outputs=None if kernel is None else kernel.outputs,
         )
         check_conforms(node, signature.outputs, binding)
         description = str(node.op) if kernel is None else kernel.description
@@ -502,7 +508,9 @@ class Planner:
     def _kernel_step(self, flat, kernel: Kernel, layouts) -> Step:
         """A step of the program run by a kernel (Rust, numba)."""
         in_layouts = [self.layout(k, layouts) for k in flat.inputs]
-        sig = node_signature(flat.node, in_layouts=in_layouts, declared=kernel.outputs)
+        sig = node_signature(
+            flat.node, input_layouts=in_layouts, outputs=kernel.outputs
+        )
         binding = self._binding(flat.node, flat.outputs, in_layouts, layouts)
         check_conforms(flat.node, sig.outputs, binding)
         return Step(
@@ -533,8 +541,9 @@ class Planner:
             node,
             "node",
             folded=folded,
-            in_layouts=in_layouts,
+            input_layouts=in_layouts,
             parallel=self.opts.parallel,
+            check_layouts=self.opts.check_layouts,
             links=LinkTable(),
             planner=self,
             writable=writable,
@@ -550,7 +559,11 @@ class Planner:
             desc = f"unit[{len(nodes)}]: {names[:120]}"
         else:
             desc = str(node.op) + _layouts_note(
-                [r for r in nf.signature.inputs if hasattr(r, "layout") and r.ndim > 0]
+                [
+                    r
+                    for r in nf.signature.inputs
+                    if isinstance(r, TensorRepr) and r.ndim > 0
+                ]
             )
         kernel = self._compiled(module, nf, desc)
         binding = self._binding(node, flat.outputs, in_layouts, layouts)
@@ -661,10 +674,8 @@ class Planner:
         self.stats.n_numba += 1
         self.stats.numba.append(str(node.op))
         outs = [
-            Output(repr_of(o.type), OutputMode.ABSENT)
-            if is_absent(o.type)
-            else Output(repr_of(o.type, lay), OutputMode.RETURNED)
-            for o, lay in zip(node.outputs, layouts, strict=True)
+            Output.new_buffer(var, layout, Passing.CALLEE_SLOT)
+            for var, layout in zip(node.outputs, layouts, strict=True)
         ]
         destroyed = getattr(node.op, "destroy_map", None) or {}
         return Kernel(
@@ -688,11 +699,15 @@ class Planner:
     def _can_generate(self, node, in_layouts) -> bool:
         """Is there an emitter that handles this node? (Tried in a scratch module: an
         emitter says no by raising, possibly halfway through.)"""
-        if llvm_emit.dispatch(type(node.op)) is llvm_emit.dispatch(object):
+        if not has_emitter(node.op):
             return False
         try:
             build_node_function(
-                ir.Module("probe"), node, "probe", in_layouts=in_layouts, parallel=False
+                ir.Module("probe"),
+                node,
+                "probe",
+                input_layouts=in_layouts,
+                parallel=False,
             )
             return True
         except NotImplementedError:

@@ -33,8 +33,9 @@ from pytensor.link.llvm.codegen.graph import (
     PROFILE_ON,
     build_graph_function,
 )
+from pytensor.link.llvm.codegen.interface import NewBuffer
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
-from pytensor.link.llvm.codegen.signature import Output, OutputMode
+from pytensor.link.llvm.codegen.signature import Output, Passing
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
 from pytensor.link.llvm.planner import PlannedGraph, Planner
 
@@ -217,15 +218,16 @@ def _output_modes(steps, out_ids, types) -> list:
     declared = {}
     for r in steps:
         for k, o in zip(r.outputs, r.signature.outputs, strict=True):
-            declared[k] = o.mode
+            declared[k] = o.passing
     modes = []
     for k in out_ids:
         static = repr_of(types[k]).static
-        mode = declared.get(k, OutputMode.PROVIDED if static else OutputMode.RETURNED)
+        default = Passing.CALLER_BUFFER if static else Passing.CALLEE_SLOT
+        passing = declared.get(k, default)
         modes.append(
-            OutputMode.PROVIDED
-            if static and mode is OutputMode.PROVIDED
-            else OutputMode.RETURNED
+            Passing.CALLER_BUFFER
+            if static and passing is Passing.CALLER_BUFFER
+            else Passing.CALLEE_SLOT
         )
     return modes
 
@@ -263,7 +265,7 @@ class Program:
                 for k, c in zip(in_ids, contiguous, strict=True)
             ],
             [
-                (np.dtype(types[k].dtype), shape(k), m is OutputMode.PROVIDED)
+                (np.dtype(types[k].dtype), shape(k), m is Passing.CALLER_BUFFER)
                 for k, m in zip(out_ids, modes, strict=True)
             ],
             [compiled, nf.links.keepalive],
@@ -380,15 +382,16 @@ def _dump(types, nf, steps, in_ids, contiguous, out_ids, modes) -> str:
             if k in nf.temporaries:
                 kind = f"arena +{offsets[k]}" if k in offsets else "on the stack"
                 order = list(o.layout.order) if o.layout is not None else []
-                if o.layout.fully_packed(o.repr.shape) and order != sorted(order):
+                packed = o.layout.fully_packed(o.representation.shape)
+                if packed and order != sorted(order):
                     kind += f", order {order}"
-            elif o.mode is OutputMode.PROVIDED and k in out_ids:
+            elif o.passing is Passing.CALLER_BUFFER and k in out_ids:
                 kind = f"output {out_ids.index(k)}"
-            elif o.mode is OutputMode.PROVIDED:
+            elif o.passing is Passing.CALLER_BUFFER:
                 kind = "temporary"
-            elif o.aliases:
+            elif o.aliased_inputs:
                 kind = "returned by its step, may be (a view of) " + ", ".join(
-                    f"%{ids[r.arguments[a]]}" for a in o.aliases
+                    f"%{ids[r.arguments[a]]}" for a in r.signature.alias_arguments(o)
                 )
             else:
                 kind = "allocated by its step"
@@ -399,11 +402,11 @@ def _dump(types, nf, steps, in_ids, contiguous, out_ids, modes) -> str:
         outs = ", ".join(
             f"%{ids[k]}"
             for k, o in zip(r.outputs, r.signature.outputs, strict=True)
-            if o.mode is not OutputMode.ABSENT
+            if not o.is_absent
         )
         lines.append(f"  {i:<4} ({ins}) -> ({outs})  {r.description}")
     outs = ", ".join(
-        f"%{ids[k]} ({'provided' if m is OutputMode.PROVIDED else 'returned'})"
+        f"%{ids[k]} ({'provided' if m is Passing.CALLER_BUFFER else 'returned'})"
         for k, m in zip(out_ids, modes, strict=True)
     )
     lines.append(f"outputs: {outs}")
@@ -474,18 +477,14 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
     module = ir.Module("program", fastmath=opts.fastmath, debug_info=opts.debug_info)
     profile = np.zeros(PROFILE_ITEMS + len(steps), dtype=np.uint64)
     # (returned outputs are handed over in any layout)
-    outputs = [
-        Output(
-            repr_of(
-                types[k],
-                Layout.c(types[k].ndim)
-                if m is OutputMode.PROVIDED
-                else Layout.dynamic(types[k].ndim),
-            ),
-            m,
-        )
-        for k, m in zip(out_ids, modes, strict=True)
-    ]
+    outputs = []
+    for k, passing in zip(out_ids, modes, strict=True):
+        ndim = types[k].ndim
+        if passing is Passing.CALLER_BUFFER:
+            layout = Layout.c(ndim)
+        else:
+            layout = Layout.dynamic(ndim)
+        outputs.append(Output(repr_of(types[k], layout), NewBuffer(layout), passing))
     function_graph = PlannedGraph(
         in_ids, out_ids, steps, planned.constants, planned.layouts
     )

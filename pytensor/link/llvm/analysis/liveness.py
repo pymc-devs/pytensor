@@ -10,8 +10,6 @@ Plain data in, plain data out: nothing here touches LLVM.
 
 from __future__ import annotations
 
-from pytensor.link.llvm.codegen.signature import OutputMode
-
 
 def lifetimes(steps, kept) -> tuple[dict, dict]:
     """(defined, end) per value of the steps `steps` (`planner.Step`): the
@@ -24,12 +22,12 @@ def lifetimes(steps, kept) -> tuple[dict, dict]:
         for k in args:
             end[k] = i
         for k, o in zip(r.outputs, r.signature.outputs, strict=True):
-            if o.mode is OutputMode.ABSENT:
+            if o.is_absent:
                 continue
             defined[k] = i
             end.setdefault(k, i)
-            if o.aliases:
-                aliases[k] = [args[a] for a in o.aliases]
+            if o.aliased_inputs:
+                aliases[k] = [args[a] for a in r.signature.alias_arguments(o)]
     for k in kept:
         end[k] = len(steps)
     # later values first, so chains of views propagate

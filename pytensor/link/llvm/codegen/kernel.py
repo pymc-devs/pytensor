@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pytensor.link.llvm.codegen.emit import Codegen
+from pytensor.link.llvm.codegen.emit import Array, Codegen, check_strides
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
-from pytensor.link.llvm.codegen.signature import OutputMode, Signature
+from pytensor.link.llvm.codegen.signature import Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
@@ -16,7 +16,6 @@ from pytensor.link.llvm.codegen.types import (
     TensorRepr,
     dtype_code,
     ir,
-    itemsize,
     kernel_params,
     ptarray_type,
 )
@@ -37,11 +36,13 @@ def build_kernel_wrapper(
     compares per call)."""
     sig = nf.signature
     # (outputs without a value have no argument)
-    present = [o for o in sig.outputs if o.mode is not OutputMode.ABSENT]
+    present = [o for o in sig.outputs if not o.is_absent]
     if sig.has_scalars:
         raise ValueError(
             "functions with ScalarType inputs or outputs have no kernel ABI"
         )
+    # (without scalars, every input argument is a tensor)
+    input_tensors = [r for r in sig.inputs if isinstance(r, TensorRepr)]
     pa = ptarray_type()
     fn = module.function(name, kernel_params(), ir.i32, exported=True)
     b = fn.builder()
@@ -80,7 +81,7 @@ def build_kernel_wrapper(
             f"argument check: the kernel takes {len(sig.inputs)} inputs and "
             f"{len(present)} outputs",
         )
-        for k, r in enumerate([*sig.inputs, *(o.repr for o in present)]):
+        for k, r in enumerate([*input_tensors, *(o.tensor for o in present)]):
             p = arg(k)
             ok = b.and_(
                 b.eq(b.load(ir.i32, b.field_ptr(pa, p, PtArray.NDIM)), b.i32(r.ndim)),
@@ -94,15 +95,15 @@ def build_kernel_wrapper(
                 f"argument check: argument {k} isn't a {r.ndim}-d array of {r.dtype}",
             )
         reprs = [
-            *sig.inputs,
-            *(o.repr for o in present if o.mode is OutputMode.PROVIDED),
+            *input_tensors,
+            *(o.tensor for o in present if o.passing is Passing.CALLER_BUFFER),
         ]
         positions = [
             *range(len(sig.inputs)),
             *(
                 len(sig.inputs) + k
                 for k, o in enumerate(present)
-                if o.mode is OutputMode.PROVIDED
+                if o.passing is Passing.CALLER_BUFFER
             ),
         ]
         for k, r in zip(positions, reprs, strict=True):
@@ -111,21 +112,21 @@ def build_kernel_wrapper(
 
     n_in = len(sig.inputs)
     call_args = [ctx, config]
-    call_args += [read(k, r) for k, r in enumerate(sig.inputs)]
+    call_args += [read(k, r) for k, r in enumerate(input_tensors)]
     slots = []
     for k, o in enumerate(present):
-        if o.mode is OutputMode.PROVIDED:
-            call_args.append(read(n_in + k, o.repr))
+        if o.passing is Passing.CALLER_BUFFER:
+            call_args.append(read(n_in + k, o.tensor))
         else:
-            slot = b.alloca(o.repr.slot_type)
-            b.store(b.zero(o.repr.slot_type), slot)
+            slot = b.alloca(o.tensor.slot_type)
+            b.store(b.zero(o.tensor.slot_type), slot)
             call_args.append(slot)
             slots.append((k, o, slot))
     rc = b.call(nf.function, call_args)
     # copy the slots back, also on failure (the caller releases owners)
     for k, o, slot in slots:
         p = arg(n_in + k)
-        st = o.repr.slot_type
+        st = o.tensor.slot_type
         b.store(
             b.load(ir.ptr, b.field_ptr(st, slot, Slot.DATA)),
             b.field_ptr(pa, p, PtArray.DATA),
@@ -135,43 +136,41 @@ def build_kernel_wrapper(
             b.field_ptr(st, slot, Slot.LENGTHS),
             b.field_ptr(st, slot, Slot.STRIDES),
         )
-        for a in range(o.repr.ndim):
+        for a in range(o.tensor.ndim):
             b.store(b.load(ir.i64, b.gep(ir.i64, lp, a)), b.gep(ir.i64, shape_p, a))
             b.store(b.load(ir.i64, b.gep(ir.i64, sp, a)), b.gep(ir.i64, strides_p, a))
         owner = b.load(ir.ptr, b.field_ptr(st, slot, Slot.OWNER))
-        if len(o.aliases) == 1:
+        alias_arguments = sig.alias_arguments(o)
+        if len(alias_arguments) == 1:
             # a view lies in the input's buffer, unless the kernel allocated one. (With
             # several inputs it may alias, a view's owner stays null: the caller keeps
             # all of them alive.)
             mine = b.ne(owner, b.null())
-            owner = b.select(mine, owner, field(arg(o.aliases[0]), PtArray.OWNER))
+            input_owner = field(arg(alias_arguments[0]), PtArray.OWNER)
+            owner = b.select(mine, owner, input_owner)
         b.store(owner, b.field_ptr(pa, p, PtArray.OWNER))
     b.ret(rc)
     return fn
 
 
-def _check_layout(cg, p, r: TensorRepr, k):
-    """Fail unless the PtArray at `p` has layout `r.layout` (numpy's rules: length-1 axes
-    and empty arrays don't count)."""
-    b = cg.b
-    pa = ptarray_type()
-    shape_p = b.load(ir.ptr, b.field_ptr(pa, p, PtArray.SHAPE))
-    strides_p = b.load(ir.ptr, b.field_ptr(pa, p, PtArray.STRIDES))
-    shape = [b.load(ir.i64, b.gep(ir.i64, shape_p, a)) for a in range(r.ndim)]
-    actual = [b.load(ir.i64, b.gep(ir.i64, strides_p, a)) for a in range(r.ndim)]
-    expected = r.layout.stride_values(
-        b, itemsize(r.dtype), shape, dict(enumerate(actual))
+def _check_layout(codegen, pointer, representation: TensorRepr, k):
+    """Fail unless the PtArray at `pointer` has layout `representation.layout`."""
+    builder = codegen.b
+    ptarray = ptarray_type()
+    shape_pointer = builder.load(
+        ir.ptr, builder.field_ptr(ptarray, pointer, PtArray.SHAPE)
     )
-    ok = b.const_bool(True)
-    empty = b.const_bool(False)
-    for a in range(r.ndim):
-        one = b.eq(shape[a], 1)
-        same = b.eq(actual[a], expected[a])
-        ok = b.and_(ok, b.or_(one, same))
-        empty = b.or_(empty, b.eq(shape[a], 0))
-    cg.check(
-        b.or_(ok, empty), f"layout check: argument {k} doesn't have layout {r.layout}"
+    strides_pointer = builder.load(
+        ir.ptr, builder.field_ptr(ptarray, pointer, PtArray.STRIDES)
     )
+    axes = range(representation.ndim)
+    shape = [builder.load(ir.i64, builder.gep(ir.i64, shape_pointer, a)) for a in axes]
+    strides = [
+        builder.load(ir.i64, builder.gep(ir.i64, strides_pointer, a)) for a in axes
+    ]
+    data = builder.load(ir.ptr, builder.field_ptr(ptarray, pointer, PtArray.DATA))
+    array = Array(representation.dtype, data, shape, strides, representation.layout)
+    check_strides(codegen, array, representation.layout, f"argument {k}")
 
 
 @dataclass
