@@ -85,6 +85,7 @@ from pytensor.tensor.subtensor import (
     get_constant_idx,
     get_slice_elements,
     indices_from_subtensor,
+    set_subtensor,
     slice_len,
     unflatten_index_variables,
 )
@@ -2647,6 +2648,103 @@ def local_join_subtensors(fgraph, node):
     if len(joined) == len(node.inputs):
         return None
     return [concatenate(joined, axis=axis) if len(joined) > 1 else joined[0]]
+
+
+@register_specialize
+@node_rewriter([Join])
+def local_join_with_alloc_to_set_subtensor(fgraph, node):
+    r"""Specialize a :class:`Join` containing at least one :class:`Alloc` into nested :class:`SetSubtensor`\s.
+
+    When concatenating arrays where one or more inputs are produced by an :class:`Alloc`
+    (e.g. constant background fills like ``zeros(4000)``), rewriting to :class:`SetSubtensor`
+    avoids materializing massive intermediate buffers, enables broadcasting along non-concatenated
+    dimensions, and allows downstream in-place subtensor optimization.
+    """
+    tensors = node.inputs
+    axis = node.op.axis
+    out_var = node.outputs[0]
+
+    if axis < 0:
+        axis = out_var.ndim + axis
+
+    alloc_inputs: list[tuple[int, Variable, Variable]] = []
+    for i, t in enumerate(tensors):
+        if t.owner is not None and isinstance(t.owner.op, Alloc):
+            fill_val = t.owner.inputs[0]
+            if fill_val.ndim == 0:
+                alloc_inputs.append((i, t, fill_val))
+
+    if not alloc_inputs:
+        return None
+
+    def get_static_axis_len(t):
+        if hasattr(fgraph, "shape_feature"):
+            shape = fgraph.shape_feature.get_shape(t, axis)
+            try:
+                return get_scalar_constant_value(shape, only_process_constants=True)
+            except NotScalarConstantError:
+                pass
+        return t.type.shape[axis] or 1
+
+    base_idx, _, base_val = max(
+        alloc_inputs, key=lambda item: get_static_axis_len(item[1])
+    )
+
+    if hasattr(fgraph, "shape_feature"):
+        out_shape = fgraph.shape_feature.shape_tuple(out_var)
+    else:
+        out_shape = tuple(out_var.shape)
+
+    typed_base_val = cast(base_val, out_var.dtype)
+    curr_buf = alloc(typed_base_val, *out_shape)
+
+    ndim = out_var.ndim
+    start = 0
+
+    for i, t in enumerate(tensors):
+        if hasattr(fgraph, "shape_feature"):
+            t_len = fgraph.shape_feature.get_shape(t, axis)
+            try:
+                t_len = int(
+                    get_scalar_constant_value(t_len, only_process_constants=True)
+                )
+            except NotScalarConstantError:
+                pass
+        else:
+            t_len = t.shape[axis]
+        stop = start + t_len
+
+        is_prefilled = False
+        if i == base_idx:
+            is_prefilled = True
+        elif t.owner is not None and isinstance(t.owner.op, Alloc):
+            fill_val = t.owner.inputs[0]
+            if fill_val.ndim == 0:
+                if fill_val is base_val:
+                    is_prefilled = True
+                else:
+                    try:
+                        c1 = get_scalar_constant_value(
+                            fill_val, only_process_constants=True
+                        )
+                        c2 = get_scalar_constant_value(
+                            base_val, only_process_constants=True
+                        )
+                        if c1 == c2:
+                            is_prefilled = True
+                    except NotScalarConstantError:
+                        pass
+
+        if not is_prefilled:
+            idx = [slice(None)] * ndim
+            start_slice = None if (isinstance(start, int) and start == 0) else start
+            idx[axis] = slice(start_slice, stop)
+            curr_buf = set_subtensor(curr_buf[tuple(idx)], t)
+
+        start = stop
+
+    copy_stack_trace(node.outputs, curr_buf)
+    return [curr_buf]
 
 
 @node_rewriter(

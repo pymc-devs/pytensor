@@ -13,7 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
-from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
+from pytensor.tensor.basic import Alloc, ExtractDiag, Join, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
@@ -2642,6 +2642,84 @@ def test_local_join_subtensors_skips_unmergeable_pair():
     out = pt.concatenate([x[0:1], x[1:2], x[2:4:2], x[4:5], x[5:6]])
     result = utt.RewriteTester([x], [out], custom_rewrite=local_join_subtensors)
     result.assert_graph(pt.concatenate([x[:2], x[2:4:2], x[4:6]]))
+
+
+@pytest.mark.parametrize("axis", [0, 1, -1])
+def test_local_join_with_alloc_to_set_subtensor(axis):
+    mode = get_default_mode().including("specialize")
+
+    norm_axis = 1 if axis == -1 else axis
+    shape_x = [3, 4]
+    shape_z = [3, 4]
+    shape_z[norm_axis] = 5
+    x = pt.matrix("x")
+    z = pt.zeros(shape_z)
+    joined = pt.join(axis, x, z)
+
+    fn = pytensor.function([x], joined, mode=mode)
+    nodes = fn.maker.fgraph.toposort()
+    assert not any(isinstance(n.op, Join) for n in nodes), f"Join remained: {nodes}"
+
+    x_val = np.ones(shape_x, dtype=np.float64)
+    expected = np.concatenate([x_val, np.zeros(shape_z)], axis=norm_axis)
+    np.testing.assert_array_equal(fn(x_val), expected)
+
+    grad_joined = pt.grad(joined.sum(), x)
+    fn_grad = pytensor.function([x], grad_joined, mode=mode)
+    np.testing.assert_array_equal(fn_grad(x_val), np.ones(shape_x))
+
+
+def test_local_join_with_alloc_multiple_inputs():
+    mode = get_default_mode().including("specialize")
+
+    x = pt.vector("x")
+    y = pt.vector("y")
+    z1 = pt.zeros(5)
+    z2 = pt.zeros(10)
+    o = pt.ones(3)
+
+    joined = pt.join(0, z1, x, z2, o, y)
+    fn = pytensor.function([x, y], joined, mode=mode)
+
+    nodes = fn.maker.fgraph.toposort()
+    assert not any(isinstance(n.op, Join) for n in nodes), f"Join remained: {nodes}"
+
+    vx = np.array([10.0, 20.0])
+    vy = np.array([30.0, 40.0, 50.0])
+    res = fn(vx, vy)
+    expected = np.concatenate([np.zeros(5), vx, np.zeros(10), np.ones(3), vy])
+    np.testing.assert_array_equal(res, expected)
+
+
+def test_local_join_with_all_allocs():
+    mode = get_default_mode().including("specialize")
+
+    z1 = pt.zeros(5)
+    z2 = pt.zeros(10)
+    joined = pt.join(0, z1, z2)
+
+    fn = pytensor.function([], joined, mode=mode)
+    nodes = fn.maker.fgraph.toposort()
+    assert not any(isinstance(n.op, Join) for n in nodes), f"Join remained: {nodes}"
+    # When all inputs are allocs with identical value, graph specializes to single Alloc
+    assert any(isinstance(n.op, Alloc) for n in nodes)
+    np.testing.assert_array_equal(fn(), np.zeros(15))
+
+
+def test_local_join_with_alloc_symbolic_shape():
+    mode = get_default_mode().including("specialize")
+
+    x = pt.matrix("x")
+    z = pt.zeros((x.shape[0], 5))
+    joined = pt.join(1, x, z)
+
+    fn = pytensor.function([x], joined, mode=mode)
+    nodes = fn.maker.fgraph.toposort()
+    assert not any(isinstance(n.op, Join) for n in nodes), f"Join remained: {nodes}"
+
+    x_val = np.ones((4, 7), dtype=np.float64)
+    expected = np.concatenate([x_val, np.zeros((4, 5))], axis=1)
+    np.testing.assert_array_equal(fn(x_val), expected)
 
 
 def test_local_uint_constant_indices():
