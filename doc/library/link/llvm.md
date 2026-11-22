@@ -22,9 +22,10 @@ rewrite groups small nodes into units.
 * **planner** (`planner.py`): decides how every node of a graph runs. It names values by
   **value ids** (vids), flattens the graph into **flat nodes** (`FlatNode`; among them
   **units**: compiled OpFromGraphs, several nodes generated as one kernel), and turns
-  each into a **step** (`Step`). The result is a **planned graph** (`PlannedGraph`).
-  A step of a program is a call of a kernel: a node's (Rust, numba), or code compiled
-  on its own (a node, a unit: a step without a node).
+  each into a **step** (`Step`: the node, its **implementation** and the signature that
+  follows from it). The result is a **planned graph** (`PlannedGraph`, in
+  `codegen/plan.py`). A step of a program is a call of a kernel: a node's (Rust,
+  numba), or generated code compiled in a module of its own (`OwnModule`).
 * **emitter**: the code generation of one op (`llvm_emit`), working with a `Codegen`
   (the builder and the parameters of the kernel being generated).
 * **node function**: the LLVM function generated for one node, inlined into kernels.
@@ -192,11 +193,11 @@ Every kernel has the kernel ABI (section 6), and generated code calls Rust kerne
 numba kernels and code compiled on its own the same way
 (`codegen/call.py`): it
 packs `PtArray`s (with the number of axes and the dtype of each), calls the kernel, and copies what it wrote for allocated and view
-outputs (owner included) into the node's output slots. A node implemented by such a
-kernel gets a node function like any other (`build_node_function(..., kernel=...)`),
-so units and generated loops can contain every kind of node; what a program calls that
-isn't a node (code compiled on its own) gets one from its signature
-(`build_call_function`). The
+outputs (owner included) into the node's output slots. Every node has an
+implementation (`codegen/implementation.py`: generated code, a Rust kernel, a numba
+kernel, or generated code compiled in a module of its own) and a node function like any
+other (`node.node_function`), whose body the implementation writes: a kernel call for
+the kernels, so units and generated loops can contain every kind of node. The
 called kernel's
 scratch is released after the call; an error returns its code (the kernel set the
 message).
@@ -348,7 +349,8 @@ state buffers) do; an emitter that calls `allocate` instead produces new memory,
 is always correct. Nodes inside units, in inlined inner graphs, in Scan bodies and
 Blockwise cores never work in place. A numba kernel does what PyTensor's numba implementation does, which
 overwrites destroyed inputs; where the conditions above don't hold, and always inside
-units, the call passes it copies (`Kernel.destroys`).
+units, the node function passes it copies (`NumbaKernel.always_overwrites`, of the
+inputs that aren't writable).
 
 An output that may be the input's memory is a returned output that may alias it, as a
 view: the arena keeps the memory until the last reader of either (`analysis/liveness.py`).
@@ -641,7 +643,7 @@ differs:
   which are nodes of their own; nodes touching ScalarType values are grouped into units;
   FusedElemwise stays one node when its pattern is supported. A node prefers a Rust
   kernel (nothing to compile); generated code for it (a node, a unit) is a module of
-  its own, which the program calls (a step without a node). If a unit can't be
+  its own, which the program calls (`OwnModule`). If a unit can't be
   generated, its nodes are planned on their own. This is also where in-place work is granted.
 * **Inner graphs** (of a unit, a Scan, a Blockwise) are planned when their emitter asks
   (below): every OpFromGraph is inlined, and generated code (inlined) is preferred to

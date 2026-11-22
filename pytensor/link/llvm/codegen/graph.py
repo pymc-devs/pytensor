@@ -35,7 +35,7 @@ from pytensor.link.llvm.codegen.interface import (
     ScalarOutput,
     TensorOutput,
 )
-from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
+from pytensor.link.llvm.codegen.node import NodeFunction, node_function
 from pytensor.link.llvm.codegen.num import constant, store
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
@@ -412,14 +412,14 @@ def _emit_steps(
     Returns (written, owned): the vids produced directly in their targets, and the
     slots of buffers kernels allocated for other values, for the caller to `release`
     when they are no longer used (on failure, they are released here)."""
-    from pytensor.link.llvm.codegen.call import build_call_function, linked
+    from pytensor.link.llvm.codegen.call import linked
 
     b = cg.b
     ctx, config = cg.ctx, cg.config
     memory_targets = memory_targets or {}
     slot_targets = slot_targets or {}
     written: set[int] = set()
-    owned: list[Slot] = []  # whose owner a kernel allocated
+    owned: list[Slot] = []  # whose owner is a runtime buffer
     layouts: dict[int, Layout] = {}  # of what the steps produced
     if profile is not None:
         cells = linked(cg, profile)
@@ -428,7 +428,7 @@ def _emit_steps(
             b.rt_counter_add(b.gep(ir.i64, cells, PROFILE_CALLS), b.i64(1))
         start = b.alloca(ir.i64)
     for n, step in enumerate(steps):
-        node, kernel, signature = step.node, step.kernel, step.signature
+        signature = step.signature
         results = list(zip(step.outputs, signature.outputs, strict=True))
         for vid, output in results:
             if output.layout is not None:
@@ -461,22 +461,15 @@ def _emit_steps(
             if output.passing is Passing.CALLEE_SLOT and j not in into_slot
         }
 
-        if node is None:
-            if kernel is None:
-                raise ValueError(f"{step.description}: no node and no kernel to call")
-            node_function = build_call_function(
-                cg.unit, f"{name}_n{n}", signature, kernel
-            )
-        else:
-            node_function = build_node_function(
-                cg.unit,
-                node,
-                f"{name}_n{n}",
-                scratch_outputs=frozenset(scratch),
-                input_layouts=step.in_layouts,
-                parallel=cg.parallel,
-                kernel=kernel,
-            )
+        function = node_function(
+            cg.unit,
+            f"{name}_n{n}",
+            step.node,
+            step.implementation,
+            signature,
+            scratch_outputs=frozenset(scratch),
+            parallel=cg.parallel,
+        )
         args: list[ir.Value] = [ctx, config]
         for vid, representation in zip(step.arguments, signature.inputs, strict=True):
             if vid not in values:
@@ -532,22 +525,21 @@ def _emit_steps(
                 scalar_reads.append((vid, pointer, ir_type))
             else:
                 ndim = output.tensor.ndim
+                # (a result in scratch memory, or a view, has no runtime buffer)
+                in_scratch = j in function.in_scratch
                 if j in into_slot:
                     slot = into_slot[j]
                 else:
                     slot = Slot.alloca(b, ndim)
-                    if kernel is not None:
+                    if not in_scratch:
                         owned.append(slot)
                 args.append(slot.pointer)
-                # (a scratch result of a generated node is scratch memory it took, or
-                # a view)
-                in_scratch = kernel is None and j in scratch
                 slot_reads.append(_SlotRead(vid, slot, output, in_scratch))
 
         if profile is not None:
             with b.if_(profiling):
                 b.store(b.rt_clock_ns(), start)
-        rc = b.call(node_function.function, args)
+        rc = b.call(function.function, args)
         assert rc is not None  # (it returns an i32)
         if profile is not None:
             with b.if_(profiling):

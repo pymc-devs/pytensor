@@ -1,12 +1,11 @@
 """Calls from generated code to other kernels.
 
-Rust kernels, numba kernels and separately compiled code all have the kernel ABI. Generated code calls them all the same way: it packs the arguments into
+Rust kernels, numba kernels and separately compiled code all have the kernel ABI.
+Generated code calls them all the same way (`call_kernel`): it packs the arguments into
 `PtArray`s (with the number of axes and the dtype of each), calls the kernel through its
-entry in the link table and reads back what the kernel wrote. A node implemented by such
-a kernel then has a node function like any other (`build_node_function(...,
-kernel=...)`), so units, programs and generated loops can contain it; what isn't a node
-(a compiled unit called by a program) gets one from its signature
-(`build_call_function`).
+entry in the link table and reads back what the kernel wrote. A node run by such a kernel
+has a node function like any other, whose body is the call (`implementation.RustKernel`,
+`NumbaKernel`, `OwnModule`), so units, programs and generated loops can contain it.
 
 The addresses (of the kernel and of its config) aren't part of the IR: they are entries
 of the calling kernel's link table, which is its config.
@@ -23,8 +22,6 @@ import numpy as np
 from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
-    Representation,
-    TensorRepr,
     dtype_code,
     ir,
     memory_type,
@@ -40,9 +37,6 @@ if TYPE_CHECKING:
         OutputDestination,
         SlotDestination,
     )
-    from pytensor.link.llvm.codegen.kernel_module import KernelModule
-    from pytensor.link.llvm.codegen.node import NodeFunction
-    from pytensor.link.llvm.codegen.signature import Output, Signature
 
 
 #: An input of a kernel call: the value (None for one without data) and its type.
@@ -51,19 +45,14 @@ type KernelInput = tuple[Array | ir.Value | None, ScalarType | None]
 
 @dataclass
 class Kernel:
-    """A kernel that generated code calls for a node: a Rust kernel, a numba kernel, or
-    code compiled on its own."""
+    """Something generated code can call through the kernel ABI: a Rust kernel, a numba
+    kernel, or generated code compiled on its own."""
 
     address: int
     #: the kernel's config (`const void* config` of the kernel ABI)
     config: int
-    #: what it produces, per node output
-    outputs: list[Output]
     description: str = ""
     keepalive: object = None
-    #: node inputs the kernel overwrites (a numba implementation of an op that destroys
-    #: them): generated code calling it passes copies
-    destroys: frozenset[int] = frozenset()
 
 
 @dataclass
@@ -148,14 +137,13 @@ class _Argument(NamedTuple):
     slot_destination: SlotDestination | None = None
 
 
-def _call_kernel(
+def call_kernel(
     cg: Codegen,
     kernel: Kernel,
-    index: int,
     inputs: Sequence[KernelInput],
     outputs: Sequence[OutputDestination | None],
 ) -> None:
-    """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
+    """Call `kernel` (linked into the module's link table, `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, `ScalarType`) pairs) and
     `outputs` (`ProvidedDestination`, `SlotDestination`, or None).
 
@@ -241,6 +229,7 @@ def _call_kernel(
         b.store(b.i32(dtype_code(scalar_type)), b.field_ptr(ptarray, p, PtArray.DTYPE))
         ptrs.append(p)
 
+    index = cg.links.link_kernel(kernel)
     fn = linked(cg, index)
     config = linked(cg, index + 1)
     mark = b.rt_scratch_mark(cg.ctx)
@@ -264,97 +253,6 @@ def _call_kernel(
         destination.done = True
     with b.if_(b.ne(rc, 0)):
         b.ret(rc)
-
-
-def call_destroying(
-    cg: Codegen,
-    kernel: Kernel,
-    index: int,
-    inputs: Sequence[KernelInput],
-    outputs: Sequence[OutputDestination | None],
-) -> None:
-    """`_call_kernel`, with copies of the inputs the kernel overwrites
-    (`Kernel.destroys`, positions in `inputs`): it may only write its outputs."""
-    from pytensor.link.llvm.codegen.array import Array
-
-    ins: list[KernelInput] = []
-    for pos, (a, scalar_type) in enumerate(inputs):
-        if pos in kernel.destroys and isinstance(a, Array):
-            mine = cg.temporary(a.scalar_type, a.shape)
-            mine.copy_from(cg, a)
-            a = mine
-        ins.append((a, scalar_type))
-    _call_kernel(cg, kernel, index, ins, outputs)
-
-
-def build_call_function(
-    unit: KernelModule,
-    name: str,
-    signature: Signature,
-    kernel: Kernel,
-    index: int | None = None,
-) -> NodeFunction:
-    """A function (always inlined) with `signature` that calls `kernel`: how generated
-    code runs a kernel that isn't a node's (a compiled unit, a separately compiled
-    node), and nodes the planner gives a kernel. `index`: the kernel's entry
-    in `unit`'s link table (default: linked here). Returns a `NodeFunction`."""
-    from pytensor.link.llvm.codegen.array import Array, Slot
-    from pytensor.link.llvm.codegen.context import Codegen
-    from pytensor.link.llvm.codegen.destination import (
-        ProvidedDestination,
-        SlotDestination,
-    )
-    from pytensor.link.llvm.codegen.node import NodeFunction
-    from pytensor.link.llvm.codegen.signature import Passing
-
-    fn = unit.module.function(
-        name,
-        signature.param_types(),
-        ir.i32,
-        inline=ir.Inline.Always,
-        debug_name=kernel.description[:200],
-    )
-    b = fn.builder()
-    params = iter(fn.params)
-    ctx, config = next(params), next(params)
-    cg = Codegen(b, ctx, config, unit, name=name)
-    inputs = [
-        Array.unpack(b, _tensor(representation), next(params))
-        for representation in signature.inputs
-    ]
-    for pos, a in enumerate(inputs):
-        a.base, a.writable = pos, False
-    outputs: list[OutputDestination | None] = []
-    for output in signature.outputs:
-        if output.is_absent:
-            outputs.append(None)
-        elif output.passing is Passing.CALLER_BUFFER:
-            array = Array.unpack(b, output.tensor, next(params))
-            outputs.append(ProvidedDestination(cg, array))
-        else:
-            outputs.append(
-                SlotDestination(
-                    cg,
-                    Slot(next(params), output.tensor.ndim),
-                    output.tensor.scalar_type,
-                    signature.alias_arguments(output),
-                )
-            )
-    if index is None:
-        index = unit.links.link_kernel(kernel)
-    with cg.scratch_scope(function=True):
-        call_destroying(
-            cg, kernel, index, [(a, a.scalar_type) for a in inputs], outputs
-        )
-    b.ret(0)
-    return NodeFunction(fn, signature, unit.links)
-
-
-def _tensor(representation: Representation) -> TensorRepr:
-    """The representation of a kernel's input: kernels only take tensors."""
-    if not isinstance(representation, TensorRepr):
-        raise TypeError(f"a kernel input that isn't a tensor: {representation}")
-    return representation
 
 
 __all__ = [

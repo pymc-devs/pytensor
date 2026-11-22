@@ -17,7 +17,8 @@ from functools import singledispatch
 import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.signature import Output, Passing
+from pytensor.link.llvm.codegen.call import Kernel
+from pytensor.link.llvm.codegen.implementation import OutputDeclaration, RustKernel
 from pytensor.tensor.math import Dot
 
 
@@ -57,16 +58,28 @@ def rust_kernel(op, node, in_layouts=None, linalg_parallel=False):
     return None
 
 
-def rust_kernel_outputs(kernel, node) -> list[Output]:
-    """What `kernel` declares about the outputs of `node` (it chose their layouts when
-    it was made for its inputs' layouts), as the `Output`s of a signature: new memory,
-    provided or allocated by the kernel."""
-    outputs = []
+def rust_implementation(node, in_layouts, linalg_parallel=False) -> RustKernel | None:
+    """The node's Rust kernel as its implementation (made for `in_layouts`), or None if
+    it has none."""
+    k = rust_kernel(node.op, node, in_layouts, linalg_parallel)
+    if k is None:
+        return None
+    return RustKernel(
+        Kernel(k.address, k.config, repr(k), k), rust_kernel_declarations(k, node)
+    )
+
+
+def rust_kernel_declarations(kernel, node) -> tuple[OutputDeclaration, ...]:
+    """What `kernel` declares about the outputs of `node`: it chose their layouts when it
+    was made for its inputs' layouts, and whether it writes them into memory the caller
+    provides (else it allocates them)."""
+    declarations = []
     for var, (mode, spec) in zip(node.outputs, kernel.outputs(), strict=True):
         shape = tuple(None if s is None else int(s) for s in var.type.shape)
-        passing = Passing.CALLER_BUFFER if mode == "provided" else Passing.CALLEE_SLOT
-        outputs.append(Output.new_buffer(var, Layout.from_spec(spec, shape), passing))
-    return outputs
+        declarations.append(
+            OutputDeclaration(Layout.from_spec(spec, shape), mode == "provided")
+        )
+    return tuple(declarations)
 
 
 @rust_kernel.register(Dot)

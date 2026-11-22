@@ -17,22 +17,16 @@ from pytensor.link.llvm.codegen.destination import (
     ScalarDestination,
     SlotDestination,
 )
+from pytensor.link.llvm.codegen.implementation import GENERATED, Implementation
 from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
-    EmitterOutput,
-    ScalarOutput,
-    TensorOutput,
-    llvm_emit,
 )
 from pytensor.link.llvm.codegen.num import constant, store
 from pytensor.link.llvm.codegen.signature import (
-    Output,
     Passing,
     Signature,
-    destroyed_inputs,
     node_signature,
     skipped_inputs,
-    view_inputs,
 )
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
@@ -46,7 +40,7 @@ from pytensor.link.llvm.codegen.types import (
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.codegen.call import Kernel, LinkTable
+    from pytensor.link.llvm.codegen.call import LinkTable
     from pytensor.link.llvm.codegen.kernel_module import KernelModule
 
 
@@ -65,6 +59,9 @@ class NodeFunction:
     #: of a graph's function: where its array constants are in the link table
     #: ({vid: entry})
     constants: dict[int, int] = field(default_factory=dict)
+    #: of a node's function: the outputs it puts into scratch memory of the code around
+    #: it (the rest of its new outputs are runtime buffers)
+    in_scratch: frozenset[int] = frozenset()
 
 
 def _debug_name(node: Apply) -> str:
@@ -79,38 +76,25 @@ def _debug_name(node: Apply) -> str:
     return text if len(text) <= 200 else text[:197] + "..."
 
 
-def build_node_function(
+def node_function(
     unit: KernelModule,
-    node: Apply,
     name: str,
+    node: Apply,
+    implementation: Implementation,
+    signature: Signature,
     scratch_outputs: Collection[int] = frozenset(),
-    folded: Mapping[int, float] | None = None,
-    input_layouts: Sequence[Layout | None] | None = None,
-    provided: Sequence[Layout | None] | None = None,
     parallel: bool | None = None,
-    kernel: Kernel | None = None,
-    writable: Collection[int] = frozenset(),
 ) -> NodeFunction:
-    """Build the LLVM function of one node in `unit`, always inlined.
+    """Build the LLVM function of `node` in `unit`, always inlined: its parameters from
+    `signature` (`node_signature` for `implementation`), its body written by
+    `implementation`.
 
-    * `scratch_outputs`: positions of the outputs that are temporaries of a compiled
-      unit: they go into the unit's scratch memory instead of runtime buffers;
-    * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
-    * `input_layouts`, `provided`, `writable`: see `node_signature`;
+    * `scratch_outputs`: positions of the outputs that are temporaries of the code
+      around it: they go into its scratch memory instead of runtime buffers, where the
+      implementation allocates through codegen (`NodeFunction.in_scratch`);
     * `parallel`: may its loops run in parallel? (None: as `unit`'s options say; the
-      code around it passes False inside a parallel loop);
-    * `kernel`: a `Kernel` implementing the node (a Rust or numba kernel). The function
-      calls it (call.py) through an entry of `unit`'s link table.
+      code around it passes False inside a parallel loop).
     """
-    folded = folded or {}
-    signature = node_signature(
-        node,
-        frozenset(folded),
-        input_layouts,
-        provided,
-        kernel.outputs if kernel is not None else None,
-        writable,
-    )
     function = unit.module.function(
         name,
         signature.param_types(),
@@ -122,39 +106,46 @@ def build_node_function(
     params = iter(function.params)
     ctx, config = next(params), next(params)
     cg = Codegen(b, ctx, config, unit, name=name, parallel=parallel)
+    folded, writable = signature.folded_values, signature.writable
+    in_scratch = (
+        frozenset(scratch_outputs)
+        if implementation.allocates_through_codegen
+        else frozenset()
+    )
     scopes = _AliasScopes(b, name, node, signature, folded, writable)
     inputs = _inputs(cg, node, signature, folded, writable, params, scopes)
-    destinations = _destinations(cg, signature, scratch_outputs, params, scopes)
-    # (the op's scratch memory is freed before the function returns)
+    destinations = _destinations(cg, signature, in_scratch, params, scopes)
+    # (the scratch memory taken inside is freed before the function returns)
     with cg.scratch_scope(function=True):
-        if kernel is not None:
-            from pytensor.link.llvm.codegen.call import call_destroying
-
-            kernel_inputs = [
-                (array, None if is_absent(var.type) else element_type(var.type))
-                for array, var in zip(inputs, node.inputs, strict=True)
-            ]
-            call_destroying(
-                cg, kernel, unit.links.link_kernel(kernel), kernel_inputs, destinations
-            )
-        else:
-            handles = [
-                None if destination is None else _handle(node, k, destination, output)
-                for k, (destination, output) in enumerate(
-                    zip(destinations, signature.outputs, strict=True)
-                )
-            ]
-            llvm_emit(node.op, node, cg, inputs, handles)
-            if not b.terminated:
-                for k, destination in enumerate(destinations):
-                    if destination is not None:
-                        try:
-                            destination.finish()
-                        except ValueError as e:
-                            raise ValueError(f"{node.op}: output {k}: {e}") from None
+        # copies of the inputs it overwrites that aren't writable
+        for position in sorted(implementation.always_overwrites - writable):
+            original = inputs[position]
+            if isinstance(original, Array):
+                mine = cg.temporary(original.scalar_type, original.shape)
+                mine.copy_from(cg, original)
+                inputs[position] = mine
+        implementation.emit(cg, node, signature, inputs, destinations)
     if not b.terminated:
         b.ret(0)
-    return NodeFunction(function, signature, unit.links)
+    return NodeFunction(function, signature, unit.links, in_scratch=in_scratch)
+
+
+def build_node_function(
+    unit: KernelModule,
+    node: Apply,
+    name: str,
+    *,
+    input_layouts: Sequence[Layout | None] | None = None,
+    folded: Mapping[int, float] | None = None,
+    writable: Collection[int] = frozenset(),
+    provided: Sequence[Layout | None] | None = None,
+) -> NodeFunction:
+    """Build the function of `node`'s generated code (`GENERATED`) in `unit`, with the
+    signature `node_signature` gives for these arguments (see there)."""
+    signature = node_signature(
+        node, input_layouts, folded=folded, writable=writable, provided=provided
+    )
+    return node_function(unit, name, node, GENERATED, signature)
 
 
 class _AliasScopes:
@@ -277,21 +268,8 @@ def _destinations(
     return destinations
 
 
-def _handle(
-    node: Apply, position: int, destination: OutputDestination, output: Output
-) -> EmitterOutput:
-    """Return what the emitter gets for output `position` of `node`."""
-    if isinstance(destination, ScalarDestination):
-        return ScalarOutput(destination)
-    return TensorOutput(
-        destination,
-        output.tensor.layout,
-        view_inputs(node, position),
-        destroyed_inputs(node, position),
-    )
-
-
 __all__ = [
     "NodeFunction",
     "build_node_function",
+    "node_function",
 ]

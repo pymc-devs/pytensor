@@ -9,13 +9,14 @@ passed. This is the only place where those rules live.
 from __future__ import annotations
 
 import enum
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.basic import Apply
 from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
-from pytensor.link.llvm.codegen.interface import has_emitter, llvm_layout
+from pytensor.link.llvm.codegen.implementation import GENERATED, Implementation
+from pytensor.link.llvm.codegen.interface import has_emitter
 from pytensor.link.llvm.codegen.types import (
     NoneRepr,
     Representation,
@@ -48,15 +49,6 @@ class Output:
     #: Positions of the node inputs the result may be a view of: those the op's
     #: `view_map` lists, and an input it may overwrite where the planner allows it.
     aliased_inputs: tuple[int, ...] = ()
-
-    @classmethod
-    def new_buffer(
-        cls, var: Variable, layout: Layout | None, passing: Passing
-    ) -> Output:
-        """Return the output for `var` in new memory of `layout` (a kernel's output)."""
-        if is_absent(var.type):
-            return cls(NoneRepr())
-        return cls(repr_of(var.type, layout), passing)
 
     @property
     def tensor(self) -> TensorRepr:
@@ -119,6 +111,15 @@ class Signature:
     #: arguments (folded constants, values without data). None: the inputs are the
     #: arguments, in order.
     argument_of_input: tuple[int | None, ...] | None = None
+    #: the constant inputs compiled into the code: (position, value) pairs
+    folded: tuple[tuple[int, float], ...] = ()
+    #: the inputs the function may overwrite (the planner allows it)
+    writable: frozenset[int] = frozenset()
+
+    @property
+    def folded_values(self) -> dict[int, float]:
+        """{input position: value} of the folded constants."""
+        return dict(self.folded)
 
     def param_types(self) -> list[ir.Type]:
         input_types = [
@@ -208,29 +209,38 @@ def node_outputs(
     node: Apply,
     input_layouts: Sequence[Layout | None] | None = None,
     writable: Collection[int] = frozenset(),
+    implementation: Implementation = GENERATED,
 ) -> list[Output]:
-    """Return the `Output` of each output of `node`.
+    """Return the `Output` of each output of `node`, run by `implementation`.
 
-    * Its layout is what the op's `llvm_layout` declares, or the default: C for new
-      memory, nothing known for a view. An output that may overwrite an input has that
-      input's layout, where new memory can have it too (`new_memory_layout`), so that
-      it is the same whether the planner lets it overwrite the input or not.
-    * It may alias the inputs its `view_map` lists, and the input it may overwrite if
-      that input is `writable` (the planner lets the node overwrite it).
-    * It is passed in a slot if it may alias an input or its size is only known at run
-      time, else in a buffer the caller provides.
+    * Its layout is what the implementation declares (for generated code, the op's
+      `llvm_layout`), or the default: C for new memory, nothing known for a view. An
+      output that may overwrite an input has that input's layout, where new memory can
+      have it too (`new_memory_layout`), so that it is the same whether the planner
+      lets it overwrite the input or not.
+    * It may alias the inputs its `view_map` lists (if the implementation returns
+      views), and the input it may overwrite if that input is `writable` (the planner
+      lets the node overwrite it, and the implementation does).
+    * It is passed in a slot if it may alias an input, its size is only known at run
+      time, or the implementation can't write memory the caller provides; else in a
+      buffer the caller provides.
 
     `input_layouts`: the layout of each input (None where unknown)."""
     input_layouts = known_layouts(node, input_layouts)
-    declared = llvm_layout(node.op, node, input_layouts)
+    declared = implementation.outputs(node, input_layouts)
     outputs: list[Output] = []
-    for position, (var, layout) in enumerate(zip(node.outputs, declared, strict=True)):
+    for position, (var, declaration) in enumerate(
+        zip(node.outputs, declared, strict=True)
+    ):
         representation = repr_of(var.type)
         if not isinstance(representation, TensorRepr):
             outputs.append(Output(representation))
             continue
-        viewed = view_inputs(node, position)
-        destroyed = destroyed_inputs(node, position)
+        viewed = view_inputs(node, position) if implementation.may_view else ()
+        destroyed = (
+            destroyed_inputs(node, position) if implementation.can_overwrite else ()
+        )
+        layout = declaration.layout
         if destroyed:
             layout = new_memory_layout(input_layouts[destroyed[0]], var.type)
         elif layout is None:
@@ -239,7 +249,7 @@ def node_outputs(
         aliased = viewed + tuple(
             k for k in destroyed if k in writable and k not in viewed
         )
-        if aliased or not representation.static:
+        if aliased or not representation.static or not declaration.writes_provided:
             passing = Passing.CALLEE_SLOT
         else:
             passing = Passing.CALLER_BUFFER
@@ -262,21 +272,24 @@ def skipped_inputs(
 
 def node_signature(
     node: Apply,
-    folded: Collection[int] = frozenset(),
     input_layouts: Sequence[Layout | None] | None = None,
-    provided: Sequence[Layout | None] | None = None,
-    outputs: Sequence[Output] | None = None,
+    *,
+    implementation: Implementation = GENERATED,
+    folded: Mapping[int, float] | None = None,
     writable: Collection[int] = frozenset(),
+    provided: Sequence[Layout | None] | None = None,
 ) -> Signature:
-    """Return the signature of the function of `node`.
+    """Return the signature of the function of `node`, run by `implementation`: the
+    whole description of that function.
 
-    * `folded`: positions of the inputs that are constants folded into the code;
     * `input_layouts`: the layout of each input;
+    * `folded`: {position: value} of the inputs that are constants compiled into the
+      code;
+    * `writable`: the inputs the planner lets it overwrite (see `node_outputs`);
     * `provided`: per output, a layout replacing the declared one of a caller buffer
-      (for a caller that fixes the memory, e.g. a test writing into a slice);
-    * `outputs`: the outputs, instead of what `node_outputs` gives (a kernel's);
-    * `writable`: see `node_outputs`.
+      (for a caller that fixes the memory, e.g. a test writing into a slice).
     """
+    folded = folded or {}
     skipped = skipped_inputs(node, folded)
     if input_layouts is None:
         input_layouts = [None] * len(node.inputs)
@@ -289,15 +302,22 @@ def node_signature(
         None if k in skipped else k - sum(1 for s in skipped if s < k)
         for k in range(len(node.inputs))
     ]
-    if outputs is None:
-        outputs = node_outputs(node, input_layouts, writable)
+    writable = frozenset(writable)
     resolved: list[Output] = []
-    for k, output in enumerate(outputs):
+    for k, output in enumerate(
+        node_outputs(node, input_layouts, writable, implementation)
+    ):
         layout = None if provided is None else provided[k]
         if output.passing is Passing.CALLER_BUFFER and layout is not None:
             output = output.with_layout(layout)
         resolved.append(output)
-    return Signature(inputs, tuple(resolved), tuple(argument_of_input))
+    return Signature(
+        inputs,
+        tuple(resolved),
+        tuple(argument_of_input),
+        tuple(sorted(folded.items())),
+        writable,
+    )
 
 
 __all__ = [

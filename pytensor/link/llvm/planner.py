@@ -44,17 +44,23 @@ from pytensor.link.llvm.analysis.layout import (
     shape_of,
 )
 from pytensor.link.llvm.codegen.call import Kernel
+from pytensor.link.llvm.codegen.implementation import (
+    GENERATED,
+    Implementation,
+    NumbaKernel,
+    OutputDeclaration,
+    OwnModule,
+    RustKernel,
+)
 from pytensor.link.llvm.codegen.interface import has_emitter
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.kernel_module import KernelModule
-from pytensor.link.llvm.codegen.node import build_node_function
+from pytensor.link.llvm.codegen.node import build_node_function, node_function
 from pytensor.link.llvm.codegen.plan import PlannedGraph, Step
 from pytensor.link.llvm.codegen.signature import (
-    Output,
-    Passing,
+    known_layouts,
     node_outputs,
     node_signature,
-    skipped_inputs,
 )
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
@@ -66,7 +72,10 @@ from pytensor.link.llvm.dispatch.blockwise import (
     blockwise_core,
     blockwise_core_layouts,
 )
-from pytensor.link.llvm.kernels.rust import runtime, rust_kernel, rust_kernel_outputs
+from pytensor.link.llvm.kernels.rust import (
+    runtime,
+    rust_implementation,
+)
 from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
 from pytensor.tensor.basic import TensorFromScalar
@@ -129,7 +138,11 @@ class Values:
     def constants_of(self, readers, extra=()) -> dict:
         """{vid: (type, data)} of the constants `readers` (flat nodes or steps) read,
         and of the vids `extra`."""
-        vids = [k for reader in readers for k in reader.inputs] + list(extra)
+        vids = [
+            k
+            for reader in readers
+            for k in (reader.arguments if isinstance(reader, Step) else reader.inputs)
+        ] + list(extra)
         return {k: (self.types[k], self.consts[k]) for k in vids if k in self.consts}
 
 
@@ -373,35 +386,38 @@ class Planner:
         node = flat.node
         in_layouts = [self.layout(k, layouts) for k in flat.inputs]
         binding = self._binding(node, flat.outputs, in_layouts, layouts)
-        kernel = self._inside(node, in_layouts, binding)
-        signature = node_signature(
-            node,
-            frozenset(),
-            in_layouts,
-            outputs=None if kernel is None else kernel.outputs,
-        )
+        implementation = self._inside(node, in_layouts, binding)
+        signature = node_signature(node, in_layouts, implementation=implementation)
         check_conforms(node, signature.outputs, binding)
-        description = str(node.op) if kernel is None else kernel.description
+        description = (
+            str(node.op) if implementation is GENERATED else implementation.description
+        )
         return Step(
-            node, flat.inputs, flat.outputs, in_layouts, kernel, signature, description
+            node,
+            flat.inputs,
+            flat.outputs,
+            in_layouts,
+            implementation,
+            signature,
+            description,
         )
 
-    def _inside(self, node, in_layouts, binding) -> Kernel | None:
-        """The kernel that runs a node inside generated code, or None if its code is
-        generated (and inlined)."""
+    def _inside(self, node, in_layouts, binding) -> Implementation:
+        """How a node inside generated code runs: generated (and inlined) if possible,
+        else a call of its kernel."""
         if isinstance(node.op, Scan):
-            return None
+            return GENERATED
         if isinstance(node.op, Blockwise):
             # generated if its core graph can be planned (the emitter does it again,
             # from the cache)
             core_layouts = blockwise_core_layouts(node, in_layouts)
             try:
                 self.graph(*blockwise_core(node), core_layouts)
-                return None
+                return GENERATED
             except NotImplementedError:
                 return self._kernel(node, in_layouts, binding)
         if self._can_generate(node, in_layouts):
-            return None
+            return GENERATED
         return self._kernel(node, in_layouts, binding)
 
     def _program_step(self, flat, layouts) -> Step:
@@ -434,32 +450,36 @@ class Planner:
         nested = isinstance(node.op, Scan | Blockwise)
         writable = self._writable_inputs(flat, folded)
         if not folded and not nested and not writable:
-            kernel = self._rust(node, in_layouts, binding)
-            if kernel is not None:
-                return self._kernel_step(flat, kernel, layouts)
+            rust = self._rust(node, in_layouts, binding)
+            if rust is not None:
+                return self._kernel_step(flat, rust, layouts)
         try:
             return self._generated_step(flat, folded, in_layouts, layouts, writable)
         except NotImplementedError:
             # (a kernel doesn't overwrite its inputs: it can stand in for an in-place
             # node too)
             if nested or writable:
-                kernel = self._rust(node, in_layouts, binding)
-                if kernel is not None:
-                    return self._kernel_step(flat, kernel, layouts)
+                rust = self._rust(node, in_layouts, binding)
+                if rust is not None:
+                    return self._kernel_step(flat, rust, layouts)
             if not self.opts.numba_fallback:
                 raise
-        kernel = self._numba(node, binding)
-        # it overwrites the inputs its op destroys: that is what the graph asks for;
+        numba = self._numba(node, binding)
+        # it overwrites the inputs its op destroys: that is what the graph asks for,
         # where nothing else may see the memory (as in `_writable_inputs`). Else it gets
         # copies.
-        keep = frozenset(i for i in kernel.destroys if not self._may_destroy(flat, i))
-        return self._kernel_step(flat, replace(kernel, destroys=keep), layouts)
+        writable = frozenset(
+            i for i in numba.always_overwrites if self._may_destroy(flat, i)
+        )
+        return self._kernel_step(flat, numba, layouts, writable)
 
-    def _kernel_step(self, flat, kernel: Kernel, layouts) -> Step:
+    def _kernel_step(
+        self, flat, implementation: Implementation, layouts, writable=frozenset()
+    ) -> Step:
         """A step of the program run by a kernel (Rust, numba)."""
         in_layouts = [self.layout(k, layouts) for k in flat.inputs]
         signature = node_signature(
-            flat.node, input_layouts=in_layouts, outputs=kernel.outputs
+            flat.node, in_layouts, implementation=implementation, writable=writable
         )
         binding = self._binding(flat.node, flat.outputs, in_layouts, layouts)
         check_conforms(flat.node, signature.outputs, binding)
@@ -468,9 +488,9 @@ class Planner:
             flat.inputs,
             flat.outputs,
             in_layouts,
-            kernel,
+            implementation,
             signature,
-            kernel.description,
+            implementation.description,
         )
 
     def _generated_step(
@@ -484,18 +504,10 @@ class Planner:
         unit = KernelModule.new(
             f"node_{type(node.op).__name__}", self.opts.codegen, self.graph
         )
-        node_function = build_node_function(
-            unit,
-            node,
-            "node",
-            folded=folded,
-            input_layouts=in_layouts,
-            writable=writable,
-        )
+        signature = node_signature(node, in_layouts, folded=folded, writable=writable)
+        function = node_function(unit, "node", node, GENERATED, signature)
         if writable:
             self.stats.inplace.append(str(node.op))
-        skipped = skipped_inputs(node, folded)
-        args = [k for pos, k in enumerate(flat.inputs) if pos not in skipped]
         if _is_unit(node):
             self.stats.n_units += 1
             nodes = node.op.fgraph.toposort()
@@ -505,21 +517,24 @@ class Planner:
             desc = str(node.op) + _layouts_note(
                 [
                     representation
-                    for representation in node_function.signature.inputs
+                    for representation in signature.inputs
                     if isinstance(representation, TensorRepr)
                     and representation.ndim > 0
                 ]
             )
-        kernel = self._compiled(unit, node_function, desc)
+        kernel = self._compiled(unit, function, desc)
+        implementation = OwnModule(
+            kernel, tuple(GENERATED.outputs(node, known_layouts(node, in_layouts)))
+        )
         binding = self._binding(node, flat.outputs, in_layouts, layouts)
-        check_conforms(node, node_function.signature.outputs, binding)
+        check_conforms(node, signature.outputs, binding)
         return Step(
-            None,
-            args,
-            list(flat.outputs),
-            [self.layout(k, layouts) for k in args],
-            kernel,
-            node_function.signature,
+            node,
+            flat.inputs,
+            flat.outputs,
+            in_layouts,
+            implementation,
+            signature,
             desc,
         )
 
@@ -536,13 +551,7 @@ class Planner:
         """The kernel of `unit` (its function `kernel`, around `node_function`), to
         compile with the program (its address is set then)."""
         build_kernel_wrapper(unit, node_function)
-        kernel = Kernel(
-            0,
-            unit.links.address,
-            list(node_function.signature.outputs),
-            description,
-            unit.links.keepalive,
-        )
+        kernel = Kernel(0, unit.links.address, description, unit.links.keepalive)
         self.modules.append((unit.module, kernel))
         return kernel
 
@@ -583,19 +592,22 @@ class Planner:
 
     # ------------------------------------------------------------ kernels
 
-    def _rust(self, node, in_layouts, binding) -> Kernel | None:
+    def _rust(self, node, in_layouts, binding) -> RustKernel | None:
         """The node's Rust kernel, if it has one that gives its outputs the `binding`
         layouts."""
-        k = rust_kernel(node.op, node, in_layouts, self.opts.linalg_parallel)
-        if k is None:
+        implementation = rust_implementation(
+            node, in_layouts, self.opts.linalg_parallel
+        )
+        if implementation is None:
             return None
-        outputs = rust_kernel_outputs(k, node)
-        if not conforms(node, outputs, binding):
+        if not conforms(
+            node, node_outputs(node, in_layouts, (), implementation), binding
+        ):
             return None
         self.stats.n_rust_kernels += 1
-        return Kernel(k.address, k.config, outputs, repr(k), k)
+        return implementation
 
-    def _numba(self, node, binding) -> Kernel:
+    def _numba(self, node, binding) -> NumbaKernel:
         """The node's numba implementation as a kernel. It allocates its outputs, packed
         in the `binding` layouts (C-contiguous where they aren't packed: they must be
         implied by it)."""
@@ -619,25 +631,20 @@ class Planner:
         kernel = numba_kernel(node, None if not any(orders) else orders)
         self.stats.n_numba += 1
         self.stats.numba.append(str(node.op))
-        outs = [
-            Output.new_buffer(var, layout, Passing.CALLEE_SLOT)
-            for var, layout in zip(node.outputs, layouts, strict=True)
-        ]
         destroyed = getattr(node.op, "destroy_map", None) or {}
-        return Kernel(
-            runtime().numba_entry(),
-            kernel.address,
-            outs,
-            f"numba: {node.op}",
-            kernel,
-            frozenset(i for ins in destroyed.values() for i in ins),
+        return NumbaKernel(
+            Kernel(
+                runtime().numba_entry(), kernel.address, f"numba: {node.op}", kernel
+            ),
+            tuple(OutputDeclaration(layout, False) for layout in layouts),
+            destroys=frozenset(i for ins in destroyed.values() for i in ins),
         )
 
-    def _kernel(self, node, in_layouts, binding) -> Kernel:
+    def _kernel(self, node, in_layouts, binding) -> Implementation:
         """The kernel for a node we don't generate: Rust, else numba."""
-        kernel = self._rust(node, in_layouts, binding)
-        if kernel is not None:
-            return kernel
+        rust = self._rust(node, in_layouts, binding)
+        if rust is not None:
+            return rust
         if not self.opts.numba_fallback:
             raise NotImplementedError(f"No LLVM backend implementation for {node.op}")
         return self._numba(node, binding)

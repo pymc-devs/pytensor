@@ -415,12 +415,13 @@ def test_view_layout_is_checked_at_run_time():
 def test_kernels_choose_their_output_layouts():
     """Rust kernels are made for their inputs' layouts and choose their outputs':
     a sort follows its input's memory order, faer works column-major."""
-    from pytensor.link.llvm.codegen.signature import Passing
-    from pytensor.link.llvm.kernels.rust import rust_kernel, rust_kernel_outputs
+    from pytensor.link.llvm.codegen.signature import Passing, node_outputs
+    from pytensor.link.llvm.kernels.rust import rust_implementation
 
     def declared(out, in_layouts):
         node = out.owner
-        (o,) = rust_kernel_outputs(rust_kernel(node.op, node, in_layouts), node)
+        implementation = rust_implementation(node, in_layouts)
+        (o,) = node_outputs(node, in_layouts, implementation=implementation)
         return o
 
     x = pt.dmatrix("x")
