@@ -316,6 +316,16 @@ def test_cholesky_of_diag_not_applied():
     assert any(isinstance(node.op, Cholesky) for node in nodes)
 
 
+@pytest.mark.parametrize("shape", [(1, 1), (3, 1, 1)], ids=["matrix", "batched"])
+def test_cholesky_of_static_unit_matrix(shape):
+    x = pt.tensor("x", shape=shape)
+    result = RewriteTester(
+        [x], [cholesky(x)], include=("ShapeOpt", "canonicalize", "specialize")
+    )
+    result.assert_graph(pt.sqrt(x))
+    result.assert_eval(np.arange(1, np.prod(shape) + 1, dtype=x.dtype).reshape(shape))
+
+
 @pytest.mark.parametrize(
     "make_diag",
     [
@@ -931,6 +941,22 @@ def test_qz_of_diag(make_diag, return_eigenvalues):
     assert_equal_computations(rewritten, expected)
 
 
+def test_qz_of_diag_broadcast_batch():
+    a = pt.tensor("a", shape=(1, 1, 1))
+    b = pt.tensor("b", shape=(2, 1, 1))
+    outputs = qz(a, b)
+
+    result = RewriteTester([a, b], outputs, include=("ShapeOpt", "canonicalize"))
+
+    broadcast_a = pt.broadcast_to(a, b.type.shape)
+    identity = pt.broadcast_to(pt.constant([[1.0]], dtype=a.dtype), b.type.shape)
+    result.assert_graph(broadcast_a, b, identity, identity)
+    result.assert_eval(
+        np.full(a.type.shape, 2.0, dtype=a.dtype),
+        np.array([3.0, 4.0], dtype=b.dtype).reshape(b.type.shape),
+    )
+
+
 @pytest.mark.parametrize(
     "sort, return_eigenvalues",
     [
@@ -993,6 +1019,28 @@ def test_qz_of_diag_sort(sort, return_eigenvalues):
 
     np.testing.assert_allclose(Q_val @ AA_val @ Z_val.T, np.diag(a_val), atol=1e-12)
     np.testing.assert_allclose(Q_val @ BB_val @ Z_val.T, np.diag(b_val), atol=1e-12)
+
+
+def test_decomposition_of_batched_static_unit_matrix():
+    x = pt.tensor("x", shape=(3, 1, 1))
+    outs = [
+        *lu(x),
+        *lu(x, p_indices=True),
+        *lu_factor(x),
+        *qr(x, mode="raw", pivoting=True),
+        *schur(x),
+        *schur(x, sort="lhp"),
+        *qz(x, x**2),
+        *qz(x, x**2, sort="ouc"),
+    ]
+
+    result = RewriteTester(
+        [x], outs, include=("ShapeOpt", "canonicalize", "specialize")
+    )
+    assert not any(
+        isinstance(node.op, Blockwise) for node in result.rewr_fg.apply_nodes
+    )
+    result.assert_eval(np.array([-2.0, 0.5, 3.0], dtype=x.dtype).reshape(3, 1, 1))
 
 
 def test_eig_to_eigh():
