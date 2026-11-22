@@ -309,13 +309,14 @@ def test_empty_arrays():
 def test_alias_metadata_on_array_accesses():
     # inputs and written outputs get scopes and TBAA tags; the gather's inner row copy
     # then doesn't reload the index (and vectorizes)
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
     from pytensor.link.llvm.codegen.node import build_node_function
 
     x = pt.matrix("x")
     i = pt.vector("i", dtype="int32")
     node = x[i].owner
-    m = ir.Module("alias_test")
-    build_node_function(m, node, "gather")
-    text = m.ir()
+    unit = KernelModule.new("alias_test")
+    build_node_function(unit, node, "gather")
+    text = unit.module.ir()
     assert "!alias.scope" in text and "!noalias" in text and "!tbaa" in text
     assert "pt.alias_test.gather.i0" in text and "pt.alias_test.gather.o0" in text

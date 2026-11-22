@@ -11,6 +11,7 @@ from pytensor.graph.basic import Apply
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, Slot
 from pytensor.link.llvm.codegen.context import Codegen
+from pytensor.link.llvm.codegen.kernel_module import CodegenOptions, KernelModule
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
@@ -25,10 +26,9 @@ from pytensor.link.llvm.codegen.types import (
 
 
 def build_kernel_wrapper(
-    module: ir.Module,
+    unit: KernelModule,
     node_function: NodeFunction,
-    name: str,
-    check_layouts: bool = False,
+    name: str = "kernel",
 ) -> ir.Function:
     """`int32 name(PtCtx*, PtArray* args, int32 n_inputs, int32 n_outputs, const void*
     config)` around `node_function`: the kernel ABI.
@@ -36,10 +36,10 @@ def build_kernel_wrapper(
     The generated code knows its arguments from the signature, and doesn't look at
     their number, or at the `ndim` and `dtype` of the `PtArray`s.
 
-    `check_layouts`: verify what the caller promises and can be looked at: the number
-    of arguments, their `ndim` and `dtype`, and that the arrays passed have the layouts
-    the signature claims (for testing the planner and the layout inference; costs a few
-    compares per call)."""
+    With `check_layouts` in `unit`'s options it verifies what the caller promises and
+    can be looked at: the number of arguments, their `ndim` and `dtype`, and that the
+    arrays passed have the layouts the signature claims (for testing the planner and
+    the layout inference; costs a few compares per call)."""
     signature = node_function.signature
     # (outputs without a value have no argument)
     present = [output for output in signature.outputs if not output.is_absent]
@@ -54,7 +54,8 @@ def build_kernel_wrapper(
         if isinstance(representation, TensorRepr)
     ]
     ptarray = ptarray_type()
-    fn = module.function(name, kernel_params(), ir.i32, exported=True)
+    fn = unit.module.function(name, kernel_params(), ir.i32, exported=True)
+    check_layouts = unit.options.check_layouts
     b = fn.builder()
     ctx, args, n_inputs, n_outputs, config = fn.params
 
@@ -88,7 +89,7 @@ def build_kernel_wrapper(
         )
 
     if check_layouts:
-        cg = Codegen(b, ctx, config)
+        cg = Codegen(b, ctx, config, unit, name=name)
         cg.check(
             b.and_(
                 b.eq(n_inputs, b.i32(len(signature.inputs))),
@@ -214,10 +215,12 @@ def compile_node(
 ) -> CompiledNode:
     """Compile one node as a kernel (for tests and one-node units).
     `provided`: layouts of the memory the caller will provide (default: as declared)."""
-    module = ir.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
-    node_function = build_node_function(module, node, "node", provided=provided)
-    build_kernel_wrapper(module, node_function, "kernel")
-    compiled = module.compile(opt_level=opt_level)
+    unit = KernelModule.new(
+        f"node_{type(node.op).__name__}", CodegenOptions(fastmath=fastmath)
+    )
+    node_function = build_node_function(unit, node, "node", provided=provided)
+    build_kernel_wrapper(unit, node_function)
+    compiled = unit.module.compile(opt_level=opt_level)
     return CompiledNode(compiled, node_function.signature)
 
 

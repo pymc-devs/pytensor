@@ -29,7 +29,6 @@ The program's graph (`Planner.program`) and graphs inside generated code
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
 
 import numpy as np
 
@@ -44,14 +43,15 @@ from pytensor.link.llvm.analysis.layout import (
     layout_feature,
     shape_of,
 )
-from pytensor.link.llvm.codegen.call import Kernel, LinkTable
+from pytensor.link.llvm.codegen.call import Kernel
 from pytensor.link.llvm.codegen.interface import has_emitter
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
+from pytensor.link.llvm.codegen.kernel_module import KernelModule
 from pytensor.link.llvm.codegen.node import build_node_function
+from pytensor.link.llvm.codegen.plan import PlannedGraph, Step
 from pytensor.link.llvm.codegen.signature import (
     Output,
     Passing,
-    Signature,
     node_outputs,
     node_signature,
     skipped_inputs,
@@ -59,7 +59,6 @@ from pytensor.link.llvm.codegen.signature import (
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     TensorRepr,
-    ir,
     is_absent,
     repr_of,
 )
@@ -197,58 +196,6 @@ def fusable(op, node) -> bool:
 
 
 # ------------------------------------------------------------------ how nodes run
-
-
-@dataclass
-class Step:
-    """One thing a planned graph runs, in order, with everything decided about how."""
-
-    #: the node it runs; None for code compiled on its own, which it calls with
-    #: `inputs` (a node or a unit of the program)
-    node: Apply | None
-    #: the values (vids) it reads: one per input of the node, or per argument of the
-    #: code compiled on its own
-    inputs: list[int]
-    #: the values it writes, one per output
-    outputs: list[int]
-    #: the layouts of `inputs`
-    in_layouts: list[Layout | None]
-    #: the kernel it calls; None: its code is generated (and inlined)
-    kernel: Kernel | None
-    #: the signature of its function: representations of inputs and outputs
-    signature: Signature
-    #: what it runs, for dumps and profiles
-    description: str
-
-    @property
-    def arguments(self) -> list[int]:
-        """The values passed, one per input of the signature (inputs without data
-        aren't passed)."""
-        if self.node is None:
-            return self.inputs
-        return [
-            vid
-            for vid, var in zip(self.inputs, self.node.inputs, strict=True)
-            if not is_absent(var.type)
-        ]
-
-
-@dataclass
-class PlannedGraph:
-    """A graph with every decision made about how its nodes run (`Planner.graph`,
-    `Planner.program`): a Scan's loop body, a Blockwise's core, a unit's inner graph,
-    or the program.
-
-    Its steps are in the order they run, and refer to values by their vids."""
-
-    #: the values (vids) of the graph's inputs and outputs
-    in_ids: list[int]
-    out_ids: list[int]
-    steps: list[Step]
-    #: {vid: (type, data)} of the constants the steps read
-    constants: dict[int, tuple[TensorType | ScalarType, Any]]
-    #: the layouts of its values (vid -> Layout; constants: `Planner.layout`)
-    layouts: dict[int, Layout | None]
 
 
 class Planner:
@@ -534,21 +481,15 @@ class Planner:
         constant scalar inputs compiled into the code; `writable`: the inputs it may
         overwrite (`_writable_inputs`)."""
         node = flat.node
-        module = ir.Module(
-            f"node_{type(node.op).__name__}",
-            fastmath=self.opts.fastmath,
-            debug_info=self.opts.debug_info,
+        unit = KernelModule.new(
+            f"node_{type(node.op).__name__}", self.opts.codegen, self.graph
         )
         node_function = build_node_function(
-            module,
+            unit,
             node,
             "node",
             folded=folded,
             input_layouts=in_layouts,
-            parallel=self.opts.parallel,
-            check_layouts=self.opts.check_layouts,
-            links=LinkTable(),
-            planner=self,
             writable=writable,
         )
         if writable:
@@ -569,7 +510,7 @@ class Planner:
                     and representation.ndim > 0
                 ]
             )
-        kernel = self._compiled(module, node_function, desc)
+        kernel = self._compiled(unit, node_function, desc)
         binding = self._binding(node, flat.outputs, in_layouts, layouts)
         check_conforms(node, node_function.signature.outputs, binding)
         return Step(
@@ -591,19 +532,18 @@ class Planner:
         flat = FlatNode(node, [src], [dst])
         return self._generated_step(flat, {}, in_layouts, layouts)
 
-    def _compiled(self, module, node_function, description) -> Kernel:
-        """The kernel of the module `module` (its function `kernel`, around `nf`), to
+    def _compiled(self, unit, node_function, description) -> Kernel:
+        """The kernel of `unit` (its function `kernel`, around `node_function`), to
         compile with the program (its address is set then)."""
-        build_kernel_wrapper(module, node_function, "kernel", self.opts.check_layouts)
-        links = node_function.links
+        build_kernel_wrapper(unit, node_function)
         kernel = Kernel(
             0,
-            0 if links is None else links.address,
+            unit.links.address,
             list(node_function.signature.outputs),
             description,
-            None if links is None else links.keepalive,
+            unit.links.keepalive,
         )
-        self.modules.append((module, kernel))
+        self.modules.append((unit.module, kernel))
         return kernel
 
     # ------------------------------------------------------------ in place
@@ -709,11 +649,10 @@ class Planner:
             return False
         try:
             build_node_function(
-                ir.Module("probe"),
+                KernelModule.new("probe", replace(self.opts.codegen, parallel=False)),
                 node,
                 "probe",
                 input_layouts=in_layouts,
-                parallel=False,
             )
             return True
         except NotImplementedError:

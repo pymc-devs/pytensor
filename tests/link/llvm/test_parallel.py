@@ -80,14 +80,15 @@ def test_large_elemwise_and_reductions(static):
 
 
 def test_small_loops_have_no_region():
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
     from pytensor.link.llvm.codegen.node import build_node_function
 
     small = pt.tensor("s", shape=(10, 10))
     large = pt.tensor("l", shape=(1000, 1000))
     for var, expected in [(small, False), (large, True), (pt.dmatrix("d"), True)]:
-        m = ir.Module("t")
-        build_node_function(m, pt.exp(var).owner, "node")
-        assert ("ptl_rt_parallel_for" in m.ir()) is expected
+        unit = KernelModule.new("t")
+        build_node_function(unit, pt.exp(var).owner, "node")
+        assert ("ptl_rt_parallel_for" in unit.module.ir()) is expected
 
 
 def test_random_draws_dont_depend_on_parallelism():

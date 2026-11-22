@@ -50,9 +50,9 @@ from pytensor.link.llvm.codegen.types import (
 
 if TYPE_CHECKING:
     from pytensor.graph.type import Type
-    from pytensor.link.llvm.codegen.call import LinkTable
     from pytensor.link.llvm.codegen.destination import OutputDestination
-    from pytensor.link.llvm.planner import PlannedGraph, Planner, Step
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
+    from pytensor.link.llvm.codegen.plan import PlannedGraph, Step
     from pytensor.scalar.basic import ScalarType
     from pytensor.tensor.type import TensorType
 
@@ -207,18 +207,17 @@ class GraphFunction:
 
 
 def build_graph_function(
-    module: ir.Module,
+    unit: KernelModule,
     name: str,
     planned: PlannedGraph,
     in_types: Sequence[Type],
     in_layouts: Sequence[Layout | None],
     outputs: Sequence[Output],
-    links: LinkTable,
-    parallel: bool = True,
     profile: np.ndarray | None = None,
-    planner: Planner | None = None,
 ) -> NodeFunction:
-    """Build an LLVM function that runs the graph `planned` (the program's top level).
+    """Build an LLVM function in `unit` that runs the graph `planned` (the program's
+    top level). The kernels it calls and its array constants go into `unit`'s link
+    table, and inner graphs are planned with its `plan_graph`.
 
     The function has the same kind of signature as a node's function, but is not
     inlined: the program's kernel wrapper calls it.
@@ -227,11 +226,8 @@ def build_graph_function(
       layout the graph was prepared for;
     * `outputs`: one `Output` per graph output: memory the caller provides
       (`CALLER_BUFFER`), or new memory the function returns (`CALLEE_SLOT`);
-    * `links`: the function's link table; the kernels it calls and its array
-      constants are added to it;
     * `profile`: if given, an array of counters (`PROFILE_ITEMS + len(planned.steps)`
       uint64 values) that the code adds the time of each step to;
-    * `planner`: decides how the nodes of inner graphs run (a Scan's body, ...).
 
     The returned `NodeFunction` also says where the temporary values went (`arena`,
     `temporaries`) and where the array constants are in the link table
@@ -246,20 +242,11 @@ def build_graph_function(
         if not output.is_tensor or output.aliased_inputs:
             raise NotImplementedError(f"function outputs can't be {output}")
     signature = Signature(tuple(in_reprs), tuple(outputs))
-    fn = module.function(name, signature.param_types(), ir.i32, debug_name=name)
+    fn = unit.module.function(name, signature.param_types(), ir.i32, debug_name=name)
     b = fn.builder()
     params = iter(fn.params)
     ctx, config = next(params), next(params)
-    cg = Codegen(
-        b,
-        ctx,
-        config,
-        parallel=parallel,
-        links=links,
-        planner=planner,
-        module=module,
-        name=name,
-    )
+    cg = Codegen(b, ctx, config, unit, name=name)
     inputs: list[Array | ir.Value | None] = []
     for pos, representation in enumerate(in_reprs):
         a = Array.unpack(b, representation, next(params))
@@ -274,13 +261,13 @@ def build_graph_function(
     # (temporaries are freed before the function returns)
     with cg.scratch_scope(function=True):
         graph = GraphFunction.bind(cg, planned, name)
-        cells = None if profile is None else links.link_array(profile, share=False)
+        cells = None if profile is None else unit.links.link_array(profile, share=False)
         temporaries, arena = graph.emit_call(cg, inputs, outs, profile=cells)
     b.ret(0)
     return NodeFunction(
         fn,
         signature,
-        links,
+        unit.links,
         arena=arena,
         temporaries=temporaries,
         constants=graph.entries,
@@ -379,8 +366,6 @@ def _bind_constants(
                 store(b, scalar_type, value, slot)
                 values[vid] = Array.c(scalar_type, slot, [], [])
         else:
-            if cg.links is None:
-                raise NotImplementedError("array constants need a links")
             from pytensor.link.llvm.codegen.call import linked
 
             layout = Layout.of_const(data)
@@ -429,9 +414,7 @@ def _emit_steps(
     when they are no longer used (on failure, they are released here)."""
     from pytensor.link.llvm.codegen.call import build_call_function, linked
 
-    b, module = cg.b, cg.module
-    if module is None:
-        raise ValueError("emitting steps needs the module being built")
+    b = cg.b
     ctx, config = cg.ctx, cg.config
     memory_targets = memory_targets or {}
     slot_targets = slot_targets or {}
@@ -479,23 +462,20 @@ def _emit_steps(
         }
 
         if node is None:
-            if kernel is None or cg.links is None:
+            if kernel is None:
                 raise ValueError(f"{step.description}: no node and no kernel to call")
             node_function = build_call_function(
-                module, f"{name}_n{n}", signature, kernel, cg.links
+                cg.unit, f"{name}_n{n}", signature, kernel
             )
         else:
             node_function = build_node_function(
-                module,
+                cg.unit,
                 node,
                 f"{name}_n{n}",
                 scratch_outputs=frozenset(scratch),
                 input_layouts=step.in_layouts,
                 parallel=cg.parallel,
-                check_layouts=cg.check_layouts,
                 kernel=kernel,
-                links=cg.links,
-                planner=cg.planner,
             )
         args: list[ir.Value] = [ctx, config]
         for vid, representation in zip(step.arguments, signature.inputs, strict=True):

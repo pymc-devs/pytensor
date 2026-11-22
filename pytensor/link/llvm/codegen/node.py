@@ -47,7 +47,7 @@ from pytensor.link.llvm.codegen.types import (
 
 if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.call import Kernel, LinkTable
-    from pytensor.link.llvm.planner import Planner
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
 
 
 @dataclass
@@ -80,33 +80,27 @@ def _debug_name(node: Apply) -> str:
 
 
 def build_node_function(
-    module: ir.Module,
+    unit: KernelModule,
     node: Apply,
     name: str,
     scratch_outputs: Collection[int] = frozenset(),
     folded: Mapping[int, float] | None = None,
     input_layouts: Sequence[Layout | None] | None = None,
     provided: Sequence[Layout | None] | None = None,
-    parallel: bool = True,
+    parallel: bool | None = None,
     kernel: Kernel | None = None,
-    links: LinkTable | None = None,
-    planner: Planner | None = None,
     writable: Collection[int] = frozenset(),
-    check_layouts: bool = False,
 ) -> NodeFunction:
-    """Build the LLVM function of one node, always inlined.
+    """Build the LLVM function of one node in `unit`, always inlined.
 
     * `scratch_outputs`: positions of the outputs that are temporaries of a compiled
       unit: they go into the unit's scratch memory instead of runtime buffers;
     * `folded`: {input position: value} for 0-d constant inputs compiled into the code;
     * `input_layouts`, `provided`, `writable`: see `node_signature`;
+    * `parallel`: may its loops run in parallel? (None: as `unit`'s options say; the
+      code around it passes False inside a parallel loop);
     * `kernel`: a `Kernel` implementing the node (a Rust or numba kernel). The function
-      calls it (call.py) through an entry of `links`, the link table that is the
-      config of the kernel being generated. Code nested in the node (a Scan's loop
-      body, a Blockwise's core) links its kernels there too;
-    * `planner`: decides how the nodes of inner graphs run (a Scan's loop body, a
-      Blockwise's core: `Codegen.graph_function`);
-    * `check_layouts`: verify views' layouts at run time (`Codegen.check_layouts`).
+      calls it (call.py) through an entry of `unit`'s link table.
     """
     folded = folded or {}
     signature = node_signature(
@@ -117,7 +111,7 @@ def build_node_function(
         kernel.outputs if kernel is not None else None,
         writable,
     )
-    function = module.function(
+    function = unit.module.function(
         name,
         signature.param_types(),
         ir.i32,
@@ -127,17 +121,7 @@ def build_node_function(
     b = function.builder()
     params = iter(function.params)
     ctx, config = next(params), next(params)
-    cg = Codegen(
-        b,
-        ctx,
-        config,
-        parallel=parallel,
-        check_layouts=check_layouts,
-        links=links,
-        planner=planner,
-        module=module,
-        name=name,
-    )
+    cg = Codegen(b, ctx, config, unit, name=name, parallel=parallel)
     scopes = _AliasScopes(b, name, node, signature, folded, writable)
     inputs = _inputs(cg, node, signature, folded, writable, params, scopes)
     destinations = _destinations(cg, signature, scratch_outputs, params, scopes)
@@ -146,14 +130,12 @@ def build_node_function(
         if kernel is not None:
             from pytensor.link.llvm.codegen.call import call_destroying
 
-            if links is None:
-                raise ValueError("a node function calling a kernel needs a links")
             kernel_inputs = [
                 (array, None if is_absent(var.type) else element_type(var.type))
                 for array, var in zip(inputs, node.inputs, strict=True)
             ]
             call_destroying(
-                cg, kernel, links.link_kernel(kernel), kernel_inputs, destinations
+                cg, kernel, unit.links.link_kernel(kernel), kernel_inputs, destinations
             )
         else:
             handles = [
@@ -172,7 +154,7 @@ def build_node_function(
                             raise ValueError(f"{node.op}: output {k}: {e}") from None
     if not b.terminated:
         b.ret(0)
-    return NodeFunction(function, signature, links)
+    return NodeFunction(function, signature, unit.links)
 
 
 class _AliasScopes:

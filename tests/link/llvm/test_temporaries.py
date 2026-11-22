@@ -17,17 +17,18 @@ from pytensor.link.llvm.codegen.context import (  # noqa: E402
     STACK_TEMPORARY_BYTES,
     Codegen,
 )
+from pytensor.link.llvm.codegen.kernel_module import KernelModule  # noqa: E402
 
 
 STRICT = get_mode("LLVM").clone(link_kwargs={"numba_fallback": False})
 
 
 def codegen():
-    m = ir.Module("temporaries")
-    f = m.function("f", [ir.ptr, ir.ptr, ir.i64], ir.i32)
+    unit = KernelModule.new("temporaries")
+    f = unit.module.function("f", [ir.ptr, ir.ptr, ir.i64], ir.i32)
     b = f.builder()
     ctx, config, n = f.params
-    return m, b, Codegen(b, ctx, config), n
+    return unit.module, b, Codegen(b, ctx, config, unit), n
 
 
 def counts(m):

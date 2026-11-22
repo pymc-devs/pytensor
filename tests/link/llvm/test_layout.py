@@ -15,6 +15,10 @@ ir = pytest.importorskip("pytensor_llvm.ir")
 
 from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
+from pytensor.link.llvm.codegen.kernel_module import (  # noqa: E402
+    CodegenOptions,
+    KernelModule,
+)
 from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
 from pytensor.link.llvm.codegen.signature import node_outputs  # noqa: E402
 
@@ -182,10 +186,10 @@ def test_scan_body_gets_row_layouts():
 def test_layout_check_catches_a_wrong_claim():
     x = pt.dmatrix("x")
     node = pt.exp(x).owner
-    m = ir.Module("wrong_claim")
-    nf = build_node_function(m, node, "node", input_layouts=[C(2)])
-    build_kernel_wrapper(m, nf, "kernel", check_layouts=True)
-    c = m.compile()
+    unit = KernelModule.new("wrong_claim", CodegenOptions(check_layouts=True))
+    nf = build_node_function(unit, node, "node", input_layouts=[C(2)])
+    build_kernel_wrapper(unit, nf)
+    c = unit.module.compile()
     v = rng.normal(size=(3, 4))
     (r,) = ir.call_kernel(c.address("kernel"), [v], [(np.dtype("float64"), 2)])
     np.testing.assert_allclose(r, np.exp(v))
@@ -254,15 +258,11 @@ def test_compiled_graph_has_the_layouts_of_its_values():
 
 
 def _blocks(node, lays):
-    import pytensor_llvm.ir as pir
-
-    from pytensor.link.llvm.codegen.node import build_node_function
-
-    m = pir.Module("t")
-    build_node_function(m, node, "node", input_layouts=lays)
+    unit = KernelModule.new("t")
+    build_node_function(unit, node, "node", input_layouts=lays)
     labels = [
         ln.split(":")[0]
-        for ln in m.ir().splitlines()
+        for ln in unit.module.ir().splitlines()
         if ln and ln[0] not in " ;}" and ":" in ln
     ]
     # (loops, run-time choices between loop variants: if_else blocks; checks are if_)
@@ -400,12 +400,10 @@ def test_view_layout_is_checked_at_run_time():
     node = BadTranspose()(x).owner
     v = rng.normal(size=(3, 4))
     for check in (False, True):
-        m = ir.Module("bad")
-        nf = build_node_function(
-            m, node, "node", input_layouts=[C(2)], check_layouts=check
-        )
-        build_kernel_wrapper(m, nf, "kernel")
-        c = m.compile()
+        unit = KernelModule.new("bad", CodegenOptions(check_layouts=check))
+        nf = build_node_function(unit, node, "node", input_layouts=[C(2)])
+        build_kernel_wrapper(unit, nf)
+        c = unit.module.compile()
         outputs = [(np.dtype("float64"), 2)]
         if check:
             with pytest.raises(Exception, match="layout check: a view"):

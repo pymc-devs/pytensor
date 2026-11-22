@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         OutputDestination,
         SlotDestination,
     )
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
     from pytensor.link.llvm.codegen.node import NodeFunction
     from pytensor.link.llvm.codegen.signature import Output, Signature
 
@@ -287,17 +288,16 @@ def call_destroying(
 
 
 def build_call_function(
-    module: ir.Module,
+    unit: KernelModule,
     name: str,
     signature: Signature,
     kernel: Kernel,
-    links: LinkTable,
     index: int | None = None,
 ) -> NodeFunction:
     """A function (always inlined) with `signature` that calls `kernel`: how generated
     code runs a kernel that isn't a node's (a compiled unit, a separately compiled
     node), and nodes the planner gives a kernel. `index`: the kernel's entry
-    in `links` (default: linked here). Returns a `NodeFunction`."""
+    in `unit`'s link table (default: linked here). Returns a `NodeFunction`."""
     from pytensor.link.llvm.codegen.array import Array, Slot
     from pytensor.link.llvm.codegen.context import Codegen
     from pytensor.link.llvm.codegen.destination import (
@@ -307,7 +307,7 @@ def build_call_function(
     from pytensor.link.llvm.codegen.node import NodeFunction
     from pytensor.link.llvm.codegen.signature import Passing
 
-    fn = module.function(
+    fn = unit.module.function(
         name,
         signature.param_types(),
         ir.i32,
@@ -317,7 +317,7 @@ def build_call_function(
     b = fn.builder()
     params = iter(fn.params)
     ctx, config = next(params), next(params)
-    cg = Codegen(b, ctx, config, links=links, module=module, name=name)
+    cg = Codegen(b, ctx, config, unit, name=name)
     inputs = [
         Array.unpack(b, _tensor(representation), next(params))
         for representation in signature.inputs
@@ -341,13 +341,13 @@ def build_call_function(
                 )
             )
     if index is None:
-        index = links.link_kernel(kernel)
+        index = unit.links.link_kernel(kernel)
     with cg.scratch_scope(function=True):
         call_destroying(
             cg, kernel, index, [(a, a.scalar_type) for a in inputs], outputs
         )
     b.ret(0)
-    return NodeFunction(fn, signature, links)
+    return NodeFunction(fn, signature, unit.links)
 
 
 def _tensor(representation: Representation) -> TensorRepr:

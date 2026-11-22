@@ -18,12 +18,12 @@ from pytensor.graph.op import Op
 
 pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor_llvm import ir
 
 from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
 )
+from pytensor.link.llvm.codegen.kernel_module import KernelModule
 from pytensor.link.llvm.codegen.node import build_node_function
 from pytensor.link.llvm.codegen.num import load, store
 from pytensor.link.llvm.codegen.signature import (
@@ -240,7 +240,7 @@ def test_only_the_inputs_the_node_may_overwrite_are_writable():
         inputs[1].store(cg.b, 0.0, 0, 0)
 
     with pytest.raises(ValueError, match="storing into an input"):
-        build_node_function(ir.Module("m"), Two()(x, y).owner, "f", writable={0})
+        build_node_function(KernelModule.new("m"), Two()(x, y).owner, "f", writable={0})
     assert seen == [[True, False]]
 
 

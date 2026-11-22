@@ -622,12 +622,13 @@ layouts of its inputs, and what the layout fixes arrives in the emitter as a con
 element with a constant step. A packed stride is not even passed to the generated function:
 
 ```python
+from pytensor.link.llvm.codegen.kernel_module import KernelModule
 from pytensor.link.llvm.codegen.node import build_node_function
 
 node = cummax(x).owner
-any_strides = build_node_function(ir.Module("any"), node, "node")
+any_strides = build_node_function(KernelModule.new("any"), node, "node")
 contiguous = build_node_function(
-    ir.Module("c"), node, "node", input_layouts=[Layout.c(1)]
+    KernelModule.new("c"), node, "node", input_layouts=[Layout.c(1)]
 )
 
 assert any_strides.signature.inputs[0].stride_axes == (

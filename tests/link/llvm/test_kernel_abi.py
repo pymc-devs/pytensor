@@ -12,6 +12,10 @@ ir = pytest.importorskip("pytensor_llvm.ir")
 runtime = pytest.importorskip("pytensor_llvm.runtime")
 
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
+from pytensor.link.llvm.codegen.kernel_module import (  # noqa: E402
+    CodegenOptions,
+    KernelModule,
+)
 from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
 
 
@@ -79,10 +83,10 @@ def test_rust_kernels_reject_missing_or_other_memory():
 
 def test_generated_kernels_check_their_arguments_when_asked():
     x = pt.dmatrix("x")
-    module = ir.Module("argument_check")
-    nf = build_node_function(module, pt.exp(x).owner, "node")
-    build_kernel_wrapper(module, nf, "kernel", check_layouts=True)
-    kernel = module.compile().address("kernel")
+    unit = KernelModule.new("argument_check", CodegenOptions(check_layouts=True))
+    nf = build_node_function(unit, pt.exp(x).owner, "node")
+    build_kernel_wrapper(unit, nf)
+    kernel = unit.module.compile().address("kernel")
     values = np.ones((2, 3))
     (result,) = ir.call_kernel(kernel, [values], [(f64, 2)])
     np.testing.assert_allclose(result, np.exp(values))

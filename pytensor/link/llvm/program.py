@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.call import LinkTable
 from pytensor.link.llvm.codegen.graph import (
     PROFILE_CALLS,
     PROFILE_ITEMS,
@@ -34,9 +33,11 @@ from pytensor.link.llvm.codegen.graph import (
     build_graph_function,
 )
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
+from pytensor.link.llvm.codegen.kernel_module import CodegenOptions, KernelModule
+from pytensor.link.llvm.codegen.plan import PlannedGraph
 from pytensor.link.llvm.codegen.signature import Output, Passing
 from pytensor.link.llvm.codegen.types import TensorRepr, ir, is_absent, repr_of
-from pytensor.link.llvm.planner import PlannedGraph, Planner
+from pytensor.link.llvm.planner import Planner
 
 
 if TYPE_CHECKING:
@@ -72,6 +73,16 @@ class Options:
     #: Python code that emitted it, in a function named after its node (for remarks,
     #: perf, debuggers; also turned on by PYTENSOR_LLVM_DEBUG_INFO=1)
     debug_info: bool = False
+
+    @property
+    def codegen(self) -> CodegenOptions:
+        """The options of code generation."""
+        return CodegenOptions(
+            parallel=self.parallel,
+            check_layouts=self.check_layouts,
+            fastmath=self.fastmath,
+            debug_info=self.debug_info,
+        )
 
     def __post_init__(self):
         import os
@@ -477,7 +488,7 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
     out_ids = [planned.out_ids[pos] for pos in outs]
     modes = _output_modes(steps, out_ids, types)
     t0 = time.perf_counter()
-    module = ir.Module("program", fastmath=opts.fastmath, debug_info=opts.debug_info)
+    unit = KernelModule.new("program", opts.codegen, planner.graph)
     profile = np.zeros(PROFILE_ITEMS + len(steps), dtype=np.uint64)
     # (returned outputs are handed over in any layout)
     outputs = []
@@ -492,26 +503,23 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         in_ids, out_ids, steps, planned.constants, planned.layouts
     )
     node_function = build_graph_function(
-        module,
+        unit,
         "program",
         function_graph,
         [types[k] for k in in_ids],
         [planner.layout(k, planned.layouts) for k in in_ids],
         outputs,
-        parallel=opts.parallel,
-        links=LinkTable(),
         profile=profile,
-        planner=planner,
     )
-    build_kernel_wrapper(module, node_function, "kernel", opts.check_layouts)
+    build_kernel_wrapper(unit, node_function)
     t1 = time.perf_counter()
 
     # compile everything at once
     for m, kernel in planner.modules:
         m.label = "ptl:" + " ".join(kernel.description.split())[:160]  # perf maps
-    module.label = f"ptl:program[{len(steps)}]"
+    unit.module.label = f"ptl:program[{len(steps)}]"
     compiled = ir.compile_many(
-        [*(m for m, _ in planner.modules), module], opt_level=opts.opt_level
+        [*(m for m, _ in planner.modules), unit.module], opt_level=opts.opt_level
     )
     for (_, kernel), c in zip(planner.modules, compiled[:-1], strict=True):
         kernel.address = c.address("kernel")

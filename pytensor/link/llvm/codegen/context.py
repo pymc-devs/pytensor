@@ -20,7 +20,7 @@ from pytensor.scalar.basic import ScalarType
 if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.call import LinkTable
     from pytensor.link.llvm.codegen.graph import GraphFunction
-    from pytensor.link.llvm.planner import Planner
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
 
 
 #: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
@@ -49,34 +49,44 @@ class _ScratchScope(list[tuple[ir.Value, ir.Value, bool]]):
 
 @dataclass
 class Codegen:
-    """The state of generating one kernel's code: the builder and the kernel's
-    parameters (`ctx`, its `config` = link table), and what nested code needs (link
-    table, module, the planner of inner graphs)."""
+    """The state of generating one function's code: the builder, the kernel's
+    parameters (`ctx`, its `config` = link table) and the module the function is in
+    (`unit`: its options, its link table, how inner graphs are planned)."""
 
     b: ir.Builder
     ctx: ir.Value
     #: the kernel's config: its link table (call.py)
     config: ir.Value
+    unit: KernelModule
+    #: the name of the function being built (nested functions are named after it)
+    name: str = ""
     #: bytes of stack temporaries so far (`temp_memory`)
     stack_bytes: int = 0
-    #: may loops run in parallel (`Options.parallel`)?
-    parallel: bool = True
-    #: verify at run time that views have the layouts the planner relies on
-    #: (`Options.check_layouts`)
-    check_layouts: bool = False
-    #: the link table of the kernel being generated (call.py); None: it calls nothing
-    links: LinkTable | None = None
-    #: Decides how the nodes of an inner graph run (generated code or a kernel), for
-    #: `graph_function`. None: the code generated here can't run inner graphs.
-    planner: Planner | None = None
-    #: the module being built, and the name of the function being built in it (nested
-    #: functions are named after it)
-    module: ir.Module | None = None
-    name: str = ""
+    #: may loops run in parallel? None: as the options say. Off inside a parallel
+    #: loop (`for_range`): no nested parallel regions.
+    parallel: bool | None = None
     #: the scratch memory taken in the scopes being emitted, innermost last: what to
     #: free at the end of each (`scratch_scope`)
     scratch_scopes: list[_ScratchScope] = field(default_factory=list)
     _checks: int = field(default=0)
+
+    def __post_init__(self) -> None:
+        if self.parallel is None:
+            self.parallel = self.unit.options.parallel
+
+    @property
+    def check_layouts(self) -> bool:
+        """Verify at run time that views have the layouts the planner relies on."""
+        return self.unit.options.check_layouts
+
+    @property
+    def links(self) -> LinkTable:
+        """The link table of the module (call.py)."""
+        return self.unit.links
+
+    @property
+    def module(self) -> ir.Module:
+        return self.unit.module
 
     def fail(self, message: str | None) -> None:
         """Report `message` (unless a called kernel already did) and return 1."""
@@ -111,12 +121,12 @@ class Codegen:
         before a loop that runs the graph, not inside the loop. `name` is used to name
         the LLVM functions of its nodes.
 
-        Raises NotImplementedError if inner graphs can't be run here (no planner)."""
+        Raises NotImplementedError if inner graphs can't be run here (no `plan_graph`)."""
         from pytensor.link.llvm.codegen.graph import GraphFunction
 
-        if self.planner is None or self.links is None or self.module is None:
+        if self.unit.plan_graph is None:
             raise NotImplementedError("inner graphs here")
-        body = self.planner.graph(inputs, outputs, in_layouts)
+        body = self.unit.plan_graph(inputs, outputs, in_layouts)
         return GraphFunction.bind(self, body, f"{self.name}_{name}")
 
     def temp_memory(self, nbytes: ir.Value, escapes: bool = False) -> ir.Value:
