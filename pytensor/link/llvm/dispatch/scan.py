@@ -247,9 +247,11 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
         reads = [int(t) for t in reads]
         lookback = -min(min(reads, default=0), 0)
         is_mit_mot = k < info.n_mit_mot
-        # the outer buffer itself, if the Scan may destroy it and the planner lets it
-        buffer = out.buffer(init)
-        if not out.reuses(init):
+        if out.may_overwrite(init):
+            # the outer buffer itself
+            buffer = out.overwrite(init)
+        else:
+            buffer = out.allocate(list(init.shape))
             if is_mit_mot:
                 copy(cg, init, buffer)
             else:

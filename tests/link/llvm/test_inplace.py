@@ -1,6 +1,6 @@
 """Tasks that overwrite an input: what the op destroys (`destroy_map`), where the
 planner sees that nothing else reads the memory (the input is `writable`), and what the
-emitter does with it (`TensorOutput.buffer`, `buffer_holding`)."""
+emitter does with it (`TensorOutput.may_overwrite`, `overwrite`)."""
 
 import numpy as np
 import pytest
@@ -21,7 +21,7 @@ pytest.importorskip("pytensor_llvm.ir")
 from pytensor_llvm import ir
 
 from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
-from pytensor.link.llvm.codegen.emit import for_each, load, store
+from pytensor.link.llvm.codegen.emit import copy, for_each, load, store
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
 )
@@ -180,7 +180,13 @@ def _halve(cg, out):
 
 @llvm_emit.register(Halve)
 def _(op, node, codegen, inputs, outputs):
-    _halve(codegen, outputs[0].buffer_holding(inputs[0]))
+    x, out = inputs[0], outputs[0]
+    if out.may_overwrite(x):
+        result = out.overwrite(x)
+    else:
+        result = out.allocate(x.shape)
+        copy(codegen, x, result)
+    _halve(codegen, result)
 
 
 class HalveCopying(Halve):

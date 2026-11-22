@@ -189,7 +189,7 @@ def _(op, node, cg, inputs, outputs):
 
     def view():
         strides = c_strides(b, x.dtype, shape)
-        out.view(x.view(x.data, shape, strides, Layout.c(len(shape))))
+        out.set_view(x.view(x.data, shape, strides, Layout.c(len(shape))))
         return []
 
     def copied():
@@ -268,4 +268,4 @@ def _(op, node, codegen, inputs, outputs):
         dtype = var.type.dtype
         ok = value if dtype == "bool" else cast(builder, value, dtype, "bool")
         codegen.check(ok, op.msg or "Assertion failed")
-    outputs[0].view(inputs[0])
+    outputs[0].set_view(inputs[0])

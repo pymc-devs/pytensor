@@ -148,9 +148,9 @@ def _(op, node, codegen, inputs, outputs):
     builder = codegen.b
     flag, x, y = inputs
     with builder.if_(builder.ne(load(builder, flag.dtype, flag.data), 0)):
-        outputs[0].view(x)
+        outputs[0].set_view(x)
     with builder.else_():
-        outputs[0].view(y)
+        outputs[0].set_view(y)
 
 
 pick = Pick()
@@ -207,7 +207,7 @@ def test_an_emitter_only_returns_views_the_op_declares():
     def _(op, node, codegen, inputs, outputs):
         (x,) = inputs
         stride = codegen.b.mul(x.strides[0], 2)
-        outputs[0].view(x.view(x.data, [codegen.b.i64(2)], [stride]))
+        outputs[0].set_view(x.view(x.data, [codegen.b.i64(2)], [stride]))
 
     x = pt.vector("x", shape=(4,))
     v = np.arange(4.0)

@@ -78,12 +78,13 @@ def _(op, node, cg, inputs, outputs):
     shape = broadcast_shape(cg, node, inputs)
     # Every element is read before it is written, so an output can be the memory of
     # the input it updates.
-    outs = [
-        output.buffer(inputs[op.inplace_pattern[k]])
-        if k in op.inplace_pattern
-        else output.allocate(shape)
-        for k, output in enumerate(outputs)
-    ]
+    outs = []
+    for k, output in enumerate(outputs):
+        updated = inputs[op.inplace_pattern[k]] if k in op.inplace_pattern else None
+        if updated is not None and output.may_overwrite(updated):
+            outs.append(output.overwrite(updated))
+        else:
+            outs.append(output.allocate(shape))
     in_dtypes = [check_dtype(v.type.dtype) for v in node.inputs]
     out_dtypes = [check_dtype(v.type.dtype) for v in node.outputs]
     # inputs that are one element for the whole loop are read once, before it

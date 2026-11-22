@@ -12,9 +12,10 @@ inputs the output may be a view of, its `destroy_map` which input it may overwri
 `node_outputs` (signature.py) combines the three into the output's layout and how it is
 passed, and the emitter gets one handle per output that knows the result:
 
-* `TensorOutput` for a tensor: `allocate(shape)` for new memory, `view(array)` for a
-  view of an input the `view_map` lists, `buffer(input)` / `buffer_holding(input)` for
-  an output that may overwrite an input the `destroy_map` lists;
+* `TensorOutput` for a tensor: `allocate(shape)` for new memory, `set_view(array)` for
+  a view of an input the `view_map` lists, and for an input the `destroy_map` lists,
+  `may_overwrite(input)` to ask whether the result may go into its memory and
+  `overwrite(input)` to put it there;
 * `ScalarOutput` for a ScalarType value: `set(value)`;
 * None for a value without data (a random generator).
 
@@ -34,7 +35,7 @@ from functools import singledispatch
 from typing import TYPE_CHECKING
 
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.emit import Array, Codegen, check_strides, copy
+from pytensor.link.llvm.codegen.emit import Array, Codegen, check_strides
 from pytensor.link.llvm.codegen.types import ir, itemsize
 
 
@@ -60,7 +61,7 @@ def llvm_layout(op, node: Apply, input_layouts: list[Layout | None]) -> list:
 
     New memory is allocated in a packed layout; one that isn't packed means any strides,
     and the memory is allocated C-contiguous. A view's layout must be true of the view
-    the emitter builds: `TensorOutput.view` relies on it."""
+    the emitter builds: `TensorOutput.set_view` relies on it."""
     return [None] * len(node.outputs)
 
 
@@ -101,7 +102,7 @@ class TensorOutput:
         """Return new memory of `shape` for the result, in the output's layout."""
         return self.destination.allocate(shape)
 
-    def view(self, array: Array) -> Array:
+    def set_view(self, array: Array) -> Array:
         """Make `array`, a view of an input, the result.
 
         The view gets the output's layout: the one `llvm_layout` declares is trusted
@@ -109,7 +110,7 @@ class TensorOutput:
         generating if `array`'s own layout contradicts it."""
         if not self.view_inputs:
             raise ValueError(
-                "view() of an output that isn't a view: the op's view_map doesn't "
+                "set_view() of an output that isn't a view: the op's view_map doesn't "
                 "list it"
             )
         codegen = self.destination.codegen
@@ -126,26 +127,23 @@ class TensorOutput:
                 check_strides(codegen, array, self.layout, "a view")
         return self.destination.assign(array)
 
-    def reuses(self, input: Array) -> bool:
-        """Does the result go into `input`'s buffer? (The op destroys it for this
-        output, and the planner lets the node overwrite it.)"""
+    def may_overwrite(self, input: Array) -> bool:
+        """May the result go into `input`'s memory?
+
+        Yes if the op destroys that input for this output (`destroy_map`) and the
+        planner lets the node overwrite it. This is known while generating the code."""
         return input.writable and input.base in self.destroyed_inputs
 
-    def buffer(self, input: Array) -> Array:
-        """Return memory for the result: `input`'s buffer, still holding the input,
-        if the result may go there (`reuses`), else new uninitialized memory."""
-        if self.reuses(input):
-            return self.destination.assign(input)
-        return self.destination.allocate(input.shape)
+    def overwrite(self, input: Array) -> Array:
+        """Make `input`'s memory the result, and return it to be written into.
 
-    def buffer_holding(self, input: Array) -> Array:
-        """Return memory for the result that holds `input`'s values: `input`'s buffer
-        if the result may go there (`reuses`), else a copy of it."""
-        if self.reuses(input):
-            return self.destination.assign(input)
-        result = self.destination.allocate(input.shape)
-        copy(self.destination.codegen, input, result)
-        return result
+        Only where `may_overwrite(input)`."""
+        if not self.may_overwrite(input):
+            raise ValueError(
+                "overwrite() of an input the output may not overwrite (ask "
+                "may_overwrite first)"
+            )
+        return self.destination.assign(input)
 
 
 def _contradicts(actual: Layout, declared: Layout, shape, size: int) -> bool:

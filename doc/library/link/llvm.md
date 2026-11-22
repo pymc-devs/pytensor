@@ -310,9 +310,9 @@ only then, else copied.
 
 **What emitters do** (`codegen/interface.py`). An emitter gets an `Array` per tensor
 input, read-only unless the planner lets the node overwrite it (`writable`), and per
-output a `TensorOutput`: `allocate(shape)`, `view(array)` (for an output the
-`view_map` lists), `buffer(x)` / `buffer_holding(x)` (for one the `destroy_map` lists:
-`x` if it may be overwritten, else new memory / a copy). A ScalarType output gets a
+output a `TensorOutput`: `allocate(shape)`, `set_view(array)` (for an output the
+`view_map` lists), and for one the `destroy_map` lists `may_overwrite(x)` (decided by
+the planner, known while generating) and `overwrite(x)`. A ScalarType output gets a
 `ScalarOutput` (`set(value)`). Ops that run an inner graph (Scan, Blockwise, compiled units) hand each
 handle's `destination` on to it (`codegen/destination.py`: caller memory, an output
 slot, a scalar pointer, or their own, like a row of a Scan's buffer).
@@ -335,7 +335,7 @@ memory:
 * it shares no memory with the node's other inputs (PyTensor's `ViewFeature` says which
   graph variables a value's memory may lie in).
 
-The emitter then writes over them through `buffer`/`buffer_holding`: Elemwise (every
+The emitter asks `may_overwrite` and then writes over them: Elemwise (every
 element is read before it is written), IncSubtensor, AdvancedIncSubtensor and Scan (its
 state buffers) do; an emitter that calls `allocate` instead produces new memory, which
 is always correct. Nodes inside units, in inlined inner graphs, in Scan bodies and

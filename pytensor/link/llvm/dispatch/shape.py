@@ -41,12 +41,12 @@ def _(op, node, codegen, inputs, outputs):
         else:
             shape.append(source.shape[entry])
             strides.append(source.strides[entry])
-    outputs[0].view(source.view(source.data, shape, strides))
+    outputs[0].set_view(source.view(source.data, shape, strides))
 
 
 @llvm_emit.register(ViewOp)
 def _(op, node, codegen, inputs, outputs):
-    outputs[0].view(inputs[0])
+    outputs[0].set_view(inputs[0])
 
 
 @llvm_emit.register(SpecifyShape)
@@ -68,7 +68,7 @@ def _(op, node, codegen, inputs, outputs):
         length if static is None else builder.i64(static)
         for length, static in zip(source.shape, node.outputs[0].type.shape, strict=True)
     ]
-    outputs[0].view(source.view(source.data, shape, source.strides))
+    outputs[0].set_view(source.view(source.data, shape, source.strides))
 
 
 @llvm_emit.register(DeepCopyOp)

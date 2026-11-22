@@ -69,7 +69,7 @@ def _(op, node, codegen, inputs, outputs):
     (output,) = outputs
     diagonal = _diagonal(codegen, op, inputs[0])
     if op.view:
-        output.view(diagonal)
+        output.set_view(diagonal)
     else:
         copy(codegen, diagonal, output.allocate(diagonal.shape))
 
@@ -109,7 +109,7 @@ def _(op, node, codegen, inputs, outputs):
         start = builder.select(builder.sgt(length, 0), start, 0)
         byte_offset = builder.mul(start, source.strides[axis], nsw=True)
         data = builder.gep_bytes(source.data, byte_offset)
-        output.view(source.view(data, shape, list(source.strides)))
+        output.set_view(source.view(data, shape, list(source.strides)))
 
 
 @llvm_emit.register(Argmax)

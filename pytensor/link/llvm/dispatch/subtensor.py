@@ -7,6 +7,7 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     cast,
     checked_index,
+    copy,
     for_each,
     load,
     store,
@@ -92,15 +93,20 @@ def _(op, node, input_layouts):
 
 @llvm_emit.register(Subtensor)
 def _(op, node, codegen, inputs, outputs):
-    outputs[0].view(index(codegen, inputs[0], _entries(op, node, inputs, 1)))
+    outputs[0].set_view(index(codegen, inputs[0], _entries(op, node, inputs, 1)))
 
 
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
-    y = inputs[1]
-    out = outputs[0].buffer_holding(inputs[0])
-    view = index(cg, out, _entries(op, node, inputs, 2))
+    x, y = inputs[0], inputs[1]
+    out = outputs[0]
+    if out.may_overwrite(x):
+        result = out.overwrite(x)
+    else:
+        result = out.allocate(x.shape)
+        copy(cg, x, result)
+    view = index(cg, result, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type
     off = view.ndim - ytype.ndim
@@ -131,7 +137,7 @@ def _(op, node, cg, inputs, outputs):
         ystrides,
         view_layout(y, view.shape, ystrides, source),
     )
-    dt = out.dtype
+    dt = result.dtype
 
     def body(p):
         v = cast(b, load(b, y.dtype, p[1]), y.dtype, dt)

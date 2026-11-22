@@ -17,6 +17,7 @@ from pytensor.link.llvm.codegen.emit import (
     advance,
     cast,
     checked_index,
+    copy,
     for_each,
     index_bounds,
     load,
@@ -154,10 +155,15 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(AdvancedIncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
-    y = inputs[1]
-    out = outputs[0].buffer_holding(inputs[0])
-    pat = pattern(cg, out, node, inputs[2:], node.inputs[2:], op)
-    base_op, idx_ops = operands(cg, out, pat)
+    x, y = inputs[0], inputs[1]
+    out = outputs[0]
+    if out.may_overwrite(x):
+        result = out.overwrite(x)
+    else:
+        result = out.allocate(x.shape)
+        copy(cg, x, result)
+    pat = pattern(cg, result, node, inputs[2:], node.inputs[2:], op)
+    base_op, idx_ops = operands(cg, result, pat)
     # y broadcasts against the indexed view, aligned on the right; like numpy, a
     # length-1 axis broadcasts even when its type doesn't say so
     vs = pat.view_shape
@@ -186,10 +192,10 @@ def _(op, node, cg, inputs, outputs):
     source = [None] * off + list(range(yt.ndim))
     ys = Array(y.dtype, y.data, vs, yst, view_layout(y, vs, yst, source))
     k = len(idx_ops)
-    dt = out.dtype
+    dt = result.dtype
 
     def body(p):
-        dst = element(cg, out, pat, p[0], p[1 : 1 + k], "write")
+        dst = element(cg, result, pat, p[0], p[1 : 1 + k], "write")
         v = cast(b, load(b, y.dtype, p[-1]), y.dtype, dt)
         if not op.set_instead_of_inc:
             v = emit_scalar(ps.add, b, [(load(b, dt, dst), dt), (v, dt)], [dt])[0]
