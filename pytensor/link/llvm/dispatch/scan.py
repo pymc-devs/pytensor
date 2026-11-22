@@ -183,9 +183,9 @@ class _RowCounters:
     def advance(self, b, rows) -> list:
         """The rows of the next iteration."""
         next_rows = []
-        for r, n in zip(rows, self.moduli, strict=True):
-            r = b.add(r, 1)
-            next_rows.append(b.select(b.eq(r, n), b.i64(0), r))
+        for row, n in zip(rows, self.moduli, strict=True):
+            row = b.add(row, 1)
+            next_rows.append(b.select(b.eq(row, n), b.i64(0), row))
         return next_rows
 
 
@@ -334,7 +334,7 @@ class _StateRow(OutputDestination):
     that row (`_StateBuffer.write_in_place`), the value is written to memory aside
     instead, and copied into the row when the iteration is done (`finish`)."""
 
-    codegen: Codegen
+    cg: Codegen
     row: Array
     #: i1: may the value be written directly into the row?
     in_place: ir.Value
@@ -348,7 +348,7 @@ class _StateRow(OutputDestination):
         return self.row.dtype
 
     def allocate(self, shape: list) -> Array:
-        cg = self.codegen
+        cg = self.cg
         message = "Scan: a body output has another shape than its rows"
         _check_shape(cg, shape, self.row.shape, message)
         known = self.in_place.const_int
@@ -365,12 +365,12 @@ class _StateRow(OutputDestination):
             raise ValueError("an output was never set")
         if self.target is self.row:
             return
-        b = self.codegen.b
+        b = self.cg.b
         if self.in_place.const_int == 0:
-            copy(self.codegen, self.target, self.row)
+            copy(self.cg, self.target, self.row)
             return
         with b.if_(b.not_(self.in_place)):
-            copy(self.codegen, self.target, self.row)
+            copy(self.cg, self.target, self.row)
 
 
 @dataclass
@@ -381,7 +381,7 @@ class _NitSotRow(OutputDestination):
     first iteration allocates it, with rows of the shape of its output. The outputs of
     all later iterations must have the same shape."""
 
-    codegen: Codegen
+    cg: Codegen
     nit: _NitSotBuffer
     #: the iteration, and the row it writes to
     i: ir.Value
@@ -393,14 +393,14 @@ class _NitSotRow(OutputDestination):
         return self.nit.output.dtype
 
     def allocate(self, shape: list) -> Array:
-        b, nit = self.codegen.b, self.nit
+        b, nit = self.cg.b, self.nit
         buffer = nit.buffer
         if buffer is None:
             with b.if_(b.eq(self.i, 0)):
                 nit.output.allocate([nit.stored_rows, *shape])
             buffer = nit.output.read()
         _check_shape(
-            self.codegen,
+            self.cg,
             shape,
             buffer.shape[1:],
             "Scan: nit-sot body outputs have different shapes",
@@ -420,7 +420,7 @@ class _UntracedState(OutputDestination):
     The value goes into temporary memory. It replaces the state when the iteration is
     done (`finish`): until then the iteration may still read the current value."""
 
-    codegen: Codegen
+    cg: Codegen
     out: SlotDestination
     current: Array
     value: Array | None = None
@@ -430,13 +430,13 @@ class _UntracedState(OutputDestination):
         return self.out.dtype
 
     def allocate(self, shape: list) -> Array:
-        self.value = self.codegen.temporary(self.out.dtype, shape)
+        self.value = self.cg.temporary(self.out.dtype, shape)
         return self.value
 
     def finish(self) -> None:
         if self.value is None:
             raise ValueError("an output was never set")
-        _replace_untraced_state(self.codegen, self.out, self.current, self.value)
+        _replace_untraced_state(self.cg, self.out, self.current, self.value)
 
 
 def _replace_untraced_state(cg, out: SlotDestination, current: Array, src: Array):

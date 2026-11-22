@@ -17,17 +17,17 @@ def lifetimes(steps, kept) -> tuple[dict, dict]:
     long as anything that may be a view of it (or overwrote it in place); `kept` are
     needed after the last step (`len(steps)`)."""
     defined, end, aliases = {}, {}, {}
-    for i, r in enumerate(steps):
-        args = r.arguments
+    for i, step in enumerate(steps):
+        args = step.arguments
         for k in args:
             end[k] = i
-        for k, o in zip(r.outputs, r.signature.outputs, strict=True):
-            if o.is_absent:
+        for k, output in zip(step.outputs, step.signature.outputs, strict=True):
+            if output.is_absent:
                 continue
             defined[k] = i
             end.setdefault(k, i)
-            if o.aliased_inputs:
-                aliases[k] = [args[a] for a in r.signature.alias_arguments(o)]
+            if output.aliased_inputs:
+                aliases[k] = [args[a] for a in step.signature.alias_arguments(output)]
     for k in kept:
         end[k] = len(steps)
     # later values first, so chains of views propagate

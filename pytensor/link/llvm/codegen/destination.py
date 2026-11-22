@@ -41,7 +41,7 @@ class OutputDestination:
     value, sets it (`set`). `finish` is called once the producer is done.
     """
 
-    codegen: Codegen
+    cg: Codegen
     dtype: str
 
     def allocate(self, shape: list[ir.Value]) -> Array:
@@ -54,7 +54,7 @@ class OutputDestination:
         The array is kept as a view where this destination accepts one, and copied
         otherwise. Return the array the result now lives in."""
         result = self.allocate(array.shape)
-        copy(self.codegen, array, result)
+        copy(self.cg, array, result)
         return result
 
     def set(self, value: ir.Value) -> None:
@@ -78,7 +78,7 @@ class OutputDestination:
 class ProvidedDestination(OutputDestination):
     """Memory the caller provides, with the caller's strides."""
 
-    codegen: Codegen
+    cg: Codegen
     array: Array
 
     @property
@@ -90,7 +90,7 @@ class ProvidedDestination(OutputDestination):
 
         A length that differs is an error while generating if both are constants, and
         else checked at run time with the `check_layouts` option."""
-        codegen = self.codegen
+        cg = self.cg
         if len(shape) != self.array.ndim:
             raise ValueError(
                 f"allocate: {len(shape)} axes, but the provided memory has "
@@ -106,9 +106,9 @@ class ProvidedDestination(OutputDestination):
                         f"allocate: axis {axis} has length {wanted_length}, but the "
                         f"provided memory has {provided_length}"
                     )
-            elif codegen.check_layouts:
-                codegen.check(
-                    codegen.b.eq(wanted, provided),
+            elif cg.check_layouts:
+                cg.check(
+                    cg.b.eq(wanted, provided),
                     f"allocate: axis {axis} doesn't have the length of the provided "
                     "memory",
                 )
@@ -119,7 +119,7 @@ class ProvidedDestination(OutputDestination):
 class SlotDestination(OutputDestination):
     """An output slot the caller reads back: new memory, or a view of an input."""
 
-    codegen: Codegen
+    cg: Codegen
     slot: ir.Value
     dtype: str
     ndim: int
@@ -141,7 +141,7 @@ class SlotDestination(OutputDestination):
     @classmethod
     def for_output(
         cls,
-        codegen: Codegen,
+        cg: Codegen,
         slot: ir.Value,
         output,
         aliased_inputs: tuple[int, ...] = (),
@@ -155,7 +155,7 @@ class SlotDestination(OutputDestination):
         representation = output.representation
         packed = output.layout.fully_packed(representation.shape)
         return cls(
-            codegen,
+            cg,
             slot,
             representation.dtype,
             representation.ndim,
@@ -181,24 +181,22 @@ class SlotDestination(OutputDestination):
 
         A result that may be a view can still be new memory (a reshape of a
         non-contiguous array): the slot's owner tells the caller which it is."""
-        codegen, builder = self.codegen, self.codegen.b
+        cg, b = self.cg, self.cg.b
         if self.in_scratch_memory:
             # The unit reads it after this node's function returned, and frees it.
-            array = codegen.temporary(
+            array = cg.temporary(
                 self.dtype, shape, self.allocation_layout, escapes=True
             )
             self._write(array.data, array.shape, array.strides)
-            builder.store(array.data, self._field(Slot.OWNER))
+            b.store(array.data, self._field(Slot.OWNER))
         else:
-            nbytes = builder.mul(size(builder, shape), itemsize(self.dtype), nsw=True)
-            data = builder.rt_alloc(codegen.ctx, nbytes, self._field(Slot.OWNER))
-            codegen.check(builder.ne(data, builder.null()), None)
-            array = packed_array(
-                builder, self.dtype, data, shape, self.allocation_layout
-            )
+            nbytes = b.mul(size(b, shape), itemsize(self.dtype), nsw=True)
+            data = b.rt_alloc(cg.ctx, nbytes, self._field(Slot.OWNER))
+            cg.check(b.ne(data, b.null()), None)
+            array = packed_array(b, self.dtype, data, shape, self.allocation_layout)
             self._write(data, shape, array.strides)
         if self.alias_scopes is not None:
-            builder.mark_array(array.data, *self.alias_scopes)
+            b.mark_array(array.data, *self.alias_scopes)
         self.done = True
         return array
 
@@ -223,12 +221,10 @@ class SlotDestination(OutputDestination):
         def copied() -> None:
             OutputDestination.assign(self, array)
 
-        self.codegen.b.if_else(array.base_if, lambda: self.set_view(array), copied)
+        self.cg.b.if_else(array.base_if, lambda: self.set_view(array), copied)
         # (the view and the copy both have the required layout)
         layout = self.required_layout or Layout.dynamic(self.ndim)
-        return read_slot(
-            self.codegen.b, self.slot, self.dtype, array.static_shape(), layout
-        )
+        return read_slot(self.cg.b, self.slot, self.dtype, array.static_shape(), layout)
 
     def set_view(self, array: Array) -> None:
         """Put `array` into the slot as it is, for a caller that knows the result may
@@ -244,34 +240,32 @@ class SlotDestination(OutputDestination):
 
     def data(self) -> ir.Value:
         """Return the data pointer in the slot (null until set)."""
-        return self.codegen.b.load(ir.ptr, self._field(Slot.DATA))
+        return self.cg.b.load(ir.ptr, self._field(Slot.DATA))
 
     def owner(self) -> ir.Value:
         """Return the buffer reference in the slot (null for a view)."""
-        return self.codegen.b.load(ir.ptr, self._field(Slot.OWNER))
+        return self.cg.b.load(ir.ptr, self._field(Slot.OWNER))
 
     def read(self) -> Array:
         """Return the array in the slot (after `allocate`), in `allocation_layout`."""
         layout = self.allocation_layout or Layout.c(self.ndim)
-        return read_slot(
-            self.codegen.b, self.slot, self.dtype, [None] * self.ndim, layout
-        )
+        return read_slot(self.cg.b, self.slot, self.dtype, [None] * self.ndim, layout)
 
     def set_length(self, axis: int, length: ir.Value) -> None:
         """Shorten `axis` of the array in the slot to `length`, keeping its strides."""
-        builder = self.codegen.b
-        builder.store(length, builder.gep(ir.i64, self._field(Slot.LENGTHS), axis))
+        b = self.cg.b
+        b.store(length, b.gep(ir.i64, self._field(Slot.LENGTHS), axis))
 
     def _field(self, field: int) -> ir.Value:
-        return self.codegen.b.field_ptr(slot_type(self.ndim), self.slot, field)
+        return self.cg.b.field_ptr(slot_type(self.ndim), self.slot, field)
 
     def _write(self, data, shape, strides) -> None:
-        builder = self.codegen.b
-        builder.store(data, self._field(Slot.DATA))
+        b = self.cg.b
+        b.store(data, self._field(Slot.DATA))
         lengths, stride_fields = self._field(Slot.LENGTHS), self._field(Slot.STRIDES)
         for axis in range(self.ndim):
-            builder.store(shape[axis], builder.gep(ir.i64, lengths, axis))
-            builder.store(strides[axis], builder.gep(ir.i64, stride_fields, axis))
+            b.store(shape[axis], b.gep(ir.i64, lengths, axis))
+            b.store(strides[axis], b.gep(ir.i64, stride_fields, axis))
 
 
 @dataclass
@@ -279,29 +273,29 @@ class ScalarDestination(OutputDestination):
     """A ScalarType result, stored through a pointer: `set` it, or compute it into the
     0-d array `allocate([])` returns."""
 
-    codegen: Codegen
+    cg: Codegen
     pointer: ir.Value
     dtype: str
     array: Array | None = None
     done: bool = False
 
     def set(self, value: ir.Value) -> None:
-        self.codegen.b.store(value, self.pointer)
+        self.cg.b.store(value, self.pointer)
         self.done = True
 
     def allocate(self, shape: list[ir.Value]) -> Array:
         if shape:
             raise ValueError("a ScalarType output has no axes")
-        self.array = self.codegen.temporary(self.dtype, [])
+        self.array = self.cg.temporary(self.dtype, [])
         return self.array
 
     def assign(self, array: Array) -> Array:
-        self.set(load(self.codegen.b, self.dtype, array.data))
+        self.set(load(self.cg.b, self.dtype, array.data))
         return array
 
     def finish(self) -> None:
         if self.array is not None:
-            self.set(load(self.codegen.b, self.dtype, self.array.data))
+            self.set(load(self.cg.b, self.dtype, self.array.data))
         if not self.done:
             raise ValueError("an output was never set")
 

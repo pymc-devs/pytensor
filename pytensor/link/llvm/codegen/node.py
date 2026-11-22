@@ -117,11 +117,11 @@ def build_node_function(
         inline=ir.Inline.Always,
         debug_name=debug_name(node),
     )
-    builder = function.builder()
+    b = function.builder()
     params = iter(function.params)
     ctx, config = next(params), next(params)
-    codegen = Codegen(
-        builder,
+    cg = Codegen(
+        b,
         ctx,
         config,
         parallel=parallel,
@@ -131,11 +131,11 @@ def build_node_function(
         module=module,
         name=name,
     )
-    scopes = _AliasScopes(builder, name, node, signature, folded, writable)
-    inputs = _inputs(codegen, node, signature, folded, writable, params, scopes)
-    destinations = _destinations(codegen, signature, scratch_outputs, params, scopes)
+    scopes = _AliasScopes(b, name, node, signature, folded, writable)
+    inputs = _inputs(cg, node, signature, folded, writable, params, scopes)
+    destinations = _destinations(cg, signature, scratch_outputs, params, scopes)
     # (the op's scratch memory is freed before the function returns)
-    with codegen.scratch_scope(function=True):
+    with cg.scratch_scope(function=True):
         if kernel is not None:
             from pytensor.link.llvm.codegen.call import call_destroying
 
@@ -146,7 +146,7 @@ def build_node_function(
                 for array, var in zip(inputs, node.inputs, strict=True)
             ]
             call_destroying(
-                codegen, kernel, links.link_kernel(kernel), kernel_inputs, destinations
+                cg, kernel, links.link_kernel(kernel), kernel_inputs, destinations
             )
         else:
             handles = [
@@ -155,16 +155,16 @@ def build_node_function(
                     zip(destinations, signature.outputs, strict=True)
                 )
             ]
-            llvm_emit(node.op, node, codegen, inputs, handles)
-            if not builder.terminated:
+            llvm_emit(node.op, node, cg, inputs, handles)
+            if not b.terminated:
                 for k, destination in enumerate(destinations):
                     if destination is not None:
                         try:
                             destination.finish()
                         except ValueError as e:
                             raise ValueError(f"{node.op}: output {k}: {e}") from None
-    if not builder.terminated:
-        builder.ret(0)
+    if not b.terminated:
+        b.ret(0)
     return NodeFunction(function, signature, links)
 
 
@@ -173,9 +173,9 @@ class _AliasScopes:
     new memory, an input it may overwrite) overlaps no other array of the function;
     inputs that are only read may overlap each other."""
 
-    def __init__(self, builder, name, node, signature, folded, writable):
-        self.builder = builder
-        builder.alias_domain(name)
+    def __init__(self, b, name, node, signature, folded, writable):
+        self.b = b
+        b.alias_domain(name)
         arguments = _argument_positions(node, folded)
         tensors = [
             position
@@ -192,9 +192,9 @@ class _AliasScopes:
     def mark(self, data, scope: str) -> None:
         """Mark the memory at `data` as the array `scope`."""
         if scope in self.read_only:
-            self.builder.mark_array(data, scope, self.written)
+            self.b.mark_array(data, scope, self.written)
         else:
-            self.builder.mark_array(data, scope, self.others(scope))
+            self.b.mark_array(data, scope, self.others(scope))
 
     def others(self, scope: str) -> list[str]:
         return self.read_only + [w for w in self.written if w != scope]
@@ -206,9 +206,9 @@ def _argument_positions(node, folded) -> list[int]:
     return [k for k in range(len(node.inputs)) if k not in skipped]
 
 
-def _inputs(codegen, node, signature, folded, writable, params, scopes) -> list:
+def _inputs(cg, node, signature, folded, writable, params, scopes) -> list:
     """Return what the emitter gets for each input (interface.py)."""
-    builder = codegen.b
+    b = cg.b
     representations = iter(signature.inputs)
     inputs: list[EmitterInput] = []
     for position, var in enumerate(node.inputs):
@@ -216,19 +216,19 @@ def _inputs(codegen, node, signature, folded, writable, params, scopes) -> list:
         if is_absent(var.type):
             inputs.append(None)
         elif position in folded:
-            value = constant(builder, dtype, folded[position])
+            value = constant(b, dtype, folded[position])
             if isinstance(repr_of(var.type), ScalarRepr):
                 inputs.append(value)
             else:
-                memory = builder.alloca(memory_type(dtype))
-                store(builder, dtype, value, memory)
+                memory = b.alloca(memory_type(dtype))
+                store(b, dtype, value, memory)
                 inputs.append(c_array(dtype, memory, [], []))
         else:
             representation, param = next(representations), next(params)
             if isinstance(representation, ScalarRepr):
                 inputs.append(param)
                 continue
-            array = unpack(builder, representation, param)
+            array = unpack(b, representation, param)
             array.base, array.writable = position, position in writable
             scopes.mark(array.data, f"i{position}")
             inputs.append(array)
@@ -236,7 +236,7 @@ def _inputs(codegen, node, signature, folded, writable, params, scopes) -> list:
 
 
 def _destinations(
-    codegen, signature: Signature, scratch_outputs, params, scopes
+    cg, signature: Signature, scratch_outputs, params, scopes
 ) -> list[OutputDestination | None]:
     """Return where each output goes, from its parameter."""
     destinations: list[OutputDestination | None] = []
@@ -247,15 +247,15 @@ def _destinations(
         param = next(params)
         representation = output.representation
         if isinstance(representation, ScalarRepr):
-            destinations.append(ScalarDestination(codegen, param, representation.dtype))
+            destinations.append(ScalarDestination(cg, param, representation.dtype))
         elif output.passing is Passing.CALLER_BUFFER:
-            array = unpack(codegen.b, output.tensor, param)
+            array = unpack(cg.b, output.tensor, param)
             scopes.mark(array.data, f"o{j}")
-            destinations.append(ProvidedDestination(codegen, array))
+            destinations.append(ProvidedDestination(cg, array))
         else:
             destinations.append(
                 SlotDestination.for_output(
-                    codegen,
+                    cg,
                     param,
                     output,
                     aliased_inputs=output.aliased_inputs,

@@ -66,7 +66,7 @@ def llvm_layout(op, node: Apply, input_layouts: list[Layout | None]) -> list:
 
 
 @singledispatch
-def llvm_emit(op, node: Apply, codegen: Codegen, inputs: list, outputs: list) -> None:
+def llvm_emit(op, node: Apply, cg: Codegen, inputs: list, outputs: list) -> None:
     """Emit the code of `node` (see the module's docstring).
 
     Raise NotImplementedError for a node it can't handle: something else runs it
@@ -121,7 +121,7 @@ class TensorOutput:
                 "set_view() of an output that isn't a view: the op's view_map doesn't "
                 "list it"
             )
-        codegen = self.destination.codegen
+        cg = self.destination.cg
         shape = array.static_shape()
         size = itemsize(array.dtype)
         if not array.layout.implies(self.layout, shape, size):
@@ -131,8 +131,8 @@ class TensorOutput:
                     f"output is declared {self.layout.describe(shape)}"
                 )
             array = array.with_layout(self.layout)
-            if codegen.check_layouts:
-                check_strides(codegen, array, self.layout, "a view")
+            if cg.check_layouts:
+                check_strides(cg, array, self.layout, "a view")
         return self.destination.assign(array)
 
     def may_overwrite(self, input: Array) -> bool:

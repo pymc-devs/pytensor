@@ -350,13 +350,13 @@ def same_layout(node, x: Layout) -> Layout:
 def dimshuffle_layout(op, node, x: Layout) -> Layout:
     out_of = {}  # input axis -> output axis
     strides = []
-    for j, o in enumerate(op.new_order):
-        if o == "x":
+    for j, entry in enumerate(op.new_order):
+        if entry == "x":
             strides.append(PACKED)
         else:
-            out_of[int(o)] = j
-            strides.append(x.strides[int(o)])
-    order = [j for j, o in enumerate(op.new_order) if o == "x"] + [
+            out_of[int(entry)] = j
+            strides.append(x.strides[int(entry)])
+    order = [j for j, entry in enumerate(op.new_order) if entry == "x"] + [
         out_of[a] for a in x.order if a in out_of
     ]
     return Layout.make(shape_of(node.outputs[0]), order, strides)
@@ -410,8 +410,8 @@ def split_layouts(op, node, x: Layout) -> list[Layout]:
     shape, isz = shape_of(xv), itemsize_of(xv)
     a = int(op.axis) % x.ndim
     outs = []
-    for o in node.outputs:
-        os = shape_of(o)
+    for var in node.outputs:
+        os = shape_of(var)
         if os[a] is not None and os[a] == shape[a]:
             outs.append(Layout.make(os, x.order, x.strides))
         else:
@@ -428,10 +428,10 @@ def common_order(layouts, shape) -> list[int] | None:
     of `shape` that aren't statically 1, if one covers them all (else None)."""
     real = [a for a in range(len(shape)) if not _is_one(shape[a])]
     votes: dict[tuple[int, ...], int] = {}
-    for lay in layouts:
-        if lay is None or lay.ndim != len(shape):
+    for layout in layouts:
+        if layout is None or layout.ndim != len(shape):
             continue
-        block = tuple(a for a in lay.packed_block(shape) if a in real)
+        block = tuple(a for a in layout.packed_block(shape) if a in real)
         if block:
             votes[block] = votes.get(block, 0) + len(block)
     if not votes:
@@ -493,23 +493,27 @@ def graph_layouts(inputs, outputs, input_layouts=None, inlined=False) -> dict:
     from pytensor.graph.traversal import io_toposort
     from pytensor.link.llvm.codegen.signature import node_outputs
 
-    lays = {}
+    layouts = {}
     for k, v in enumerate(inputs):
-        lay = input_layouts[k] if input_layouts is not None else None
-        lays[v] = lay if lay is not None else _default_layout(v)
+        layout = input_layouts[k] if input_layouts is not None else None
+        layouts[v] = layout if layout is not None else _default_layout(v)
     for node in io_toposort(inputs, outputs):
-        ins = [lays[i] if i in lays else _default_layout(i) for i in node.inputs]
+        ins = [layouts[i] if i in layouts else _default_layout(i) for i in node.inputs]
         if inlined and isinstance(node.op, OpFromGraph):
             inner = node.op.fgraph
             inner_lays = graph_layouts(inner.inputs, inner.outputs, ins, inlined=True)
-            lays.update(zip(node.outputs, (inner_lays[o] for o in inner.outputs)))
+            layouts.update(
+                zip(node.outputs, (inner_lays[var] for var in inner.outputs))
+            )
             continue
         outs = node_outputs(node, ins)
-        lays.update((v, o.layout) for v, o in zip(node.outputs, outs, strict=True))
-    for o in outputs:
-        if o not in lays:
-            lays[o] = _default_layout(o)
-    return lays
+        layouts.update(
+            (v, var.layout) for v, var in zip(node.outputs, outs, strict=True)
+        )
+    for var in outputs:
+        if var not in layouts:
+            layouts[var] = _default_layout(var)
+    return layouts
 
 
 class LayoutFeature(Feature):
@@ -543,8 +547,8 @@ class LayoutFeature(Feature):
         self.cache.clear()
 
     def on_prune(self, fgraph, node, reason):
-        for o in node.outputs:
-            self.cache.pop(o, None)
+        for var in node.outputs:
+            self.cache.pop(var, None)
 
     def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         todo = list(node.outputs)
@@ -585,7 +589,9 @@ class LayoutFeature(Feature):
                 stack.extend(missing)
                 continue
             outs = node_outputs(node, [cache[i] for i in node.inputs])
-            cache.update((v, o.layout) for v, o in zip(node.outputs, outs, strict=True))
+            cache.update(
+                (v, output.layout) for v, output in zip(node.outputs, outs, strict=True)
+            )
             stack.pop()
         return cache[var]
 

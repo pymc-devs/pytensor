@@ -152,9 +152,9 @@ _register_loop()
 def llvm_work(op, node) -> Work:
     """The default: producing the outputs, one unit per element."""
     elements = ()
-    for o in node.outputs:
-        if hasattr(o.type, "shape"):
-            elements = lengths(o)
+    for var in node.outputs:
+        if hasattr(var.type, "shape"):
+            elements = lengths(var)
             break
     return Work(1.0, elements)
 

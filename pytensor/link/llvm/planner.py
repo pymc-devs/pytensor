@@ -129,7 +129,7 @@ class Values:
     def constants_of(self, readers, extra=()) -> dict:
         """{vid: (type, data)} of the constants `readers` (flat nodes or steps) read,
         and of the vids `extra`."""
-        vids = [k for r in readers for k in r.inputs] + list(extra)
+        vids = [k for reader in readers for k in reader.inputs] + list(extra)
         return {k: (self.types[k], self.consts[k]) for k in vids if k in self.consts}
 
 
@@ -153,7 +153,7 @@ def flatten(
         if isinstance(op, OpFromGraph) and execution is None and fusable(op, node):
             # a FusedElemwise we can generate as one loop: keep it as one node
             ins = [values.of(i, scope) for i in node.inputs]
-            outs = [values.new(o.type) for o in node.outputs]
+            outs = [values.new(var.type) for var in node.outputs]
             scope.update(zip(node.outputs, outs, strict=True))
             flat_nodes.append(FlatNode(node, ins, outs))
         elif isinstance(op, OpFromGraph) and (execution is None or inside_unit):
@@ -167,7 +167,7 @@ def flatten(
             _inlined_outputs(values, inner, node, sub, scope)
         else:
             ins = [values.of(i, scope) for i in node.inputs]
-            outs = [values.new(o.type) for o in node.outputs]
+            outs = [values.new(var.type) for var in node.outputs]
             scope.update(zip(node.outputs, outs, strict=True))
             flat_nodes.append(FlatNode(node, ins, outs, of_the_graph))
     return flat_nodes
@@ -319,12 +319,12 @@ class Planner:
         if self.allow_inplace:
             self.hidden = self.views.undeclared_view_roots(fgraph)
         flat_nodes = flatten(values, nodes, scope, of_the_graph=True)
-        out_ids = [values.of(o, scope) for o in fgraph.outputs]
+        out_ids = [values.of(var, scope) for var in fgraph.outputs]
         layouts: dict = {k: Layout.c(0) for k in boxed.values()}
         for v, k in scope.items():
-            lay = fgraph.llvm_layout(v)
-            if lay is not None and k not in values.consts:
-                layouts.setdefault(k, lay)
+            layout = fgraph.llvm_layout(v)
+            if layout is not None and k not in values.consts:
+                layouts.setdefault(k, layout)
         steps = self._decide(flat_nodes, layouts, top_level=True)
         constants = values.constants_of(steps, out_ids)
         return PlannedGraph(in_ids, out_ids, steps, constants, layouts)
@@ -354,7 +354,7 @@ class Planner:
         scope.update(zip(inputs, in_ids, strict=True))
         nodes = io_toposort(inputs, outputs)
         flat_nodes = flatten(values, nodes, scope, inside_unit=True)
-        out_ids = [values.of(o, scope) for o in outputs]
+        out_ids = [values.of(var, scope) for var in outputs]
         known = graph_layouts(inputs, outputs, in_layouts, inlined=True)
         layouts: dict = {}
         for v, k in scope.items():
@@ -383,9 +383,9 @@ class Planner:
         """The layouts the values `vids` must have: the outputs of a flat node running
         `node` with inputs in `in_layouts`. Those not in `layouts` yet are what
         `node_outputs` gives them, and are added to it."""
-        for k, o in zip(vids, node_outputs(node, in_layouts), strict=True):
-            if o.layout is not None:
-                layouts.setdefault(k, o.layout)
+        for k, output in zip(vids, node_outputs(node, in_layouts), strict=True):
+            if output.layout is not None:
+                layouts.setdefault(k, output.layout)
         return [self.layout(k, layouts) for k in vids]
 
     # ------------------------------------------------------------ deciding, per node
@@ -472,7 +472,9 @@ class Planner:
             for pos, (k, var) in enumerate(zip(flat.inputs, node.inputs, strict=True))
             if k in self.values.consts and isinstance(var.type, ScalarType)
         }
-        if any(isinstance(repr_of(o.type), ScalarRepr) for o in node.outputs) or any(
+        if any(
+            isinstance(repr_of(var.type), ScalarRepr) for var in node.outputs
+        ) or any(
             isinstance(repr_of(types[k]), ScalarRepr)
             for pos, k in enumerate(flat.inputs)
             if pos not in folded
@@ -508,18 +510,18 @@ class Planner:
     def _kernel_step(self, flat, kernel: Kernel, layouts) -> Step:
         """A step of the program run by a kernel (Rust, numba)."""
         in_layouts = [self.layout(k, layouts) for k in flat.inputs]
-        sig = node_signature(
+        signature = node_signature(
             flat.node, input_layouts=in_layouts, outputs=kernel.outputs
         )
         binding = self._binding(flat.node, flat.outputs, in_layouts, layouts)
-        check_conforms(flat.node, sig.outputs, binding)
+        check_conforms(flat.node, signature.outputs, binding)
         return Step(
             flat.node,
             flat.inputs,
             flat.outputs,
             in_layouts,
             kernel,
-            sig,
+            signature,
             kernel.description,
         )
 
@@ -536,7 +538,7 @@ class Planner:
             fastmath=self.opts.fastmath,
             debug_info=self.opts.debug_info,
         )
-        nf = build_node_function(
+        node_function = build_node_function(
             module,
             node,
             "node",
@@ -560,21 +562,22 @@ class Planner:
         else:
             desc = str(node.op) + _layouts_note(
                 [
-                    r
-                    for r in nf.signature.inputs
-                    if isinstance(r, TensorRepr) and r.ndim > 0
+                    representation
+                    for representation in node_function.signature.inputs
+                    if isinstance(representation, TensorRepr)
+                    and representation.ndim > 0
                 ]
             )
-        kernel = self._compiled(module, nf, desc)
+        kernel = self._compiled(module, node_function, desc)
         binding = self._binding(node, flat.outputs, in_layouts, layouts)
-        check_conforms(node, nf.signature.outputs, binding)
+        check_conforms(node, node_function.signature.outputs, binding)
         return Step(
             None,
             args,
             list(flat.outputs),
             [self.layout(k, layouts) for k in args],
             kernel,
-            nf.signature,
+            node_function.signature,
             desc,
         )
 
@@ -587,15 +590,15 @@ class Planner:
         flat = FlatNode(node, [src], [dst])
         return self._generated_step(flat, {}, in_layouts, layouts)
 
-    def _compiled(self, module, nf, description) -> Kernel:
+    def _compiled(self, module, node_function, description) -> Kernel:
         """The kernel of the module `module` (its function `kernel`, around `nf`), to
         compile with the program (its address is set then)."""
-        build_kernel_wrapper(module, nf, "kernel", self.opts.check_layouts)
-        links = nf.links
+        build_kernel_wrapper(module, node_function, "kernel", self.opts.check_layouts)
+        links = node_function.links
         kernel = Kernel(
             0,
             0 if links is None else links.address,
-            list(nf.signature.outputs),
+            list(node_function.signature.outputs),
             description,
             None if links is None else links.keepalive,
         )
@@ -663,12 +666,14 @@ class Planner:
                 f"LLVM backend: no implementation of the random variable {node.op}"
             )
         layouts = [
-            None if lay is None else _allocated_layout(node.op, o, lay)
-            for o, lay in zip(node.outputs, binding, strict=True)
+            None if layout is None else _allocated_layout(node.op, var, layout)
+            for var, layout in zip(node.outputs, binding, strict=True)
         ]
         orders = [
-            None if lay is None or lay.is_c(shape_of(o)) else tuple(lay.order)
-            for o, lay in zip(node.outputs, layouts, strict=True)
+            None
+            if layout is None or layout.is_c(shape_of(var))
+            else tuple(layout.order)
+            for var, layout in zip(node.outputs, layouts, strict=True)
         ]
         kernel = numba_kernel(node, None if not any(orders) else orders)
         self.stats.n_numba += 1
@@ -729,28 +734,33 @@ def _copy_node(t):
 def _layouts_note(reprs):
     """` {C, [?, P0]}`: the input layouts a generated step is specialized for."""
 
-    def unknown(r):
-        n = sum(1 for s in r.shape if s != 1)
-        return n > 0 and len(r.stride_axes) == n
+    def unknown(representation):
+        n = sum(1 for s in representation.shape if s != 1)
+        return n > 0 and len(representation.stride_axes) == n
 
-    if not reprs or all(unknown(r) for r in reprs):
+    if not reprs or all(unknown(representation) for representation in reprs):
         return ""
     return (
         " {"
-        + ", ".join("?" if unknown(r) else r.layout.describe(r.shape) for r in reprs)
+        + ", ".join(
+            "?"
+            if unknown(representation)
+            else representation.layout.describe(representation.shape)
+            for representation in reprs
+        )
         + "}"
     )
 
 
-def _allocated_layout(op, var, lay) -> Layout:
+def _allocated_layout(op, var, layout) -> Layout:
     """The layout a kernel allocates `var` in to give it the layout `lay`: `lay` if it
     is packed, else C-contiguous (which must imply it)."""
     shape, size = shape_of(var), itemsize_of(var)
-    if lay.fully_packed(shape):
-        return lay
-    if not Layout.c(var.type.ndim).implies(lay, shape, size):
+    if layout.fully_packed(shape):
+        return layout
+    if not Layout.c(var.type.ndim).implies(layout, shape, size):
         raise NotImplementedError(
-            f"{op}: new memory can't have the layout {lay.describe(shape)}"
+            f"{op}: new memory can't have the layout {layout.describe(shape)}"
         )
     return Layout.c(var.type.ndim)
 
@@ -759,8 +769,8 @@ def conforms(node, outputs, binding) -> bool:
     """Do the `outputs` (`Output`s) of something running `node` have layouts that
     imply the `binding` ones?"""
     return all(
-        lay is None or o.layout.implies(lay, shape_of(var), itemsize_of(var))
-        for var, o, lay in zip(node.outputs, outputs, binding, strict=True)
+        layout is None or output.layout.implies(layout, shape_of(var), itemsize_of(var))
+        for var, output, layout in zip(node.outputs, outputs, binding, strict=True)
     )
 
 
@@ -768,8 +778,10 @@ def check_conforms(node, outputs, binding):
     """`conforms`, or an error: what runs `node` was chosen to give its outputs the
     binding layouts."""
     if not conforms(node, outputs, binding):
-        actual = [None if o.layout is None else str(o.layout) for o in outputs]
-        wanted = [None if lay is None else str(lay) for lay in binding]
+        actual = [
+            None if output.layout is None else str(output.layout) for output in outputs
+        ]
+        wanted = [None if layout is None else str(layout) for layout in binding]
         raise AssertionError(
             f"{node.op}: outputs with layouts {actual}, not implying {wanted}"
         )

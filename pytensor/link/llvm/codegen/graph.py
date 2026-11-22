@@ -83,16 +83,16 @@ class GraphFunction:
         constants: dict = {}
         entries = bind_constants(cg, planned.constants, constants)
         produced_by = {
-            vid: o
-            for r in planned.steps
-            for vid, o in zip(r.outputs, r.signature.outputs, strict=True)
+            vid: output
+            for step in planned.steps
+            for vid, output in zip(step.outputs, step.signature.outputs, strict=True)
         }
         return cls(planned, name, constants, produced_by, entries)
 
     @property
     def nodes(self) -> list:
         """The nodes of the graph, in the order they run."""
-        return [r.node for r in self.planned.steps]
+        return [step.node for step in self.planned.steps]
 
     def emit_call(
         self, cg, inputs: list, outputs: list[OutputDestination | None], profile=None
@@ -132,10 +132,10 @@ class GraphFunction:
         the arena that holds those not on the stack ({vid: offset}, size in bytes)."""
         planned = self.planned
         b = cg.b
-        vals = dict(self.constants)
+        values = dict(self.constants)
         for vid, v in zip(planned.in_ids, inputs, strict=True):
-            if v is not None and vid not in vals:
-                vals[vid] = v
+            if v is not None and vid not in values:
+                values[vid] = v
 
         # Where results may be produced directly: memory a graph output provides
         # (vid -> Array), or a graph output's slot (vid -> its destination). A value
@@ -169,7 +169,7 @@ class GraphFunction:
             cg.module,
             name,
             planned.steps,
-            vals,
+            values,
             memory_targets,
             slot_targets,
             memory=memory,
@@ -183,7 +183,7 @@ class GraphFunction:
                 continue
             if vid in written and target_of[vid] == k:
                 continue  # produced directly in the output
-            value = vals[vid]
+            value = values[vid]
             if k in given:
                 copy(cg, value, given[k])
             elif isinstance(value, Array):
@@ -226,15 +226,17 @@ def build_graph_function(
     The returned `NodeFunction` also says where the temporary values went (`arena`,
     `temporaries`) and where the array constants are in the link table
     (`constants`)."""
-    in_reprs = [repr_of(t, lay) for t, lay in zip(in_types, in_layouts, strict=True)]
-    for r in [*in_reprs, *(o.representation for o in outputs)]:
-        if isinstance(r, ScalarRepr):
+    in_reprs = [
+        repr_of(t, layout) for t, layout in zip(in_types, in_layouts, strict=True)
+    ]
+    for representation in [*in_reprs, *(output.representation for output in outputs)]:
+        if isinstance(representation, ScalarRepr):
             raise NotImplementedError("ScalarType values can't cross the boundary")
-    for o in outputs:
-        if not o.is_tensor or o.aliased_inputs:
-            raise NotImplementedError(f"function outputs can't be {o}")
-    sig = Signature(tuple(in_reprs), tuple(outputs))
-    fn = module.function(name, sig.param_types(), ir.i32, debug_name=name)
+    for output in outputs:
+        if not output.is_tensor or output.aliased_inputs:
+            raise NotImplementedError(f"function outputs can't be {output}")
+    signature = Signature(tuple(in_reprs), tuple(outputs))
+    fn = module.function(name, signature.param_types(), ir.i32, debug_name=name)
     b = fn.builder()
     params = iter(fn.params)
     ctx, config = next(params), next(params)
@@ -249,15 +251,15 @@ def build_graph_function(
         name=name,
     )
     inputs = []
-    for pos, r in enumerate(in_reprs):
-        a = unpack(b, r, next(params))
+    for pos, representation in enumerate(in_reprs):
+        a = unpack(b, representation, next(params))
         a.base, a.writable = pos, False
         inputs.append(a)
     outs: list[OutputDestination | None] = [
-        ProvidedDestination(cg, unpack(b, o.representation, v))
-        if o.passing is Passing.CALLER_BUFFER
-        else SlotDestination.for_output(cg, v, o)
-        for o, v in zip(outputs, params, strict=True)
+        ProvidedDestination(cg, unpack(b, output.representation, v))
+        if output.passing is Passing.CALLER_BUFFER
+        else SlotDestination.for_output(cg, v, output)
+        for output, v in zip(outputs, params, strict=True)
     ]
     # (temporaries are freed before the function returns)
     with cg.scratch_scope(function=True):
@@ -267,7 +269,7 @@ def build_graph_function(
     b.ret(0)
     return NodeFunction(
         fn,
-        sig,
+        signature,
         links,
         arena=arena,
         temporaries=temporaries,
@@ -351,23 +353,23 @@ def release(cg, owned):
         )
 
 
-def bind_constants(cg, constants, vals) -> dict:
+def bind_constants(cg, constants, values) -> dict:
     """Values of `constants` ({vid: (type, ndarray)}): 0-d ones folded into the code,
     arrays from the links, in their memory order (`Layout.of_const`; equal ones share
     their memory). Returns {vid: link entry} of the arrays."""
     b = cg.b
     entries = {}
     for vid, (t, data) in constants.items():
-        r = repr_of(t)
+        representation = repr_of(t)
         data = np.asarray(data, dtype=t.dtype)
-        if isinstance(r, ScalarRepr) or data.ndim == 0:
+        if isinstance(representation, ScalarRepr) or data.ndim == 0:
             value = constant(b, t.dtype, data.item())
-            if isinstance(r, ScalarRepr):
-                vals[vid] = value
+            if isinstance(representation, ScalarRepr):
+                values[vid] = value
             else:
                 slot = b.alloca(_mem_type(t.dtype))
                 store(b, t.dtype, value, slot)
-                vals[vid] = c_array(t.dtype, slot, [], [])
+                values[vid] = c_array(t.dtype, slot, [], [])
         else:
             if cg.links is None:
                 raise NotImplementedError("array constants need a links")
@@ -378,7 +380,7 @@ def bind_constants(cg, constants, vals) -> dict:
             memory = np.ascontiguousarray(data.transpose(order))
             arr = memory.transpose(np.argsort(order))
             entries[vid] = cg.links.link_array(memory)
-            vals[vid] = Array(
+            values[vid] = Array(
                 t.dtype,
                 linked(cg, entries[vid]),
                 [b.i64(n) for n in arr.shape],
@@ -393,7 +395,7 @@ def emit_steps(
     module,
     name,
     steps,
-    vals,
+    values,
     memory_targets: dict | None = None,
     slot_targets: dict | None = None,
     memory=None,
@@ -468,11 +470,11 @@ def emit_steps(
         }
 
         if node is None:
-            nf = build_call_function(
+            node_function = build_call_function(
                 module, f"{name}_n{n}", signature, kernel, cg.links
             )
         else:
-            nf = build_node_function(
+            node_function = build_node_function(
                 module,
                 node,
                 f"{name}_n{n}",
@@ -486,11 +488,11 @@ def emit_steps(
             )
         args = [ctx, config]
         for vid, representation in zip(step.arguments, signature.inputs, strict=True):
-            if vid not in vals:
+            if vid not in values:
                 raise ValueError(
                     f"{name}: {step.description} reads a value that isn't computed yet"
                 )
-            value = vals[vid]
+            value = values[vid]
             if isinstance(representation, ScalarRepr):
                 args.append(value)
                 continue
@@ -528,7 +530,7 @@ def emit_steps(
                         )
                     else:
                         array = cg.temporary(tensor.dtype, list(tensor.shape), layout)
-                vals[vid] = array
+                values[vid] = array
                 args.append(pack(b, tensor, array))
             elif output.is_scalar:
                 pointer = b.alloca(output.representation.ir_type)
@@ -552,7 +554,7 @@ def emit_steps(
         if profile is not None:
             with b.if_(profiling):
                 b.store(b.rt_clock_ns(), start)
-        rc = b.call(nf.function, args)
+        rc = b.call(node_function.function, args)
         if profile is not None:
             with b.if_(profiling):
                 b.rt_counter_add(
@@ -566,16 +568,16 @@ def emit_steps(
             b.ret(rc)
 
         for vid, pointer, output in scalar_reads:
-            vals[vid] = b.load(output.representation.ir_type, pointer)
+            values[vid] = b.load(output.representation.ir_type, pointer)
         for read in slot_reads:
             tensor = read.output.tensor
             array = read_slot(
                 b, read.slot, tensor.dtype, list(tensor.shape), layouts.get(read.vid)
             )
-            vals[read.vid] = array
+            values[read.vid] = array
             if read.output.aliased_inputs:
                 sources = [
-                    vals[step.arguments[a]]
+                    values[step.arguments[a]]
                     for a in signature.alias_arguments(read.output)
                 ]
                 _maybe_view(b, array, sources, read.slot, tensor.ndim)

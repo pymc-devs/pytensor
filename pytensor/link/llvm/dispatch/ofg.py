@@ -25,9 +25,9 @@ def _(op, node, input_layouts):
 
 
 @llvm_emit.register(OpFromGraph)
-def _(op, node, codegen, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     """A compiled unit (an OpFromGraph with `execution=COMPILED`): its code runs its
     inner graph. (Other OpFromGraphs never get here: they are inlined.)"""
     layouts = [a.layout if isinstance(a, Array) else None for a in inputs]
-    graph = codegen.graph_function(op.fgraph.inputs, op.fgraph.outputs, layouts, "unit")
-    graph.emit_call(codegen, inputs, destinations(outputs))
+    graph = cg.graph_function(op.fgraph.inputs, op.fgraph.outputs, layouts, "unit")
+    graph.emit_call(cg, inputs, destinations(outputs))

@@ -392,7 +392,7 @@ def test_view_layout_is_checked_at_run_time():
         return [C(2)]
 
     @llvm_emit.register(BadTranspose)
-    def _(op, node, codegen, inputs, outputs):
+    def _(op, node, cg, inputs, outputs):
         x = inputs[0]
         outputs[0].set_view(x.view(x.data, x.shape[::-1], x.strides[::-1]))
 

@@ -44,14 +44,14 @@ def _single(fn):
 
     def wrapper(op, b, args, out_dtypes):
         (out,) = out_dtypes
-        r = fn(b, args, out)
-        if isinstance(r, Num):
-            if r.dtype != out:
+        result = fn(b, args, out)
+        if isinstance(result, Num):
+            if result.dtype != out:
                 raise AssertionError(
-                    f"scalar op {op}: emitted {r.dtype} for an output of {out}"
+                    f"scalar op {op}: emitted {result.dtype} for an output of {out}"
                 )
-            r = r.value
-        return [r]
+            result = result.value
+        return [result]
 
     return wrapper
 
@@ -327,12 +327,12 @@ def _(b, args, out):
     x = conv(b, args, 0, out)
     # a branch, not a select: where the loop isn't vectorized, only one pair of libm
     # calls runs (the vectorizer if-converts it)
-    (r,) = b.if_else(
+    (result,) = b.if_else(
         b.fcmp(ir.FCmp.OLT, x, constant(b, out, math.log(0.5))),
         lambda: b.libm(ir.Libm.Log1p, [b.fneg(b.libm(ir.Libm.Exp, [x]))]),
         lambda: b.libm(ir.Libm.Log, [b.fneg(b.libm(ir.Libm.Expm1, [x]))]),
     )
-    return r
+    return result
 
 
 # ------------------------------------------------------------------ comparisons & logic
@@ -408,13 +408,13 @@ def _(b, args, out):
 def emit_inner(b, fg, args):
     """Emit the scalar graph `fg` on `args` ((value, dtype) per input); return the
     (value, dtype) of each output."""
-    vals = {}
+    values = {}
     for i, (v, d) in zip(fg.inputs, args, strict=True):
-        vals[i] = (cast(b, v, d, i.type.dtype), i.type.dtype)
+        values[i] = (cast(b, v, d, i.type.dtype), i.type.dtype)
 
     def get(var):
-        if var in vals:
-            return vals[var]
+        if var in values:
+            return values[var]
         if isinstance(var, Constant):
             d = check_dtype(var.type.dtype)
             return constant(
@@ -427,11 +427,11 @@ def emit_inner(b, fg, args):
             node.op,
             b,
             [get(i) for i in node.inputs],
-            [o.type.dtype for o in node.outputs],
+            [var.type.dtype for var in node.outputs],
         )
-        for o, v in zip(node.outputs, outs, strict=True):
-            vals[o] = (v, o.type.dtype)
-    return [get(o) for o in fg.outputs]
+        for var, v in zip(node.outputs, outs, strict=True):
+            values[var] = (v, var.type.dtype)
+    return [get(var) for var in fg.outputs]
 
 
 @llvm_scalar.register(ps.Composite)

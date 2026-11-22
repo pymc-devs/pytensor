@@ -144,12 +144,12 @@ def _(op, node, input_layouts):
 
 
 @llvm_emit.register(Pick)
-def _(op, node, codegen, inputs, outputs):
-    builder = codegen.b
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
     flag, x, y = inputs
-    with builder.if_(builder.ne(load(builder, flag.dtype, flag.data), 0)):
+    with b.if_(b.ne(load(b, flag.dtype, flag.data), 0)):
         outputs[0].set_view(x)
-    with builder.else_():
+    with b.else_():
         outputs[0].set_view(y)
 
 
@@ -204,10 +204,10 @@ def test_an_emitter_only_returns_views_the_op_declares():
             output_storage[0][0] = inputs[0][::2]
 
     @llvm_emit.register(Passes)
-    def _(op, node, codegen, inputs, outputs):
+    def _(op, node, cg, inputs, outputs):
         (x,) = inputs
-        stride = codegen.b.mul(x.strides[0], 2)
-        outputs[0].set_view(x.view(x.data, [codegen.b.i64(2)], [stride]))
+        stride = cg.b.mul(x.strides[0], 2)
+        outputs[0].set_view(x.view(x.data, [cg.b.i64(2)], [stride]))
 
     x = pt.vector("x", shape=(4,))
     v = np.arange(4.0)

@@ -261,11 +261,11 @@ def _(op, node, input_layouts):
 
 
 @llvm_emit.register(CheckAndRaise)
-def _(op, node, codegen, inputs, outputs):
-    builder = codegen.b
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
     for condition, var in zip(inputs[1:], node.inputs[1:], strict=True):
-        value = _scalar(builder, condition)
+        value = _scalar(b, condition)
         dtype = var.type.dtype
-        ok = value if dtype == "bool" else cast(builder, value, dtype, "bool")
-        codegen.check(ok, op.msg or "Assertion failed")
+        ok = value if dtype == "bool" else cast(b, value, dtype, "bool")
+        cg.check(ok, op.msg or "Assertion failed")
     outputs[0].set_view(inputs[0])

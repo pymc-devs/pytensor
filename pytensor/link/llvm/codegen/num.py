@@ -169,10 +169,10 @@ class Num:
         is_zero = b.eq(y, 0)
         return b.select(is_zero, 1, y), is_zero
 
-    def _floor_differs(self, r, y):
+    def _floor_differs(self, remainder, y):
         """For the C remainder `r` of a division by `y`: does floor rounding differ?"""
         b = self.b
-        return b.and_(b.ne(r, 0), b.xor(b.slt(r, 0), b.slt(y, 0)))
+        return b.and_(b.ne(remainder, 0), b.xor(b.slt(remainder, 0), b.slt(y, 0)))
 
     def _divmod(self, other, what: str, want_quotient: bool, swap: bool = False) -> Num:
         b, x, y = self.b, self.value, self._raw(other, what)
@@ -189,14 +189,16 @@ class Num:
         # a divisor of -1 is handled apart: MIN / -1 overflows (numpy wraps to MIN)
         minus_one = b.eq(y, -1)
         y = b.select(minus_one, 1, y)
-        r = b.srem(x, y)
-        differs = self._floor_differs(r, y)
+        remainder = b.srem(x, y)
+        differs = self._floor_differs(remainder, y)
         if want_quotient:
             q = b.sdiv(x, y)
             q = b.select(differs, b.sub(q, 1), q)
             res = b.select(minus_one, b.neg(x), q)
         else:
-            res = b.select(differs, b.add(r, y), r)  # x % -1 == 0 comes out of y == 1
+            res = b.select(
+                differs, b.add(remainder, y), remainder
+            )  # x % -1 == 0 comes out of y == 1
         return self._new(b.select(is_zero, 0, res))
 
     def __floordiv__(self, other):

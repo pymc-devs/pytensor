@@ -215,9 +215,9 @@ def _output_modes(steps, out_ids, types) -> list:
     constant), else handed over in a buffer, so that nothing is copied that needn't
     be."""
     declared = {}
-    for r in steps:
-        for k, o in zip(r.outputs, r.signature.outputs, strict=True):
-            declared[k] = o.passing
+    for step in steps:
+        for k, output in zip(step.outputs, step.signature.outputs, strict=True):
+            declared[k] = output.passing
     modes = []
     for k in out_ids:
         static = repr_of(types[k]).static
@@ -238,7 +238,7 @@ class Program:
     def __init__(
         self,
         types,
-        nf,
+        node_function,
         compiled,
         profile,
         steps,
@@ -247,11 +247,11 @@ class Program:
         out_ids,
         modes,
     ):
-        self.descriptions = [r.description for r in steps]
-        self.arena_bytes = nf.arena[1]
+        self.descriptions = [step.description for step in steps]
+        self.arena_bytes = node_function.arena[1]
         self.profile_cells = profile
         self.address = compiled.address("kernel")
-        self.config = nf.links.address
+        self.config = node_function.links.address
 
         def shape(k):
             return [None if n is None else int(n) for n in types[k].shape]
@@ -267,9 +267,11 @@ class Program:
                 (np.dtype(types[k].dtype), shape(k), m is Passing.CALLER_BUFFER)
                 for k, m in zip(out_ids, modes, strict=True)
             ],
-            [compiled, nf.links.keepalive],
+            [compiled, node_function.links.keepalive],
         )
-        self._dump = _dump(types, nf, steps, in_ids, contiguous, out_ids, modes)
+        self._dump = _dump(
+            types, node_function, steps, in_ids, contiguous, out_ids, modes
+        )
 
     def __call__(self, *args):
         return self.function(*args)
@@ -334,28 +336,28 @@ class Program:
             f"{calls} calls, {total * 1e3:.3f} ms in steps ({per_call:.2f} us per call)",
             f"{'%':>7} {'total ms':>10} {'us/call':>10}  step",
         ]
-        for desc, _, t in sorted(rows, key=lambda r: -r[2]):
+        for desc, _, t in sorted(rows, key=lambda row: -row[2]):
             pct = 100 * t / total if total > 0 else 0.0
             per = t / calls * 1e6 if calls else 0.0
             lines.append(f"{pct:>6.1f}% {t * 1e3:>10.3f} {per:>10.2f}  {desc[:100]}")
         return "\n".join(lines) + "\n"
 
 
-def _dump(types, nf, steps, in_ids, contiguous, out_ids, modes) -> str:
+def _dump(types, node_function, steps, in_ids, contiguous, out_ids, modes) -> str:
     """`Program.dump`'s text."""
     ids = {}  # vid -> its number in the dump
-    for k in [*in_ids, *nf.constants]:
+    for k in [*in_ids, *node_function.constants]:
         ids.setdefault(k, len(ids))
-    for r in steps:
-        for k in [*r.arguments, *r.outputs]:
+    for step in steps:
+        for k in [*step.arguments, *step.outputs]:
             ids.setdefault(k, len(ids))
     for k in out_ids:
         ids.setdefault(k, len(ids))
-    offsets = nf.arena[0]
+    offsets = node_function.arena[0]
     produced = {}  # vid -> (step, its Output)
-    for r in steps:
-        for k, o in zip(r.outputs, r.signature.outputs, strict=True):
-            produced[k] = (r, o)
+    for step in steps:
+        for k, output in zip(step.outputs, step.signature.outputs, strict=True):
+            produced[k] = (step, output)
 
     def ty(k):
         shape = ", ".join("?" if n is None else str(n) for n in types[k].shape)
@@ -363,7 +365,7 @@ def _dump(types, nf, steps, in_ids, contiguous, out_ids, modes) -> str:
 
     lines = [
         f"program: {len(in_ids)} inputs, {len(out_ids)} outputs, {len(steps)} "
-        f"steps, arena {nf.arena[1]} bytes",
+        f"steps, arena {node_function.arena[1]} bytes",
         "values:",
     ]
     for k in sorted(ids, key=ids.get):
@@ -372,38 +374,39 @@ def _dump(types, nf, steps, in_ids, contiguous, out_ids, modes) -> str:
         if k in in_ids:
             pos = in_ids.index(k)
             kind = f"input {pos}" + (" (C-contiguous)" if contiguous[pos] else "")
-        elif k in nf.constants:
-            kind = f"constant at 0x{int(nf.links.entries[nf.constants[k]]):x}"
+        elif k in node_function.constants:
+            kind = f"constant at 0x{int(node_function.links.entries[node_function.constants[k]]):x}"
         elif k not in produced:
             kind = "constant (folded)"
         else:
-            r, o = produced[k]
-            if k in nf.temporaries:
+            step, output = produced[k]
+            if k in node_function.temporaries:
                 kind = f"arena +{offsets[k]}" if k in offsets else "on the stack"
-                order = list(o.layout.order) if o.layout is not None else []
-                packed = o.layout.fully_packed(o.representation.shape)
+                order = list(output.layout.order) if output.layout is not None else []
+                packed = output.layout.fully_packed(output.representation.shape)
                 if packed and order != sorted(order):
                     kind += f", order {order}"
-            elif o.passing is Passing.CALLER_BUFFER and k in out_ids:
+            elif output.passing is Passing.CALLER_BUFFER and k in out_ids:
                 kind = f"output {out_ids.index(k)}"
-            elif o.passing is Passing.CALLER_BUFFER:
+            elif output.passing is Passing.CALLER_BUFFER:
                 kind = "temporary"
-            elif o.aliased_inputs:
+            elif output.aliased_inputs:
                 kind = "returned by its step, may be (a view of) " + ", ".join(
-                    f"%{ids[r.arguments[a]]}" for a in r.signature.alias_arguments(o)
+                    f"%{ids[step.arguments[a]]}"
+                    for a in step.signature.alias_arguments(output)
                 )
             else:
                 kind = "allocated by its step"
         lines.append(f"  %{ids[k]:<4} {ty(k):<24} {kind}")
     lines.append("steps:")
-    for i, r in enumerate(steps):
-        ins = ", ".join(f"%{ids[k]}" for k in r.arguments)
+    for i, step in enumerate(steps):
+        ins = ", ".join(f"%{ids[k]}" for k in step.arguments)
         outs = ", ".join(
             f"%{ids[k]}"
-            for k, o in zip(r.outputs, r.signature.outputs, strict=True)
-            if not o.is_absent
+            for k, output in zip(step.outputs, step.signature.outputs, strict=True)
+            if not output.is_absent
         )
-        lines.append(f"  {i:<4} ({ins}) -> ({outs})  {r.description}")
+        lines.append(f"  {i:<4} ({ins}) -> ({outs})  {step.description}")
     outs = ", ".join(
         f"%{ids[k]} ({'provided' if m is Passing.CALLER_BUFFER else 'returned'})"
         for k, m in zip(out_ids, modes, strict=True)
@@ -444,16 +447,16 @@ def compile_program(fgraph, options: Options | None = None):
     ):
         return prog, fn, stats
     sources = {
-        pos: _generator_source(fgraph, o)
-        for pos, o in enumerate(fgraph.outputs)
+        pos: _generator_source(fgraph, var)
+        for pos, var in enumerate(fgraph.outputs)
         if pos not in outs
     }
 
     def call(*args):
         res = fn(*[args[k] for k in ins])
         full = [None] * len(fgraph.outputs)
-        for k, r in zip(outs, res, strict=True):
-            full[k] = r
+        for k, result in zip(outs, res, strict=True):
+            full[k] = result
         for pos, src in sources.items():
             full[pos] = None if src is None else args[src]
         return full
@@ -487,7 +490,7 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
     function_graph = PlannedGraph(
         in_ids, out_ids, steps, planned.constants, planned.layouts
     )
-    nf = build_graph_function(
+    node_function = build_graph_function(
         module,
         "program",
         function_graph,
@@ -499,7 +502,7 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         profile=profile,
         planner=planner,
     )
-    build_kernel_wrapper(module, nf, "kernel", opts.check_layouts)
+    build_kernel_wrapper(module, node_function, "kernel", opts.check_layouts)
     t1 = time.perf_counter()
 
     # compile everything at once
@@ -515,11 +518,19 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         stats.modules.append(GeneratedModule(kernel.description, c))
     stats.n_modules = len(planner.modules)
     stats.modules.append(GeneratedModule("program", compiled[-1]))
-    nf.links.relink()
+    node_function.links.relink()
     stats.codegen_s = t1 - t0
     stats.compile_s = time.perf_counter() - t1
     return Program(
-        types, nf, compiled[-1], profile, steps, in_ids, contiguous, out_ids, modes
+        types,
+        node_function,
+        compiled[-1],
+        profile,
+        steps,
+        in_ids,
+        contiguous,
+        out_ids,
+        modes,
     )
 
 

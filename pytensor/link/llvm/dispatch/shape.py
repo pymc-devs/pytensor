@@ -23,21 +23,21 @@ def _(op, node, input_layouts):
 
 
 @llvm_emit.register(DimShuffle)
-def _(op, node, codegen, inputs, outputs):
-    builder = codegen.b
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
     source = inputs[0]
     input_shape = node.inputs[0].type.shape
     for axis in op.drop:
         if input_shape[axis] is None:
-            codegen.check(
-                builder.eq(source.shape[axis], builder.i64(1)),
+            cg.check(
+                b.eq(source.shape[axis], b.i64(1)),
                 f"DimShuffle: cannot drop axis {axis} of length other than 1",
             )
     shape, strides = [], []
     for entry in op.new_order:
         if entry == "x":
-            shape.append(builder.i64(1))
-            strides.append(builder.i64(0))
+            shape.append(b.i64(1))
+            strides.append(b.i64(0))
         else:
             shape.append(source.shape[entry])
             strides.append(source.strides[entry])
@@ -45,43 +45,43 @@ def _(op, node, codegen, inputs, outputs):
 
 
 @llvm_emit.register(ViewOp)
-def _(op, node, codegen, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     outputs[0].set_view(inputs[0])
 
 
 @llvm_emit.register(SpecifyShape)
-def _(op, node, codegen, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     """Check the given lengths (None inputs: unconstrained axes), then a view."""
-    builder = codegen.b
+    b = cg.b
     source = inputs[0]
     for axis, (length, var) in enumerate(zip(inputs[1:], node.inputs[1:], strict=True)):
         if length is None:
             continue
-        value = length.load(builder).value if isinstance(length, Array) else length
-        expected = cast(builder, value, var.type.dtype, "int64")
-        codegen.check(
-            builder.eq(source.shape[axis], expected),
+        value = length.load(b).value if isinstance(length, Array) else length
+        expected = cast(b, value, var.type.dtype, "int64")
+        cg.check(
+            b.eq(source.shape[axis], expected),
             f"SpecifyShape: axis {axis} has the wrong length",
         )
     # The output's type may know lengths the input's doesn't.
     shape = [
-        length if static is None else builder.i64(static)
+        length if static is None else b.i64(static)
         for length, static in zip(source.shape, node.outputs[0].type.shape, strict=True)
     ]
     outputs[0].set_view(source.view(source.data, shape, source.strides))
 
 
 @llvm_emit.register(DeepCopyOp)
-def _(op, node, codegen, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     source = inputs[0]
-    copy(codegen, source, outputs[0].allocate(source.shape))
+    copy(cg, source, outputs[0].allocate(source.shape))
 
 
 @llvm_emit.register(ScalarFromTensor)
-def _(op, node, codegen, inputs, outputs):
-    outputs[0].set(inputs[0].load(codegen.b).value)
+def _(op, node, cg, inputs, outputs):
+    outputs[0].set(inputs[0].load(cg.b).value)
 
 
 @llvm_emit.register(TensorFromScalar)
-def _(op, node, codegen, inputs, outputs):
-    outputs[0].allocate([]).store(codegen.b, inputs[0])
+def _(op, node, cg, inputs, outputs):
+    outputs[0].allocate([]).store(cg.b, inputs[0])

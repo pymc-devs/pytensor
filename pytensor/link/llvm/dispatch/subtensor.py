@@ -92,8 +92,8 @@ def _(op, node, input_layouts):
 
 
 @llvm_emit.register(Subtensor)
-def _(op, node, codegen, inputs, outputs):
-    outputs[0].set_view(index(codegen, inputs[0], _entries(op, node, inputs, 1)))
+def _(op, node, cg, inputs, outputs):
+    outputs[0].set_view(index(cg, inputs[0], _entries(op, node, inputs, 1)))
 
 
 @llvm_emit.register(IncSubtensor)

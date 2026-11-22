@@ -113,16 +113,18 @@ def _core_shapes(op, node, inputs, batch_ndim):
     """Per output, the lengths of its core axes known before the loop (None: only the
     core op knows)."""
     named = {}
-    for x, sig in zip(inputs, op.inputs_sig, strict=True):
-        for name, n in zip(sig, x.shape[batch_ndim:], strict=True):
+    for x, core_signature in zip(inputs, op.inputs_sig, strict=True):
+        for name, n in zip(core_signature, x.shape[batch_ndim:], strict=True):
             if name not in named or (
                 named[name].const_int is None and n.const_int is not None
             ):
                 named[name] = n
     shapes = []
-    for var, sig in zip(node.outputs, op.outputs_sig, strict=True):
+    for var, core_signature in zip(node.outputs, op.outputs_sig, strict=True):
         shape = []
-        for name, static in zip(sig, var.type.shape[batch_ndim:], strict=True):
+        for name, static in zip(
+            core_signature, var.type.shape[batch_ndim:], strict=True
+        ):
             if static is not None:
                 shape.append(static)
             else:
@@ -178,7 +180,7 @@ class _BatchRow(OutputDestination):
     The whole output is allocated before the loop (`whole`) if its shape is known then.
     Otherwise only the core knows the shape, and the first iteration allocates it."""
 
-    codegen: Codegen
+    cg: Codegen
     k: int
     out: OutputDestination
     whole: Array | None
@@ -193,7 +195,7 @@ class _BatchRow(OutputDestination):
         return self.out.dtype
 
     def allocate(self, shape: list) -> Array:
-        b = self.codegen.b
+        b = self.cg.b
         whole = self.whole
         if whole is None:
             # (only an output slot has no shape before the core ran)
@@ -203,7 +205,7 @@ class _BatchRow(OutputDestination):
             whole = self.out.read()
         self.row = _at(b, whole, self.index)
         for m, length in zip(shape, self.row.shape, strict=True):
-            self.codegen.check(
+            self.cg.check(
                 b.eq(m, length),
                 f"Blockwise: core output {self.k} doesn't have the expected shape",
             )
@@ -240,14 +242,14 @@ def _(op, node, cg, inputs, outputs):
             f"Blockwise: the core shape of output {later[0]} isn't known for an empty batch",
         )
 
-    par = None
+    policy = None
     if not later:
         per_element, per_iteration = _iteration_work(cg, core, inputs, batch_ndim)
-        par = cg.par(per_element)
-        if par is not None and not par.worth_it(b.mul(n, per_iteration)):
-            par = None
+        policy = cg.parallel_policy(per_element)
+        if policy is not None and not policy.worth_it(b.mul(n, per_iteration)):
+            policy = None
     # (no nested parallel regions: inside a parallel loop the core runs serially)
-    inner = dataclasses.replace(cg, parallel=False) if par is not None else cg
+    inner = dataclasses.replace(cg, parallel=False) if policy is not None else cg
     broadcast = [var.type.broadcastable[:batch_ndim] for var in node.inputs]
 
     def step(i):
@@ -265,8 +267,8 @@ def _(op, node, cg, inputs, outputs):
             ]
             core.emit_call(inner, args, rows)
 
-    if par is not None:
-        par.range(b, n, per_iteration, step)
+    if policy is not None:
+        policy.range(b, n, per_iteration, step)
     else:
         with b.loop(n) as i:
             step(i)

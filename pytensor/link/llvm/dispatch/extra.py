@@ -42,36 +42,36 @@ def _(op, node, cg, inputs, outputs):
     level(x, out, op.axis % x.ndim)
 
 
-def _diagonal(codegen: Codegen, op: ExtractDiag, source: Array) -> Array:
+def _diagonal(cg: Codegen, op: ExtractDiag, source: Array) -> Array:
     """Return the diagonal of two axes of `source`, as the last axis of a view."""
-    builder = codegen.b
+    b = cg.b
     axis1, axis2 = op.axis1 % source.ndim, op.axis2 % source.ndim
     offset = int(op.offset)
     # length = max(0, min(n1 - max(0, -offset), n2 - max(0, offset)))
-    length1 = builder.sub(source.shape[axis1], max(0, -offset))
-    length2 = builder.sub(source.shape[axis2], max(0, offset))
-    length = builder.smax(builder.smin(length1, length2), 0)
+    length1 = b.sub(source.shape[axis1], max(0, -offset))
+    length2 = b.sub(source.shape[axis2], max(0, offset))
+    length = b.smax(b.smin(length1, length2), 0)
     if offset >= 0:
-        start = builder.mul(source.strides[axis2], offset, nsw=True)
+        start = b.mul(source.strides[axis2], offset, nsw=True)
     else:
-        start = builder.mul(source.strides[axis1], -offset, nsw=True)
-    start = builder.select(builder.sgt(length, 0), start, 0)
+        start = b.mul(source.strides[axis1], -offset, nsw=True)
+    start = b.select(b.sgt(length, 0), start, 0)
     kept = [a for a in range(source.ndim) if a not in (axis1, axis2)]
     shape = [source.shape[a] for a in kept] + [length]
     strides = [source.strides[a] for a in kept] + [
-        builder.add(source.strides[axis1], source.strides[axis2])
+        b.add(source.strides[axis1], source.strides[axis2])
     ]
-    return source.view(builder.gep_bytes(source.data, start), shape, strides)
+    return source.view(b.gep_bytes(source.data, start), shape, strides)
 
 
 @llvm_emit.register(ExtractDiag)
-def _(op, node, codegen, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     (output,) = outputs
-    diagonal = _diagonal(codegen, op, inputs[0])
+    diagonal = _diagonal(cg, op, inputs[0])
     if op.view:
         output.set_view(diagonal)
     else:
-        copy(codegen, diagonal, output.allocate(diagonal.shape))
+        copy(cg, diagonal, output.allocate(diagonal.shape))
 
 
 @llvm_layout.register(Split)
@@ -80,35 +80,35 @@ def _(op, node, input_layouts):
 
 
 @llvm_emit.register(Split)
-def _(op, node, codegen, inputs, outputs):
-    builder = codegen.b
+def _(op, node, cg, inputs, outputs):
+    b = cg.b
     source, splits = inputs
     axis = op.axis
-    offset = builder.i64(0)
+    offset = b.i64(0)
     parts = []
     for k, var in enumerate(node.outputs):
-        length = splits.load(builder, k).astype("int64").value
-        codegen.check(builder.sge(length, 0), "Split: negative split size")
+        length = splits.load(b, k).astype("int64").value
+        cg.check(b.sge(length, 0), "Split: negative split size")
         static = var.type.shape[axis]
         if static is not None:
-            codegen.check(
-                builder.eq(length, static),
+            cg.check(
+                b.eq(length, static),
                 "Split: split size differs from the static shape",
             )
-            length = builder.i64(static)
+            length = b.i64(static)
         parts.append((offset, length))
-        offset = builder.add(offset, length)
-    codegen.check(
-        builder.eq(offset, source.shape[axis]),
+        offset = b.add(offset, length)
+    cg.check(
+        b.eq(offset, source.shape[axis]),
         "Split: the split sizes don't add up to the length of the axis",
     )
     for output, (start, length) in zip(outputs, parts, strict=True):
         shape = list(source.shape)
         shape[axis] = length
         # an empty part may start at the end: keep the pointer inside the array
-        start = builder.select(builder.sgt(length, 0), start, 0)
-        byte_offset = builder.mul(start, source.strides[axis], nsw=True)
-        data = builder.gep_bytes(source.data, byte_offset)
+        start = b.select(b.sgt(length, 0), start, 0)
+        byte_offset = b.mul(start, source.strides[axis], nsw=True)
+        data = b.gep_bytes(source.data, byte_offset)
         output.set_view(source.view(data, shape, list(source.strides)))
 
 
@@ -188,7 +188,7 @@ def _(op, node, cg, inputs, outputs):
         return [b.add(n, b.zext(nonzero(v).value, ir.i64))]
 
     (n,) = walk(x, [b.i64(0)], [], count)
-    outs = [o.allocate([n]) for o in outputs]
+    outs = [output.allocate([n]) for output in outputs]
 
     def write(index, v, k):
         take = nonzero(v).value

@@ -179,14 +179,14 @@ def _halve(cg, out):
 
 
 @llvm_emit.register(Halve)
-def _(op, node, codegen, inputs, outputs):
+def _(op, node, cg, inputs, outputs):
     x, out = inputs[0], outputs[0]
     if out.may_overwrite(x):
         result = out.overwrite(x)
     else:
         result = out.allocate(x.shape)
-        copy(codegen, x, result)
-    _halve(codegen, result)
+        copy(cg, x, result)
+    _halve(cg, result)
 
 
 class HalveCopying(Halve):

@@ -34,10 +34,10 @@ def made_for(node, in_layouts) -> tuple[list, list[int]]:
     from pytensor.link.llvm.codegen.signature import known_layouts
 
     ins = [
-        None if lay is None else lay.to_spec()
-        for lay in known_layouts(node, in_layouts)
+        None if layout is None else layout.to_spec()
+        for layout in known_layouts(node, in_layouts)
     ]
-    return ins, [o.type.ndim for o in node.outputs]
+    return ins, [var.type.ndim for var in node.outputs]
 
 
 def fresh_mode(out):
@@ -87,7 +87,7 @@ def _(op, node, in_layouts=None, linalg_parallel=False):
 
 
 def fresh_modes(node):
-    return [fresh_mode(o) for o in node.outputs]
+    return [fresh_mode(var) for var in node.outputs]
 
 
 def _linalg_dtype(node, int_outputs=()):
@@ -96,8 +96,8 @@ def _linalg_dtype(node, int_outputs=()):
     dt = node.inputs[0].type.dtype
     if dt not in ("float64", "float32") or any(i.type.dtype != dt for i in node.inputs):
         return None
-    for k, o in enumerate(node.outputs):
-        if o.type.dtype != ("int32" if k in int_outputs else dt):
+    for k, var in enumerate(node.outputs):
+        if var.type.dtype != ("int32" if k in int_outputs else dt):
             return None
     return np.dtype(dt)
 

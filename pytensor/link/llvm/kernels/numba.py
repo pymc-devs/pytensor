@@ -43,21 +43,21 @@ _i64 = ir.IntType(64)
 _i64p = _i64.as_pointer()
 
 
-def _field(builder, base, arg_index, field, ty):
+def _field(b, base, arg_index, field, ty):
     off = arg_index * PTARRAY_SIZE + 8 * field
-    p = builder.gep(builder.bitcast(base, _i8p), [ir.Constant(_i64, off)])
-    return builder.load(builder.bitcast(p, ty.as_pointer()))
+    p = b.gep(b.bitcast(base, _i8p), [ir.Constant(_i64, off)])
+    return b.load(b.bitcast(p, ty.as_pointer()))
 
 
-def _make_array(context, builder, arrty, data, shape, strides):
-    ary = context.make_array(arrty)(context, builder)
+def _make_array(context, b, arrty, data, shape, strides):
+    ary = context.make_array(arrty)(context, b)
     itemsize = context.get_abi_sizeof(context.get_data_type(arrty.dtype))
     intp = context.get_value_type(types.intp)
     populate_array(
         ary,
-        data=builder.bitcast(data, ary.data.type),
-        shape=cgutils.pack_array(builder, shape, ty=intp),
-        strides=cgutils.pack_array(builder, strides, ty=intp),
+        data=b.bitcast(data, ary.data.type),
+        shape=cgutils.pack_array(b, shape, ty=intp),
+        strides=cgutils.pack_array(b, strides, ty=intp),
         itemsize=context.get_constant(types.intp, itemsize),
         meminfo=None,  # borrowed memory
     )
@@ -70,21 +70,15 @@ def array_input(index: int, ndim: int, dtype: np.dtype):
 
     @intrinsic
     def view(typingctx, args):
-        def codegen(context, builder, sig, llargs):
+        def codegen(context, b, sig, llargs):
             (base,) = llargs
-            data = _field(builder, base, index, 0, _i8p)
-            shp = _field(builder, base, index, 1, _i64)
-            strd = _field(builder, base, index, 2, _i64)
-            shp, strd = builder.inttoptr(shp, _i64p), builder.inttoptr(strd, _i64p)
-            shape = [
-                builder.load(builder.gep(shp, [ir.Constant(_i64, d)]))
-                for d in range(ndim)
-            ]
-            strides = [
-                builder.load(builder.gep(strd, [ir.Constant(_i64, d)]))
-                for d in range(ndim)
-            ]
-            return _make_array(context, builder, arrty, data, shape, strides)
+            data = _field(b, base, index, 0, _i8p)
+            shp = _field(b, base, index, 1, _i64)
+            strd = _field(b, base, index, 2, _i64)
+            shp, strd = b.inttoptr(shp, _i64p), b.inttoptr(strd, _i64p)
+            shape = [b.load(b.gep(shp, [ir.Constant(_i64, d)])) for d in range(ndim)]
+            strides = [b.load(b.gep(strd, [ir.Constant(_i64, d)])) for d in range(ndim)]
+            return _make_array(context, b, arrty, data, shape, strides)
 
         return arrty(args), codegen
 
@@ -97,12 +91,12 @@ def scalar_input(index: int, dtype: np.dtype):
 
     @intrinsic
     def load(typingctx, args):
-        def codegen(context, builder, sig, llargs):
+        def codegen(context, b, sig, llargs):
             (base,) = llargs
-            data = _field(builder, base, index, 0, _i8p)
+            data = _field(b, base, index, 0, _i8p)
             llty = context.get_data_type(nbty)
-            v = builder.load(builder.bitcast(data, llty.as_pointer()))
-            return context.data_model_manager[nbty].from_data(builder, v)
+            v = b.load(b.bitcast(data, llty.as_pointer()))
+            return context.data_model_manager[nbty].from_data(b, v)
 
         return nbty(args), codegen
 
@@ -123,12 +117,12 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype, order=None):
         if not isinstance(shape, types.BaseTuple) or len(shape) != ndim:
             return None
 
-        def codegen(context, builder, sig, llargs):
+        def codegen(context, b, sig, llargs):
             ctx_p, base, shape_v = llargs
             dims = [
                 context.cast(
-                    builder,
-                    builder.extract_value(shape_v, d),
+                    b,
+                    b.extract_value(shape_v, d),
                     sig.args[2][d],
                     types.int64,
                 )
@@ -136,39 +130,39 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype, order=None):
             ]
             n = ir.Constant(_i64, itemsize)
             for d in dims:
-                n = builder.mul(n, d)
+                n = b.mul(n, d)
             # rt = ctx->rt; data = rt->alloc(ctx, n, 64, &owner)
-            rt = builder.load(builder.bitcast(ctx_p, _i8p.as_pointer()))
+            rt = b.load(b.bitcast(ctx_p, _i8p.as_pointer()))
             fnty = ir.FunctionType(_i8p, [_i8p, _i64, _i64, _i8p.as_pointer()])
-            fptr_p = builder.gep(rt, [ir.Constant(_i64, RUNTIME_ALLOC_OFFSET)])
-            fptr = builder.load(builder.bitcast(fptr_p, fnty.as_pointer().as_pointer()))
-            owner = cgutils.alloca_once(builder, _i8p)
-            data = builder.call(
-                fptr, [builder.bitcast(ctx_p, _i8p), n, ir.Constant(_i64, 64), owner]
+            fptr_p = b.gep(rt, [ir.Constant(_i64, RUNTIME_ALLOC_OFFSET)])
+            fptr = b.load(b.bitcast(fptr_p, fnty.as_pointer().as_pointer()))
+            owner = cgutils.alloca_once(b, _i8p)
+            data = b.call(
+                fptr, [b.bitcast(ctx_p, _i8p), n, ir.Constant(_i64, 64), owner]
             )
             # fill the PtArray: data, owner, shape, strides
-            entry = builder.gep(
-                builder.bitcast(base, _i8p), [ir.Constant(_i64, index * PTARRAY_SIZE)]
+            entry = b.gep(
+                b.bitcast(base, _i8p), [ir.Constant(_i64, index * PTARRAY_SIZE)]
             )
 
             def slot(k, ty):
-                return builder.bitcast(
-                    builder.gep(entry, [ir.Constant(_i64, 8 * k)]), ty.as_pointer()
+                return b.bitcast(
+                    b.gep(entry, [ir.Constant(_i64, 8 * k)]), ty.as_pointer()
                 )
 
-            builder.store(data, slot(0, _i8p))
-            builder.store(builder.load(owner), slot(3, _i8p))
-            shp = builder.inttoptr(builder.load(slot(1, _i64)), _i64p)
-            strd = builder.inttoptr(builder.load(slot(2, _i64)), _i64p)
+            b.store(data, slot(0, _i8p))
+            b.store(b.load(owner), slot(3, _i8p))
+            shp = b.inttoptr(b.load(slot(1, _i64)), _i64p)
+            strd = b.inttoptr(b.load(slot(2, _i64)), _i64p)
             strides = [None] * ndim
             acc = ir.Constant(_i64, itemsize)
             for d in reversed(order):
                 strides[d] = acc
-                acc = builder.mul(acc, dims[d])
+                acc = b.mul(acc, dims[d])
             for d in range(ndim):
-                builder.store(dims[d], builder.gep(shp, [ir.Constant(_i64, d)]))
-                builder.store(strides[d], builder.gep(strd, [ir.Constant(_i64, d)]))
-            return _make_array(context, builder, arrty, data, dims, strides)
+                b.store(dims[d], b.gep(shp, [ir.Constant(_i64, d)]))
+                b.store(strides[d], b.gep(strd, [ir.Constant(_i64, d)]))
+            return _make_array(context, b, arrty, data, dims, strides)
 
         return arrty(ctx, args, shape), codegen
 
@@ -266,8 +260,8 @@ def numba_kernel(node, orders=None):
     kernel = compile_numba_function_src(
         src, "kernel", global_env=env, cache_key=cache_key
     )
-    sig = sigutils.normalize_signature(_SIG)
-    cfunc = _CFunc(kernel, sig, locals={}, options={"nopython": True})
+    signature = sigutils.normalize_signature(_SIG)
+    cfunc = _CFunc(kernel, signature, locals={}, options={"nopython": True})
     if cache_key is not None:
         cfunc.enable_caching()
     cfunc.compile()

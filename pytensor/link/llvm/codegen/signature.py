@@ -117,15 +117,21 @@ class Signature:
     argument_of_input: tuple[int | None, ...] | None = None
 
     def param_types(self) -> list:
-        input_types = [r.ir_type for r in self.inputs if not isinstance(r, NoneRepr)]
-        output_types = [o.ir_type for o in self.outputs if not o.is_absent]
+        input_types = [
+            representation.ir_type
+            for representation in self.inputs
+            if not isinstance(representation, NoneRepr)
+        ]
+        output_types = [
+            output.ir_type for output in self.outputs if not output.is_absent
+        ]
         return [ir.ptr, ir.ptr, *input_types, *output_types]
 
     @property
     def has_scalars(self) -> bool:
-        return any(isinstance(r, ScalarRepr) for r in self.inputs) or any(
-            o.is_scalar for o in self.outputs
-        )
+        return any(
+            isinstance(representation, ScalarRepr) for representation in self.inputs
+        ) or any(output.is_scalar for output in self.outputs)
 
     def alias_arguments(self, output: Output) -> tuple[int, ...]:
         """Return the argument positions of the inputs `output` may be a view of."""

@@ -137,8 +137,8 @@ def fused_spec(op, node):
                 n_elem + n_idx + written.index(int(s)),
                 mode == "set",
             )
-    for i, o in enumerate(node.outputs):
-        if o.type.dtype != E.outputs[i].type.dtype:
+    for i, var in enumerate(node.outputs):
+        if var.type.dtype != E.outputs[i].type.dtype:
             raise NotImplementedError(
                 "FusedElemwise: output dtype differs from the loop's"
             )
@@ -177,11 +177,11 @@ def emit_fused(op, node, cg, inputs, outputs):
         x = inputs[j]
         if not isinstance(x, Array):
             continue  # a scalar
-        r = reads[j]
+        read = reads[j]
         etype = E.inputs[j].type
         for a in range(nd):
-            if r is not None and a == r.axis:
-                lengths[a].append(inputs[r.index].shape[0])
+            if read is not None and a == read.axis:
+                lengths[a].append(inputs[read.index].shape[0])
             elif etype.shape[a] != 1:
                 lengths[a].append(x.shape[a])
     for i, spec in enumerate(outs):
@@ -284,13 +284,16 @@ def emit_fused(op, node, cg, inputs, outputs):
                 args.append((cast(b, fixed[j], x.dtype, d), d))
                 continue
             p = ptr_in[j]
-            r = reads[j]
-            if r is not None:
-                n = x.shape[r.axis]
+            read = reads[j]
+            if read is not None:
+                n = x.shape[read.axis]
                 ix = checked(
-                    index_value(r.index, loop_index[r.axis]), n, "read", r.index
+                    index_value(read.index, loop_index[read.axis]),
+                    n,
+                    "read",
+                    read.index,
                 )
-                p = advance(b, p, ix, x.strides[r.axis], x.dtype)
+                p = advance(b, p, ix, x.strides[read.axis], x.dtype)
             args.append((load(b, x.dtype, p), d))
         res = emit_scalar(E.op.scalar_op, b, args, out_dtypes)
         new_accs = {}
@@ -359,7 +362,7 @@ def emit_fused(op, node, cg, inputs, outputs):
     in_keys = sorted(plain_in)
     out_keys = sorted(plain_out)
     arrays = [plain_in[j] for j in in_keys] + [plain_out[i] for i in out_keys]
-    any_indexed = any(r is not None for r in reads) or any(
+    any_indexed = any(read is not None for read in reads) or any(
         isinstance(s, Write) for s in outs
     )
 
@@ -418,7 +421,7 @@ def emit_fused(op, node, cg, inputs, outputs):
             def increment(k, *runs):
                 i = b.add(start, k, nsw=True)
                 new = []
-                for r, j in enumerate(inner_inc):
+                for position, j in enumerate(inner_inc):
                     spec, d = outs[j], out_dtypes[j]
                     ix = checked(
                         index_value(spec.index, i),
@@ -427,7 +430,9 @@ def emit_fused(op, node, cg, inputs, outputs):
                         spec.index,
                     )
                     v = load(b, d, b.gep(memory_type(d), bufs[j], k))
-                    new += inc_run(j, d, po[j], ix, v, *runs[2 * r : 2 * r + 2])
+                    new += inc_run(
+                        j, d, po[j], ix, v, *runs[2 * position : 2 * position + 2]
+                    )
                 return new
 
             return [*accs, *b.fold(m, list(carried[nr:]), increment)]

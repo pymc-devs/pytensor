@@ -200,9 +200,9 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
         else:
             n = None
             for var, x in zip(params_vars, params, strict=True):
-                pa = a - (nd - var.type.ndim)
-                if pa >= 0 and var.type.shape[pa] != 1:
-                    n = x.shape[pa]
+                param_axis = a - (nd - var.type.ndim)
+                if param_axis >= 0 and var.type.shape[param_axis] != 1:
+                    n = x.shape[param_axis]
                     break
             shape.append(n if n is not None else b.i64(1))
     if not is_absent(size_var.type):
@@ -217,16 +217,16 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
         strides = []
         off = nd - var.type.ndim
         for a in range(nd):
-            pa = a - off
-            if pa < 0 or var.type.shape[pa] == 1:
+            param_axis = a - off
+            if param_axis < 0 or var.type.shape[param_axis] == 1:
                 strides.append(b.i64(0))
             else:
-                if x.shape[pa].const_int is None or shape[a].const_int is None:
+                if x.shape[param_axis].const_int is None or shape[a].const_int is None:
                     cg.check(
-                        b.eq(x.shape[pa], shape[a]),
+                        b.eq(x.shape[param_axis], shape[a]),
                         f"{op}: parameter {k} has a different length on axis {a}",
                     )
-                strides.append(x.strides[pa])
+                strides.append(x.strides[param_axis])
         same_ndim = var.type.ndim == nd and all(s != 1 for s in var.type.shape)
         views.append(
             Array(
@@ -264,17 +264,17 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
         arrays.append(base)
 
     def body(ptrs):
-        vals = []
+        values = []
         for k, (dt, x) in enumerate(zip(spec.param_dtypes, views, strict=True)):
             v = cast(b, load(b, x.dtype, ptrs[k]), x.dtype, dt)
             check = spec.checks[k]
             if check is not None:
                 cg.check(_ok(b, check, v), f"{op}: {check[2]}")
-            vals.append(v)
+            values.append(v)
         if spec.check is not None:
-            cg.check(b.slt(vals[0], vals[1]), f"{op}: {spec.check[1]}")
+            cg.check(b.slt(values[0], values[1]), f"{op}: {spec.check[1]}")
         z = load(b, "float64", ptrs[len(views) + 1]) if base is not None else None
-        v = spec.draw(b, cg, z, vals)
+        v = spec.draw(b, cg, z, values)
         src = "int64" if v.type == ir.i64 else "float64"
         store(b, out.dtype, cast(b, v, src, out.dtype), ptrs[len(views)])
 

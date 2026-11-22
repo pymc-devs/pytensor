@@ -255,38 +255,42 @@ def size(b, shape):
     return n
 
 
-def unpack(b, r: TensorRepr, value) -> Array:
+def unpack(b, representation: TensorRepr, value) -> Array:
     """The Array of a tensor value in its representation."""
-    if r.ndim == 0:
-        return Array(r.dtype, value, [], [], Layout.c(0))
+    if representation.ndim == 0:
+        return Array(representation.dtype, value, [], [], Layout.c(0))
     data = b.extract(value, 0)
     lengths = b.extract(value, 1)
     shape, k = [], 0
-    for s in r.shape:
+    for s in representation.shape:
         if s is None:
             shape.append(b.extract(lengths, k))
             k += 1
         else:
             shape.append(b.i64(s))
     passed = {}
-    if r.stride_axes:
+    if representation.stride_axes:
         st = b.extract(value, 2)
-        passed = {a: b.extract(st, k) for k, a in enumerate(r.stride_axes)}
-    strides = r.layout.stride_values(b, itemsize(r.dtype), shape, passed)
-    return Array(r.dtype, data, shape, strides, r.layout)
+        passed = {a: b.extract(st, k) for k, a in enumerate(representation.stride_axes)}
+    strides = representation.layout.stride_values(
+        b, itemsize(representation.dtype), shape, passed
+    )
+    return Array(representation.dtype, data, shape, strides, representation.layout)
 
 
-def pack(b, r: TensorRepr, a: Array):
+def pack(b, representation: TensorRepr, a: Array):
     """A tensor value in its representation."""
-    if r.ndim == 0:
+    if representation.ndim == 0:
         return a.data
     lengths = b.aggregate(
-        ir.Type.array(ir.i64, len(r.dynamic_axes)), [a.shape[k] for k in r.dynamic_axes]
+        ir.Type.array(ir.i64, len(representation.dynamic_axes)),
+        [a.shape[k] for k in representation.dynamic_axes],
     )
     strides = b.aggregate(
-        ir.Type.array(ir.i64, len(r.stride_axes)), [a.strides[k] for k in r.stride_axes]
+        ir.Type.array(ir.i64, len(representation.stride_axes)),
+        [a.strides[k] for k in representation.stride_axes],
     )
-    return b.aggregate(r.ir_type, [a.data, lengths, strides])
+    return b.aggregate(representation.ir_type, [a.data, lengths, strides])
 
 
 def load(b, dtype, ptr):
@@ -488,7 +492,7 @@ class Codegen:
     scratch_scopes: list = field(default_factory=list)
     _checks: int = field(default=0)
 
-    def par(self, per_element: float) -> ParallelPolicy | None:
+    def parallel_policy(self, per_element: float) -> ParallelPolicy | None:
         """How loops over elements costing `per_element` each (`analysis/work.py`) may
         run in parallel, or None."""
         return (
@@ -668,13 +672,13 @@ def is_contiguous(b, shape, a: Array, order=None):
     nd = len(shape)
     order = list(range(nd)) if order is None else list(order)
     static = [n.const_int for n in shape]
-    lay = a.layout
-    same_order = [ax for ax in lay.order if static[ax] != 1] == [
+    layout = a.layout
+    same_order = [ax for ax in layout.order if static[ax] != 1] == [
         ax for ax in order if static[ax] != 1
     ]
-    if lay.fully_packed(static) and same_order:
+    if layout.fully_packed(static) and same_order:
         return b.const_bool(True)
-    if not lay.dynamic_axes and not (lay.fully_packed(static) and same_order):
+    if not layout.dynamic_axes and not (layout.fully_packed(static) and same_order):
         # the layout is fully known and isn't this one (degenerate lengths at run time
         # just take the general path)
         if not all(st.const_int is not None for st in a.strides):
@@ -750,17 +754,17 @@ class ParallelPolicy:
     def range(self, b, n, elements_per_iteration, body):
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
-        with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as r:
+        with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as chunk:
             # (a parallel body is a function of its own)
             with (
                 self.cg.scratch_scope(function=True),
-                b.loop(b.sub(r.end, r.start)) as j,
+                b.loop(b.sub(chunk.end, chunk.start)) as j,
             ):
-                body(b.add(r.start, j))
-        self.cg.check(b.eq(r.result, 0), None)
+                body(b.add(chunk.start, j))
+        self.cg.check(b.eq(chunk.result, 0), None)
 
 
-def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
+def for_each(b, shape, arrays, body, policy: ParallelPolicy | None = None):
     """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
 
     `arrays` have strides over `shape` (0 where broadcast). The loops follow memory order
@@ -769,44 +773,44 @@ def for_each(b, shape, arrays, body, par: ParallelPolicy | None = None):
     only arrays whose layout leaves it open are checked at run time, and then both the
     flat loop and the nest are generated.
 
-    With `par`, the loop (the flat one, or the nest's outermost) runs in chunks that may
+    With `policy`, the loop (the flat one, or the nest's outermost) runs in chunks that may
     run in parallel when there's enough work. Iterations must not depend on each other.
     """
     order = loop_order(shape, arrays)
-    if par is not None and not par.worth_it(size(b, shape)):
-        par = None
+    if policy is not None and not policy.worth_it(size(b, shape)):
+        policy = None
     contig = b.const_bool(True)
     for a in arrays:
         contig = b.and_(contig, is_contiguous(b, shape, a, order))
     c = contig.const_int
     if c == 1:
-        _flat(b, shape, arrays, body, par)
+        _flat(b, shape, arrays, body, policy)
     elif c == 0:
-        _strided(b, shape, arrays, body, order, par=par)
+        _strided(b, shape, arrays, body, order, policy=policy)
     else:
         b.if_else(
             contig,
-            lambda: _flat(b, shape, arrays, body, par),
-            lambda: _strided(b, shape, arrays, body, order, par=par),
+            lambda: _flat(b, shape, arrays, body, policy),
+            lambda: _strided(b, shape, arrays, body, order, policy=policy),
         )
 
 
-def _flat(b, shape, arrays, body, par=None):
+def _flat(b, shape, arrays, body, policy=None):
     n = size(b, shape)
 
     def at(i):
         body([b.gep(memory_type(a.dtype), a.data, i) for a in arrays])
 
-    if par is not None:
-        par.range(b, n, b.i64(1), at)
+    if policy is not None:
+        policy.range(b, n, b.i64(1), at)
         return
     with b.loop(n) as i:
         at(i)
 
 
-def _strided(b, shape, arrays, body, order, level=0, base=None, par=None):
+def _strided(b, shape, arrays, body, order, level=0, base=None, policy=None):
     """Loops over the axes in `order` (outermost first; may be a subset of the axes).
-    With `par`, the outermost loop runs in chunks that may run in parallel."""
+    With `policy`, the outermost loop runs in chunks that may run in parallel."""
     if base is None:
         base = [a.data for a in arrays]
     if level == len(order):
@@ -821,9 +825,9 @@ def _strided(b, shape, arrays, body, order, level=0, base=None, par=None):
         ]
         _strided(b, shape, arrays, body, order, level + 1, ptrs)
 
-    if par is not None and level == 0:
+    if policy is not None and level == 0:
         inner = size(b, [shape[a] for a in order[1:]])
-        par.range(b, shape[axis], inner, at)
+        policy.range(b, shape[axis], inner, at)
         return
     with b.loop(shape[axis]) as i:
         at(i)
@@ -838,30 +842,28 @@ def copy(cg, src: Array, dst: Array):
             b, dst.dtype, cast(b, load(b, src.dtype, p[0]), src.dtype, dst.dtype), p[1]
         )
 
-    for_each(b, dst.shape, [src, dst], body, cg.par(1.0))
+    for_each(b, dst.shape, [src, dst], body, cg.parallel_policy(1.0))
 
 
-def check_strides(codegen: Codegen, array: Array, layout: Layout, what: str) -> None:
+def check_strides(cg: Codegen, array: Array, layout: Layout, what: str) -> None:
     """Fail at run time unless the strides of `array` satisfy `layout`.
 
     Length-1 axes and empty arrays don't count, as in numpy's contiguity rules. `what`
     names the array in the error message."""
-    builder = codegen.b
+    b = cg.b
     expected = layout.stride_values(
-        builder, itemsize(array.dtype), array.shape, dict(enumerate(array.strides))
+        b, itemsize(array.dtype), array.shape, dict(enumerate(array.strides))
     )
-    matches = builder.const_bool(True)
-    empty = builder.const_bool(False)
+    matches = b.const_bool(True)
+    empty = b.const_bool(False)
     for length, actual, wanted in zip(
         array.shape, array.strides, expected, strict=True
     ):
-        irrelevant = builder.eq(length, 1)
-        matches = builder.and_(
-            matches, builder.or_(irrelevant, builder.eq(actual, wanted))
-        )
-        empty = builder.or_(empty, builder.eq(length, 0))
-    codegen.check(
-        builder.or_(matches, empty),
+        irrelevant = b.eq(length, 1)
+        matches = b.and_(matches, b.or_(irrelevant, b.eq(actual, wanted)))
+        empty = b.or_(empty, b.eq(length, 0))
+    cg.check(
+        b.or_(matches, empty),
         f"layout check: {what} doesn't have layout {layout}",
     )
 

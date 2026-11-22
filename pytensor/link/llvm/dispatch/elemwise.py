@@ -109,7 +109,7 @@ def _(op, node, cg, inputs, outputs):
         for k, (v, d) in enumerate(zip(res, out_dtypes, strict=True)):
             store(b, d, v, ptrs[n_in + k])
 
-    for_each(b, shape, operands, body, cg.par(scalar_cost(op.scalar_op)))
+    for_each(b, shape, operands, body, cg.parallel_policy(scalar_cost(op.scalar_op)))
 
 
 @llvm_emit.register(ps.ScalarOp)
@@ -119,7 +119,9 @@ def _(op, node, cg, inputs, outputs):
         (v, check_dtype(var.type.dtype))
         for v, var in zip(inputs, node.inputs, strict=True)
     ]
-    res = emit_scalar(op, cg.b, args, [check_dtype(o.type.dtype) for o in node.outputs])
+    res = emit_scalar(
+        op, cg.b, args, [check_dtype(var.type.dtype) for var in node.outputs]
+    )
     for out, v in zip(outputs, res, strict=True):
         out.set(v)
 
@@ -186,8 +188,8 @@ def _(op, node, cg, inputs, outputs):
     acc_arr = res if acc == out_dtype else cg.temporary(acc, out_shape)
     for_each(b, out_shape, [acc_arr], lambda p: store(b, acc, init, p[0]))
     acc_strides, source, k = [], [], 0
-    for r in reduced:
-        if r:
+    for is_reduced in reduced:
+        if is_reduced:
             acc_strides.append(b.i64(0))
             source.append(None)
         else:
@@ -198,8 +200,8 @@ def _(op, node, cg, inputs, outputs):
     # accumulated in a register (for a transposed x and axis=0 that's the unit-stride one)
     order = loop_order(x.shape, [x])
     inner = order[-1]
-    lay = view_layout(acc_arr, x.shape, acc_strides, source)
-    accs = Array(acc, acc_arr.data, x.shape, acc_strides, lay)
+    layout = view_layout(acc_arr, x.shape, acc_strides, source)
+    accs = Array(acc, acc_arr.data, x.shape, acc_strides, layout)
 
     def body(p):
         cur = load(b, acc, p[1])
@@ -212,10 +214,14 @@ def _(op, node, cg, inputs, outputs):
     loops = order[:-1] if reduced[inner] else order
     # the outermost loop may run in parallel when each iteration has its own
     # accumulators (it isn't over a reduced axis)
-    par = cg.par(scalar_cost(op.scalar_op)) if loops and not reduced[loops[0]] else None
-    if par is not None and not par.worth_it(size(b, x.shape)):
-        par = None
-    _strided(b, x.shape, [x, accs], body, loops, par=par)
+    policy = (
+        cg.parallel_policy(scalar_cost(op.scalar_op))
+        if loops and not reduced[loops[0]]
+        else None
+    )
+    if policy is not None and not policy.worth_it(size(b, x.shape)):
+        policy = None
+    _strided(b, x.shape, [x, accs], body, loops, policy=policy)
     if acc != out_dtype:
         copy(cg, acc_arr, res)
 
@@ -252,27 +258,27 @@ def reduce_all(b, x: Array, init, combine):
     chosen at run time, when the layout doesn't settle it)."""
 
     def flat():
-        (r,) = b.fold(
+        (result,) = b.fold(
             size(b, x.shape),
             [init],
             lambda i, a: [
                 combine(a, load(b, x.dtype, b.gep(memory_type(x.dtype), x.data, i)))
             ],
         )
-        return [r]
+        return [result]
 
     def nest():
         def level(axis, p, a):
             if axis == x.ndim:
                 return combine(a, load(b, x.dtype, p))
-            (r,) = b.fold(
+            (result,) = b.fold(
                 x.shape[axis],
                 [a],
                 lambda i, acc: [
                     level(axis + 1, advance(b, p, i, x.strides[axis], x.dtype), acc)
                 ],
             )
-            return r
+            return result
 
         return [level(0, x.data, init)]
 

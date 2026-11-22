@@ -100,8 +100,8 @@ def operands(cg, base: Array, pat: Pattern):
     first = pat.first
     bst = list(base.strides[:first]) + [zero] * nb + list(base.strides[first + k :])
     source = [*range(first), *[None] * nb, *range(first + k, base.ndim)]
-    lay = view_layout(base, pat.view_shape, bst, source)
-    base_op = Array(base.dtype, base.data, pat.view_shape, bst, lay)
+    layout = view_layout(base, pat.view_shape, bst, source)
+    base_op = Array(base.dtype, base.data, pat.view_shape, bst, layout)
     idx_ops = []
     for arr, var in pat.indices:
         off = nb - var.type.ndim
@@ -111,8 +111,8 @@ def operands(cg, base: Array, pat: Pattern):
             if var.type.shape[d] != 1:
                 st[first + off + d] = arr.strides[d]
                 source_shape[first + off + d] = d
-        lay = view_layout(arr, pat.view_shape, st, source_shape)
-        idx_ops.append(Array(arr.dtype, arr.data, pat.view_shape, st, lay))
+        layout = view_layout(arr, pat.view_shape, st, source_shape)
+        idx_ops.append(Array(arr.dtype, arr.data, pat.view_shape, st, layout))
     return base_op, idx_ops
 
 

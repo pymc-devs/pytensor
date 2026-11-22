@@ -62,8 +62,8 @@ def _positive_or_rust(b, x, which, large, table):
             lambda: b.rust_math(which, x.value),
         )
 
-    (r,) = b.if_else((x >= 64.0).value, lambda: large(x).value, small)
-    return r
+    (result,) = b.if_else((x >= 64.0).value, lambda: large(x).value, small)
+    return result
 
 
 def _strict(fn):
@@ -101,8 +101,8 @@ def gammaln(b, x, dtype):
         def below_one():
             return (x * (x - 1.0) * f - _log(x)).value
 
-        (r,) = b.if_else(ge1.value, above_one, below_one)
-        return Num(b, r, dtype)
+        (result,) = b.if_else(ge1.value, above_one, below_one)
+        return Num(b, result, dtype)
 
     return _positive_or_rust(b, x, ir.RustMath.GammaLn, large, table)
 
@@ -121,9 +121,11 @@ def psi(b, x, dtype):
     def table(x):
         ge1 = x >= 1.0
         y = ge1.select(x, x + 1.0)
-        r = _panel_series(b, psi_table, y)
+        result = _panel_series(b, psi_table, y)
         # r (y - x0) with x0 in two parts; y - x0_hi is exact
-        r = (y < 2.0).select(r * (y - float(x0_hi)) - r * float(x0_lo), r)
-        return ge1.select(r, r - 1.0 / x)
+        result = (y < 2.0).select(
+            result * (y - float(x0_hi)) - result * float(x0_lo), result
+        )
+        return ge1.select(result, result - 1.0 / x)
 
     return _positive_or_rust(b, x, ir.RustMath.Psi, large, table)

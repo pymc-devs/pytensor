@@ -132,7 +132,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     from pytensor.link.llvm.codegen.emit import Array, store
 
     b = cg.b
-    pa = ptarray_type()
+    ptarray = ptarray_type()
     i64 = ir.i64
     # per argument: (data, shape ptr, strides ptr, ndim, dtype, slot or None)
     args_of: list[tuple[object, object, object, int, str, SlotDestination | None]] = []
@@ -163,11 +163,11 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
             p = b.alloca(memory_type(dtype))
             store(b, dtype, a, p)
             args_of.append((p, storage([]), storage([]), 0, dtype, None))
-    for o in outputs:
-        if o is None:
+    for destination in outputs:
+        if destination is None:
             continue
-        if isinstance(o, ProvidedDestination):
-            a = o.array
+        if isinstance(destination, ProvidedDestination):
+            a = destination.array
             args_of.append(
                 (
                     a.data,
@@ -178,33 +178,33 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
                     None,
                 )
             )
-        elif isinstance(o, SlotDestination):
-            st = slot_type(o.ndim)
+        elif isinstance(destination, SlotDestination):
+            st = slot_type(destination.ndim)
             args_of.append(
                 (
                     b.null(),
-                    b.field_ptr(st, o.slot, Slot.LENGTHS),
-                    b.field_ptr(st, o.slot, Slot.STRIDES),
-                    o.ndim,
-                    o.dtype,
-                    o,
+                    b.field_ptr(st, destination.slot, Slot.LENGTHS),
+                    b.field_ptr(st, destination.slot, Slot.STRIDES),
+                    destination.ndim,
+                    destination.dtype,
+                    destination,
                 )
             )
         else:
             raise NotImplementedError(
-                f"{kernel.description}: a {type(o).__name__} output"
+                f"{kernel.description}: a {type(destination).__name__} output"
             )
 
-    args = b.alloca(ir.Type.array(pa, max(len(args_of), 1)))
+    args = b.alloca(ir.Type.array(ptarray, max(len(args_of), 1)))
     ptrs = []
     for k, (data, shape, strides, nd, dtype, _) in enumerate(args_of):
         p = b.gep_bytes(args, k * PTARRAY_SIZE)
-        b.store(data, b.field_ptr(pa, p, PtArray.DATA))
-        b.store(shape, b.field_ptr(pa, p, PtArray.SHAPE))
-        b.store(strides, b.field_ptr(pa, p, PtArray.STRIDES))
-        b.store(b.null(), b.field_ptr(pa, p, PtArray.OWNER))
-        b.store(b.i32(nd), b.field_ptr(pa, p, PtArray.NDIM))
-        b.store(b.i32(dtype_code(dtype)), b.field_ptr(pa, p, PtArray.DTYPE))
+        b.store(data, b.field_ptr(ptarray, p, PtArray.DATA))
+        b.store(shape, b.field_ptr(ptarray, p, PtArray.SHAPE))
+        b.store(strides, b.field_ptr(ptarray, p, PtArray.STRIDES))
+        b.store(b.null(), b.field_ptr(ptarray, p, PtArray.OWNER))
+        b.store(b.i32(nd), b.field_ptr(ptarray, p, PtArray.NDIM))
+        b.store(b.i32(dtype_code(dtype)), b.field_ptr(ptarray, p, PtArray.DTYPE))
         ptrs.append(p)
 
     fn = linked(cg, index)
@@ -214,19 +214,19 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     rc = b.call_ptr(fn, [cg.ctx, args, *counts, config], ir.i32)
     b.rt_scratch_release(cg.ctx, mark)
 
-    for p, (*_, o) in zip(ptrs, args_of, strict=True):
-        if o is None:
+    for p, (*_, destination) in zip(ptrs, args_of, strict=True):
+        if destination is None:
             continue
-        st = slot_type(o.ndim)
+        st = slot_type(destination.ndim)
         b.store(
-            b.load(ir.ptr, b.field_ptr(pa, p, PtArray.DATA)),
-            b.field_ptr(st, o.slot, Slot.DATA),
+            b.load(ir.ptr, b.field_ptr(ptarray, p, PtArray.DATA)),
+            b.field_ptr(st, destination.slot, Slot.DATA),
         )
         b.store(
-            b.load(ir.ptr, b.field_ptr(pa, p, PtArray.OWNER)),
-            b.field_ptr(st, o.slot, Slot.OWNER),
+            b.load(ir.ptr, b.field_ptr(ptarray, p, PtArray.OWNER)),
+            b.field_ptr(st, destination.slot, Slot.OWNER),
         )
-        o.done = True
+        destination.done = True
     with b.if_(b.ne(rc, 0)):
         b.ret(rc)
 
@@ -272,7 +272,9 @@ def build_call_function(
     params = iter(fn.params)
     ctx, config = next(params), next(params)
     cg = Codegen(b, ctx, config, links=links, module=module, name=name)
-    inputs = [unpack(b, r, next(params)) for r in signature.inputs]
+    inputs = [
+        unpack(b, representation, next(params)) for representation in signature.inputs
+    ]
     for pos, a in enumerate(inputs):
         a.base, a.writable = pos, False
     outputs: list = []
