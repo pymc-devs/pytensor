@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.tensor as pt
 from pytensor import function
 from pytensor.conditional.op import IfElse, ifelse
 from pytensor.conditional.rewriting import cond_make_inplace, ifelse_simplify_db
@@ -23,6 +24,22 @@ def test_simplify_nested_ifelse(true_branch):
         custom_rewrite=ifelse_simplify_db.query("+numba"),
     )
     result.assert_graph(expected)
+
+
+@pytest.mark.parametrize("condition", [True, False])
+def test_local_useless_ifelse(condition):
+    x, y, z, w = (vector(name) for name in "xyzw")
+    out = ifelse(np.array(condition), [x, y], [z, w])
+    expected = [x, y] if condition else [z, w]
+    result = utt.RewriteTester([x, y, z, w], out)
+    result.assert_graph(*expected)
+
+
+def test_local_useless_ifelse_static_shape():
+    x = vector("x", shape=(4,))
+    out = ifelse(x.shape[0] >= 2, pt.exp(x), pt.log(x))
+    result = utt.RewriteTester([x], [out], include=("ShapeOpt", "canonicalize"))
+    result.assert_graph(pt.exp(x))
 
 
 @pytest.mark.parametrize(
