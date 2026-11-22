@@ -15,7 +15,7 @@ none of its own.
   order.
 
 The layouts of the outputs are not a choice: they are the binding ones (what follows
-from `llvm_outputs`, `node_outputs`), and what runs a node must give its outputs
+from `llvm_layout`, `node_outputs`), and what runs a node must give its outputs
 layouts that imply them (`conforms`). A Rust kernel that doesn't is not used.
 
 The program's graph (`Planner.program`) and graphs inside generated code

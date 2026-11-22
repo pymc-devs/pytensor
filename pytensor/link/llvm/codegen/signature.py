@@ -1,9 +1,9 @@
 """How a node's function is called: the representation of each argument, and how each
 output is passed (`Signature`).
 
-`node_outputs` turns what an op declares about its outputs (`llvm_outputs`) into the
-`Output`s of its function: their layouts and how they are passed. This is the only
-place where those rules live.
+`node_outputs` turns what an op says about its outputs (its `view_map`, `destroy_map`
+and `llvm_layout`) into the `Output`s of its function: their layouts and how they are
+passed. This is the only place where those rules live.
 """
 
 from __future__ import annotations
@@ -13,14 +13,7 @@ from dataclasses import dataclass, replace
 
 from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
-from pytensor.link.llvm.codegen.interface import (
-    InPlaceUpdate,
-    InputView,
-    NewBuffer,
-    OutputStorage,
-    ViewOrCopy,
-    llvm_outputs,
-)
+from pytensor.link.llvm.codegen.interface import has_emitter, llvm_layout
 from pytensor.link.llvm.codegen.types import (
     NoneRepr,
     ScalarRepr,
@@ -46,14 +39,14 @@ class Passing(enum.Enum):
 
 @dataclass(frozen=True)
 class Output:
-    """One output of a function: what it is, where its memory comes from, and how it is
-    passed. For a ScalarType output (stored through a pointer) or one without data
-    (no argument), only `representation` is set."""
+    """One output of a function: what it is, and how it is passed. For a ScalarType
+    output (stored through a pointer) or one without data (no argument), only
+    `representation` is set."""
 
     representation: Representation
-    storage: OutputStorage | None = None
     passing: Passing | None = None
-    #: Positions of the node inputs the result may be a view of.
+    #: Positions of the node inputs the result may be a view of: those the op's
+    #: `view_map` lists, and an input it may overwrite where the planner allows it.
     aliased_inputs: tuple[int, ...] = ()
 
     @classmethod
@@ -61,7 +54,7 @@ class Output:
         """Return the output for `var` in new memory of `layout` (a kernel's output)."""
         if is_absent(var.type):
             return cls(NoneRepr())
-        return cls(repr_of(var.type, layout), NewBuffer(layout), passing)
+        return cls(repr_of(var.type, layout), passing)
 
     @property
     def tensor(self) -> TensorRepr:
@@ -179,76 +172,65 @@ def can_update_in_place(node, output: int, input: int) -> bool:
     )
 
 
+def view_inputs(node, output: int) -> tuple[int, ...]:
+    """Return the positions of the inputs output `output` of `node` may be a view of
+    (the op's `view_map`)."""
+    parents = op_view_parents(node.op, node)[output]
+    return tuple(k for k, var in enumerate(node.inputs) if var in parents)
+
+
+def destroyed_inputs(node, output: int) -> tuple[int, ...]:
+    """Return the position of the input output `output` of `node` may be written into
+    (the first the op's `destroy_map` lists that `can_update_in_place`), or ().
+
+    Only for generated code, which can choose to: a kernel's outputs are new memory."""
+    if not has_emitter(node.op):
+        return ()
+    for k in node.op.destroy_map.get(output, ()):
+        if can_update_in_place(node, output, k):
+            return (k,)
+    return ()
+
+
 def node_outputs(
     node, input_layouts=None, writable: frozenset[int] = frozenset()
 ) -> list[Output]:
-    """Return the `Output` of each output of `node`, from what its op declares
-    (`llvm_outputs`).
+    """Return the `Output` of each output of `node`.
 
-    `input_layouts`: the layout of each input (None where unknown). `writable`: the
-    positions of the inputs the planner lets the node overwrite; an `InPlaceUpdate`
-    output may only be its input's memory if that input is writable."""
+    * Its layout is what the op's `llvm_layout` declares, or the default: C for new
+      memory, nothing known for a view. An output that may overwrite an input has that
+      input's layout, where new memory can have it too (`new_memory_layout`), so that
+      it is the same whether the planner lets it overwrite the input or not.
+    * It may alias the inputs its `view_map` lists, and the input it may overwrite if
+      that input is `writable` (the planner lets the node overwrite it).
+    * It is passed in a slot if it may alias an input or its size is only known at run
+      time, else in a buffer the caller provides.
+
+    `input_layouts`: the layout of each input (None where unknown)."""
     input_layouts = known_layouts(node, input_layouts)
-    declared = llvm_outputs(node.op, node, input_layouts)
-    return [
-        _resolve(node, position, storage, input_layouts, writable)
-        for position, storage in enumerate(declared)
-    ]
-
-
-def _resolve(
-    node,
-    position: int,
-    storage: OutputStorage,
-    input_layouts: list[Layout | None],
-    writable: frozenset[int],
-) -> Output:
-    var = node.outputs[position]
-    representation = repr_of(var.type)
-    if not isinstance(representation, TensorRepr):
-        return Output(representation)
-
-    # new memory of a static size is provided by the caller
-    new_memory = Passing.CALLER_BUFFER if representation.static else Passing.CALLEE_SLOT
-
-    match storage:
-        case NewBuffer(layout=layout):
-            if layout is None:
-                layout = Layout.c(var.type.ndim)
-            return Output(repr_of(var.type, layout), storage, new_memory)
-        case InputView(input=input, layout=layout):
-            _check_view(node, position, (input,))
-            return Output(
-                repr_of(var.type, layout), storage, Passing.CALLEE_SLOT, (input,)
-            )
-        case ViewOrCopy(inputs=inputs, layout=layout):
-            _check_view(node, position, inputs)
-            return Output(
-                repr_of(var.type, layout), storage, Passing.CALLEE_SLOT, inputs
-            )
-        case InPlaceUpdate(input=input):
-            if not can_update_in_place(node, position, input):
-                # the op doesn't destroy the input for this output: new memory
-                layout = Layout.c(var.type.ndim)
-                return Output(repr_of(var.type, layout), storage, new_memory)
-            layout = new_memory_layout(input_layouts[input], var.type)
-            if input in writable:
-                return Output(
-                    repr_of(var.type, layout), storage, Passing.CALLEE_SLOT, (input,)
-                )
-            return Output(repr_of(var.type, layout), storage, new_memory)
-    raise TypeError(f"{node.op}: output {position}: not an OutputStorage: {storage!r}")
-
-
-def _check_view(node, position: int, inputs: tuple[int, ...]) -> None:
-    """Fail unless the graph knows output `position` may be a view of `inputs`."""
-    parents = op_view_parents(node.op, node)[position]
-    for input in inputs:
-        if node.inputs[input] not in parents:
-            raise ValueError(
-                f"{node.op}: output {position} is declared a view of input {input}, "
-                "but the op's view_map doesn't say so"
-            )
+    declared = llvm_layout(node.op, node, input_layouts)
+    outputs = []
+    for position, (var, layout) in enumerate(zip(node.outputs, declared, strict=True)):
+        representation = repr_of(var.type)
+        if not isinstance(representation, TensorRepr):
+            outputs.append(Output(representation))
+            continue
+        viewed = view_inputs(node, position)
+        destroyed = destroyed_inputs(node, position)
+        if destroyed:
+            layout = new_memory_layout(input_layouts[destroyed[0]], var.type)
+        elif layout is None:
+            ndim = var.type.ndim
+            layout = Layout.dynamic(ndim) if viewed else Layout.c(ndim)
+        aliased = viewed + tuple(
+            k for k in destroyed if k in writable and k not in viewed
+        )
+        if aliased or not representation.static:
+            passing = Passing.CALLEE_SLOT
+        else:
+            passing = Passing.CALLER_BUFFER
+        outputs.append(Output(repr_of(var.type, layout), passing, aliased))
+    return outputs
 
 
 # ------------------------------------------------------------------ signatures
@@ -311,8 +293,10 @@ __all__ = [
     "Representation",
     "Signature",
     "can_update_in_place",
+    "destroyed_inputs",
     "known_layouts",
     "node_outputs",
     "node_signature",
     "skipped_inputs",
+    "view_inputs",
 ]

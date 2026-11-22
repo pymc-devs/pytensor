@@ -5,21 +5,21 @@ from __future__ import annotations
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.link.llvm.analysis.layout import dimshuffle_layout, same_layout
 from pytensor.link.llvm.codegen.emit import Array, cast, copy
-from pytensor.link.llvm.codegen.interface import InputView, llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.shape import SpecifyShape
 
 
-@llvm_outputs.register(DimShuffle)
+@llvm_layout.register(DimShuffle)
 def _(op, node, input_layouts):
-    return [InputView(0, dimshuffle_layout(op, node, input_layouts[0]))]
+    return [dimshuffle_layout(op, node, input_layouts[0])]
 
 
-@llvm_outputs.register(ViewOp)
-@llvm_outputs.register(SpecifyShape)
+@llvm_layout.register(ViewOp)
+@llvm_layout.register(SpecifyShape)
 def _(op, node, input_layouts):
-    return [InputView(0, same_layout(node, input_layouts[0]))]
+    return [same_layout(node, input_layouts[0])]
 
 
 @llvm_emit.register(DimShuffle)

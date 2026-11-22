@@ -105,15 +105,15 @@ don't matter and are always packed. C-contiguous is "all packed, identity order"
 Layouts are claims the code relies on (packed strides aren't passed, they're computed),
 so they come only from how a value is produced:
 
-* new memory has the layout the op's `llvm_outputs` declares (`NewBuffer`, default
-  C-contiguous; Elemwise follows its inputs); for an op with a Rust kernel that is the layout the
+* new memory has the layout the op's `llvm_layout` declares (default C-contiguous;
+  Elemwise follows its inputs); for an op with a Rust kernel that is the layout the
   kernel chose (the faer kernels: column-major; Sort: its input's order where known),
   Scan allocates C-contiguous, graph outputs the caller provides are C-contiguous,
   constants are stored in their own memory order (packed, else C);
-* a view's layout follows from its input's, as the op declares it (`InputView`:
-  DimShuffle, Subtensor, Split, SpecifyShape, ...; `ViewOrCopy`: Reshape; the rules in
+* a view's layout follows from its input's, as the op's `llvm_layout` declares it
+  (DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...; the rules in
   analysis/layout.py); a view nothing is declared for is DYNAMIC;
-* an output that updates an input in place (`InPlaceUpdate`, section 3) has that input's layout, where new
+* an output that may overwrite an input (section 3) has that input's layout, where new
   memory can have it too (packed, or implied by C-contiguous), else DYNAMIC: whether it
   does overwrite it is decided when planning;
 * an OpFromGraph's outputs have the layouts its inner graph gives them; a compiled
@@ -123,7 +123,7 @@ so they come only from how a value is produced:
   copy other arrays, the C API rejects them.
 
 These layouts belong to the graph. Its `LayoutFeature` gives every variable's,
-`fgraph.llvm_layout(var)` (what follows from the ops' `llvm_outputs`, `node_outputs`), like
+`fgraph.llvm_layout(var)` (what follows from the ops, `node_outputs`), like
 the DestroyHandler does for views; the `llvm_layouts` rewrite, which the linker
 requires, attaches it before any other rewrite, so rewrites can consult it, and a
 compiled function's graph keeps it (`f.maker.fgraph.llvm_layout(var)`). Replacing a
@@ -251,38 +251,33 @@ before vectorized loops.
 
 ## 3. Outputs
 
-An op's implementation declares where the memory of each output comes from, by a
-dispatch per op: `llvm_outputs(op, node, input_layouts) -> [OutputStorage]`
-(`codegen/interface.py`). That declaration is the single source of truth about an
-output: its layout and how it is passed follow from it (`node_outputs` in
-`codegen/signature.py`), and the emitter gets a handle that only offers what it
-declared.
+What the backend needs to know about an output mostly comes from the op itself: its
+`view_map` (the inputs the output may be a view of) and its `destroy_map` (the input it
+may overwrite). The only addition is its layout, declared by a dispatch per op:
+`llvm_layout(op, node, input_layouts) -> [Layout | None]` (`codegen/interface.py`).
+`node_outputs` (`codegen/signature.py`) combines them, in one place:
 
-| storage | meaning | layout | handle |
-|---|---|---|---|
-| `NewBuffer(layout)` | new memory | `layout` (default C) | `allocate(shape)` |
-| `InputView(input, layout)` | always a view of `input` | `layout` | `view(array)` |
-| `ViewOrCopy(inputs, layout)` | a view of one of `inputs`, or new memory | `layout` | `view(array)`, `allocate(shape)` |
-| `InPlaceUpdate(input)` | `input`, with changes | the input's, where new memory can have it too (`new_memory_layout`) | `buffer()`, `buffer_holding_input()` |
+* the layout is the declared one, or the default: C for new memory, DYNAMIC for a view;
+  an output that may overwrite an input has that input's layout, where new memory can
+  have it too (`new_memory_layout`), whether the input is overwritten or not (only for
+  generated code: a kernel's outputs are new memory);
+* the output may alias the inputs its `view_map` lists, and the input it may overwrite
+  if the planner lets the node overwrite it (`writable`).
 
-The default is `NewBuffer()`, or `ViewOrCopy` with a DYNAMIC layout for an output the
-op's `view_map` lists. A view storage must agree with the `view_map`, and an
-`InPlaceUpdate` reuses its input only where the op destroys it (else it is new
-C-contiguous memory). A Rust kernel is made for the layouts of its inputs and chooses
-the layouts of its outputs then, in Rust, next to the kernel
-(`Kernel::output_layouts`); `llvm_outputs` of its op declares `NewBuffer`s in what it
-chose (`kernels/rust.py`). A numba kernel allocates its outputs in the declared layouts.
+A Rust kernel is made for the layouts of its inputs and chooses the layouts of its
+outputs then, in Rust, next to the kernel (`Kernel::output_layouts`); `llvm_layout` of
+its op declares what it chose (`kernels/rust.py`). A numba kernel allocates its outputs
+in the declared layouts.
 
-How an output is passed (`Passing`) follows from its storage and type:
+How an output is passed (`Passing`) follows:
 
-| storage | the type says | passing |
-|---|---|---|
-| `NewBuffer`, or `InPlaceUpdate` whose input isn't writable | static shape | caller buffer |
-| `NewBuffer`, or `InPlaceUpdate` whose input isn't writable | shape known at run time only | callee slot, aliases nothing |
-| `InputView`, `ViewOrCopy` | | callee slot, may alias the inputs it names |
-| `InPlaceUpdate` whose input the planner lets the node overwrite | | callee slot, may alias that input |
-| | a ScalarType | (by pointer) |
-| | no data (a random generator) | (no argument) |
+| output | passing |
+|---|---|
+| may alias an input | callee slot, may alias those inputs |
+| new memory, shape known at run time only | callee slot, aliases nothing |
+| new memory, static shape | caller buffer |
+| a ScalarType | (by pointer) |
+| no data (a random generator) | (no argument) |
 
 Layouts are binding:
 
@@ -291,15 +286,15 @@ Layouts are binding:
   own layout (C-contiguous for a graph output); one declared otherwise is written to an
   arena temporary and copied. A graph output handed over in a buffer is handed over in
   any layout;
-* callee slot: `allocate` gives memory in the declared layout; a `ViewOrCopy` view is
-  checked, when generating the code, to have a layout implying the declared one; an
-  `InputView` is given the declared layout, and `check_layouts` (off by default)
-  verifies at run time that its strides match.
+* callee slot: `allocate` gives memory in the declared layout; a view gets the
+  declared layout. It is an error while generating if the view's own layout
+  contradicts it, and `check_layouts` (off by default) verifies at run time that a
+  view's strides match it.
 
 | passing | argument | the caller | the called function |
 |---|---|---|---|
 | caller buffer | the representation, like an input | owns the memory, chooses lengths and strides | writes the elements |
-| callee slot | `ptr` to an output slot | zero-initializes the slot | allocates and fills the slot (one new reference), or fills data, lengths and strides of a view of an input its storage names |
+| callee slot | `ptr` to an output slot | zero-initializes the slot | allocates and fills the slot (one new reference), or fills data, lengths and strides of a view of an input it may alias |
 | (scalar) | `ptr` to the value | | stores the value |
 | (no data) | none | | (a value without data: a random generator) |
 
@@ -314,15 +309,17 @@ of the graph carries that input (`Array.base`) and whether it really is a view
 only then, else copied.
 
 **What emitters do** (`codegen/interface.py`). An emitter gets an `Array` per tensor
-input, read-only unless an `InPlaceUpdate` output may reuse it (`writable`), and per
-output the handle of its storage (above), or a `ScalarOutput` (`set(value)`) for a
-ScalarType value. Ops that run an inner graph (Scan, Blockwise, compiled units) hand each
+input, read-only unless the planner lets the node overwrite it (`writable`), and per
+output a `TensorOutput`: `allocate(shape)`, `view(array)` (for an output the
+`view_map` lists), `buffer(x)` / `buffer_holding(x)` (for one the `destroy_map` lists:
+`x` if it may be overwritten, else new memory / a copy). A ScalarType output gets a
+`ScalarOutput` (`set(value)`). Ops that run an inner graph (Scan, Blockwise, compiled units) hand each
 handle's `destination` on to it (`codegen/destination.py`: caller memory, an output
 slot, a scalar pointer, or their own, like a row of a Scan's buffer).
 
 Mistakes that are cheap to see are errors when the code is generated (storing into an
-input that isn't writable, a view whose layout doesn't hold, a view of an output that
-isn't declared one, an output never produced). Beyond that implementations are trusted:
+input that isn't writable, a view whose layout contradicts the declared one, a view of
+an output the `view_map` doesn't list, an output never produced). Beyond that implementations are trusted:
 an emitter that writes to an input through a raw pointer is a bug nothing catches.
 
 **In place.** The planner decides which inputs a node may overwrite
@@ -338,10 +335,10 @@ memory:
 * it shares no memory with the node's other inputs (PyTensor's `ViewFeature` says which
   graph variables a value's memory may lie in).
 
-An op whose output is declared `InPlaceUpdate` then writes over them: Elemwise (every
+The emitter then writes over them through `buffer`/`buffer_holding`: Elemwise (every
 element is read before it is written), IncSubtensor, AdvancedIncSubtensor and Scan (its
-state buffers) do; an op that declares `NewBuffer` instead produces new memory, which is
-always correct. Nodes inside units, in inlined inner graphs, in Scan bodies and
+state buffers) do; an emitter that calls `allocate` instead produces new memory, which
+is always correct. Nodes inside units, in inlined inner graphs, in Scan bodies and
 Blockwise cores never work in place. A numba kernel does what PyTensor's numba implementation does, which
 overwrites destroyed inputs; where the conditions above don't hold, and always inside
 units, the call passes it copies (`Kernel.destroys`).

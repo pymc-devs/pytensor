@@ -16,22 +16,18 @@ from pytensor.link.llvm.codegen.emit import Codegen, c_array, constant, store, u
 from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
     EmitterOutput,
-    InPlaceOutput,
-    InPlaceUpdate,
-    InputView,
-    InputViewOutput,
-    NewBufferOutput,
     ScalarOutput,
-    ViewOrCopy,
-    ViewOrCopyOutput,
+    TensorOutput,
     llvm_emit,
 )
 from pytensor.link.llvm.codegen.signature import (
     Output,
     Passing,
     Signature,
+    destroyed_inputs,
     node_signature,
     skipped_inputs,
+    view_inputs,
 )
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
@@ -154,9 +150,9 @@ def build_node_function(
             )
         else:
             handles = [
-                None if destination is None else _handle(destination, output, inputs)
-                for destination, output in zip(
-                    destinations, signature.outputs, strict=True
+                None if destination is None else _handle(node, k, destination, output)
+                for k, (destination, output) in enumerate(
+                    zip(destinations, signature.outputs, strict=True)
                 )
             ]
             llvm_emit(node.op, node, codegen, inputs, handles)
@@ -271,22 +267,17 @@ def _destinations(
 
 
 def _handle(
-    destination: OutputDestination, output: Output, inputs: list
+    node, position: int, destination: OutputDestination, output: Output
 ) -> EmitterOutput:
-    """Return what the emitter gets for `output`: the handle matching its storage."""
+    """Return what the emitter gets for output `position` of `node`."""
     if isinstance(destination, ScalarDestination):
         return ScalarOutput(destination)
-    storage = output.storage
-    layout = output.layout
-    assert layout is not None
-    match storage:
-        case InputView():
-            return InputViewOutput(destination, layout)
-        case ViewOrCopy():
-            return ViewOrCopyOutput(destination, layout)
-        case InPlaceUpdate(input=input):
-            return InPlaceOutput(destination, inputs[input])
-    return NewBufferOutput(destination)
+    return TensorOutput(
+        destination,
+        output.tensor.layout,
+        view_inputs(node, position),
+        destroyed_inputs(node, position),
+    )
 
 
 __all__ = ["NodeFunction", "build_node_function", "debug_name"]

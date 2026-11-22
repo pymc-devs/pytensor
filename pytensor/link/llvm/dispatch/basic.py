@@ -16,12 +16,7 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.interface import (
-    InputView,
-    ViewOrCopy,
-    llvm_emit,
-    llvm_outputs,
-)
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import ir, is_float
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
@@ -156,10 +151,10 @@ def _(op, node, cg, inputs, outputs):
         out.store(b, cast(b, v, dt, out_dtype), i)
 
 
-@llvm_outputs.register(Reshape)
+@llvm_layout.register(Reshape)
 def _(op, node, input_layouts):
     # a view of a C-contiguous input, else a C-contiguous copy: C either way
-    return [ViewOrCopy((0,), Layout.c(node.outputs[0].type.ndim))]
+    return [Layout.c(node.outputs[0].type.ndim)]
 
 
 @llvm_emit.register(Reshape)
@@ -260,9 +255,9 @@ def _(op, node, cg, inputs, outputs):
         )
 
 
-@llvm_outputs.register(CheckAndRaise)
+@llvm_layout.register(CheckAndRaise)
 def _(op, node, input_layouts):
-    return [InputView(0, same_layout(node, input_layouts[0]))]
+    return [same_layout(node, input_layouts[0])]
 
 
 @llvm_emit.register(CheckAndRaise)

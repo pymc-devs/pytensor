@@ -1,7 +1,7 @@
 """The toolkit for generating code: nothing here knows about specific ops (their
 implementations are in `dispatch/`).
 
-* `interface`: what an op registers (`llvm_outputs`, `llvm_emit`) and what its emitter
+* `interface`: what an op registers (`llvm_emit`, `llvm_layout`) and what its emitter
   gets (its inputs, one handle per output) -- start here;
 * `destination`: where results go (caller memory, output slots, scalars);
 * `types`: LLVM representations of PyTensor types;
@@ -15,11 +15,11 @@ implementations are in `dispatch/`).
   core, a compiled unit, the program's function).
 """
 
-# The ops' implementations register themselves with `llvm_emit` and `llvm_outputs` when
+# The ops' implementations register themselves with `llvm_emit` and `llvm_layout` when
 # imported. Code generation always imports this package first, so importing them here
 # makes sure they are registered wherever code is generated.
 import pytensor.link.llvm.dispatch
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_outputs
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.kernel import compile_node
 from pytensor.link.llvm.codegen.signature import (
     Passing,

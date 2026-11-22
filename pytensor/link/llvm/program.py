@@ -33,7 +33,6 @@ from pytensor.link.llvm.codegen.graph import (
     PROFILE_ON,
     build_graph_function,
 )
-from pytensor.link.llvm.codegen.interface import NewBuffer
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.signature import Output, Passing
 from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
@@ -484,7 +483,7 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
             layout = Layout.c(ndim)
         else:
             layout = Layout.dynamic(ndim)
-        outputs.append(Output(repr_of(types[k], layout), NewBuffer(layout), passing))
+        outputs.append(Output(repr_of(types[k], layout), passing))
     function_graph = PlannedGraph(
         in_ids, out_ids, steps, planned.constants, planned.layouts
     )

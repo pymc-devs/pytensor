@@ -23,10 +23,10 @@ its strides. They come from how a value is produced:
 * numba kernels allocate their outputs packed, in the order asked for (default C);
 * graph inputs are DYNAMIC unless checked.
 
-Where each output's memory comes from, and so its layout, is declared per op by
-`llvm_outputs` (codegen/interface.py). What follows from it is binding: the `LayoutFeature`
-of the graph holds the layout of every value (`node_outputs`), and the planner makes
-whatever runs a node give its outputs those layouts.
+The layout of each output follows from what its op says: `llvm_layout`
+(codegen/interface.py), and its `view_map` and `destroy_map`. It is binding: the
+`LayoutFeature` of the graph holds the layout of every value (`node_outputs`), and the
+planner makes whatever runs a node give its outputs those layouts.
 """
 
 from __future__ import annotations
@@ -338,7 +338,7 @@ def remove_axis(layout: Layout, axis, shape, itemsize) -> Layout:
 
 
 # ------------------------------------------------------------------ layouts of views
-# (used by the ops' `llvm_outputs`, next to their emitters)
+# (used by the ops' `llvm_layout`, next to their emitters)
 
 
 def same_layout(node, x: Layout) -> Layout:

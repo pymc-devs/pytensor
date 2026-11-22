@@ -1,6 +1,6 @@
 """Tasks that overwrite an input: what the op destroys (`destroy_map`), where the
 planner sees that nothing else reads the memory (the input is `writable`), and what the
-op declares (`InPlaceUpdate`)."""
+emitter does with it (`TensorOutput.buffer`, `buffer_holding`)."""
 
 import numpy as np
 import pytest
@@ -23,10 +23,7 @@ from pytensor_llvm import ir
 from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
 from pytensor.link.llvm.codegen.emit import for_each, load, store
 from pytensor.link.llvm.codegen.interface import (
-    InPlaceUpdate,
-    NewBuffer,
     llvm_emit,
-    llvm_outputs,
 )
 from pytensor.link.llvm.codegen.node import build_node_function
 from pytensor.link.llvm.codegen.signature import (
@@ -149,7 +146,6 @@ def test_an_output_may_be_the_input_it_overwrites():
     assert inplace.op.destroy_map == {0: [0]}
     assert can_update_in_place(inplace, 0, 0)
     (o,) = node_outputs(inplace, writable={0})
-    assert isinstance(o.storage, InPlaceUpdate)
     assert o.passing is R and o.aliased_inputs == (0,)
     (o,) = node_outputs(inplace)
     # without the planner's word: new memory
@@ -182,24 +178,13 @@ def _halve(cg, out):
     )
 
 
-@llvm_outputs.register(Halve)
-def _(op, node, input_layouts):
-    return [InPlaceUpdate(0)]
-
-
 @llvm_emit.register(Halve)
 def _(op, node, codegen, inputs, outputs):
-    _halve(codegen, outputs[0].buffer_holding_input())
+    _halve(codegen, outputs[0].buffer_holding(inputs[0]))
 
 
 class HalveCopying(Halve):
-    """The same, into new memory: it declares a new buffer although it may overwrite
-    x."""
-
-
-@llvm_outputs.register(HalveCopying)
-def _(op, node, input_layouts):
-    return [NewBuffer()]
+    """The same, into new memory: its emitter ignores that it may overwrite x."""
 
 
 @llvm_emit.register(HalveCopying)
@@ -215,7 +200,7 @@ def _(op, node, cg, inputs, outputs):
     )
 
 
-def test_the_op_declares_whether_to_overwrite():
+def test_the_emitter_decides_whether_to_overwrite():
     x = pt.matrix("x")
     for op in [Halve(), HalveCopying()]:
         f, stats = validated([x], [op(x * 2)])

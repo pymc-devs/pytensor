@@ -9,8 +9,7 @@ zeroed. nit-sot buffers whose rows have no static shape are allocated by the fir
 iteration.
 
 A state's buffer is the outer buffer itself when the Scan may destroy it (`inplace`,
-not for while-loops: its output is then an `InPlaceUpdate`); else a new one, into which
-only the initial rows are copied.
+not for while-loops); else a new one, into which only the initial rows are copied.
 
 Every iteration runs the inner graph, the loop body (`Codegen.graph_function`). Nodes
 we generate are inlined, the others are calls of their Rust or numba kernels. The body
@@ -51,13 +50,9 @@ from pytensor.link.llvm.codegen.emit import (
     store,
 )
 from pytensor.link.llvm.codegen.interface import (
-    InPlaceOutput,
-    InPlaceUpdate,
-    NewBuffer,
-    ViewOrCopy,
     destinations,
     llvm_emit,
-    llvm_outputs,
+    llvm_layout,
 )
 from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, value_type
 
@@ -65,25 +60,13 @@ from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, value_type
 def register():
     from pytensor.scan.op import Scan
 
-    @llvm_outputs.register(Scan)
+    @llvm_layout.register(Scan)
     def _(op, node, input_layouts):
-        # An untraced state may be its initial value (`view_map`: for zero steps), and
-        # is returned in a slot, which the loop reallocates if the state's shape
-        # changes. A traced state's buffer updates its initial buffer where the Scan
-        # destroys it. The others are allocated by the loop, C-contiguous (as the Rust
-        # kernel's).
-        storage = []
-        for k, output in enumerate(node.outputs):
-            if k in op.view_map:
-                inputs = tuple(op.view_map[k])
-                storage.append(ViewOrCopy(inputs, Layout.c(output.type.ndim)))
-            elif k in op.destroy_map:
-                storage.append(InPlaceUpdate(op.destroy_map[k][0]))
-            elif is_absent(output.type):
-                storage.append(NewBuffer())
-            else:
-                storage.append(NewBuffer(Layout.c(output.type.ndim)))
-        return storage
+        # buffers allocated by the loop, C-contiguous (as the Rust kernel's)
+        return [
+            None if is_absent(output.type) else Layout.c(output.type.ndim)
+            for output in node.outputs
+        ]
 
     @llvm_emit.register(Scan)
     def _(op, node, cg, inputs, outputs):
@@ -264,14 +247,9 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
         reads = [int(t) for t in reads]
         lookback = -min(min(reads, default=0), 0)
         is_mit_mot = k < info.n_mit_mot
-        if isinstance(out, InPlaceOutput):
-            # the outer buffer itself, if the planner lets the Scan reuse it
-            buffer = out.buffer()
-            reused = out.reuses_input
-        else:
-            buffer = out.allocate(list(init.shape))
-            reused = False
-        if not reused:
+        # the outer buffer itself, if the Scan may destroy it and the planner lets it
+        buffer = out.buffer(init)
+        if not out.reuses(init):
             if is_mit_mot:
                 copy(cg, init, buffer)
             else:

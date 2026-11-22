@@ -26,7 +26,7 @@ rng = np.random.default_rng(3)
 
 
 def view_layout(out, *ins):
-    """The layout of `out` given its node's input layouts (from `llvm_outputs`)."""
+    """The layout of `out` given its node's input layouts (from `llvm_layout`)."""
     node = out.owner
     ins = list(ins) + [None] * (len(node.inputs) - len(ins))
     return node_outputs(node, ins)[node.outputs.index(out)].layout
@@ -332,21 +332,18 @@ def test_elemwise_output_follows_its_inputs():
 
 
 def test_declared_outputs():
-    from pytensor.link.llvm.codegen.interface import InputView, NewBuffer
     from pytensor.link.llvm.codegen.signature import Passing
 
     x = pt.dmatrix("x")
     (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
     assert (
-        isinstance(o.storage, NewBuffer)
-        and o.passing is Passing.CALLEE_SLOT
+        o.passing is Passing.CALLEE_SLOT
         and o.aliased_inputs == ()
         and str(o.layout) == "[P0, P1]"
     )
     (o,) = node_outputs((pt.exp(x.T)).owner, [None])
     assert o.layout == C(2)
     (o,) = node_outputs(x.T.owner, [C(2)])
-    assert isinstance(o.storage, InputView)
     assert o.passing is Passing.CALLEE_SLOT
     assert o.aliased_inputs == (0,) and o.layout == T2
 
@@ -377,7 +374,7 @@ def test_view_layout_is_checked_at_run_time():
     """A view gets the layout its op declares; `check_layouts` verifies the claim."""
     from pytensor.graph.basic import Apply
     from pytensor.graph.op import Op
-    from pytensor.link.llvm.codegen.interface import InputView, llvm_emit, llvm_outputs
+    from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 
     class BadTranspose(Op):
         """Claims its view is C-contiguous, but returns the transpose."""
@@ -390,9 +387,9 @@ def test_view_layout_is_checked_at_run_time():
         def perform(self, node, inputs, out):
             out[0][0] = inputs[0].T
 
-    @llvm_outputs.register(BadTranspose)
+    @llvm_layout.register(BadTranspose)
     def _(op, node, input_layouts):
-        return [InputView(0, C(2))]
+        return [C(2)]
 
     @llvm_emit.register(BadTranspose)
     def _(op, node, codegen, inputs, outputs):

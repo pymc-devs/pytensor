@@ -21,11 +21,7 @@ from pytensor.link.llvm.analysis.liveness import (  # noqa: E402
     place_temporaries,
 )
 from pytensor.link.llvm.codegen.emit import Array, load, unknown_layout  # noqa: E402
-from pytensor.link.llvm.codegen.interface import (  # noqa: E402
-    ViewOrCopy,
-    llvm_emit,
-    llvm_outputs,
-)
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout  # noqa: E402
 from pytensor.link.llvm.codegen.signature import (  # noqa: E402
     Output,
     Passing,
@@ -66,7 +62,7 @@ def step(inputs, outputs, passings, aliases=None):
     aliases = aliases or [()] * len(outputs)
     representation = TensorRepr("float64", (8,), Layout.c(1))
     outs = [
-        Output(representation, None, passing, a)
+        Output(representation, passing, a)
         for passing, a in zip(passings, aliases, strict=True)
     ]
     return SimpleNamespace(
@@ -141,10 +137,10 @@ class Pick(Op):
         output_storage[0][0] = a if flag else b
 
 
-@llvm_outputs.register(Pick)
+@llvm_layout.register(Pick)
 def _(op, node, input_layouts):
     _, a, b = input_layouts
-    return [ViewOrCopy((1, 2), a.join(b, (None,), 8))]  # what both views have
+    return [a.join(b, (None,), 8)]  # what both views have
 
 
 @llvm_emit.register(Pick)
@@ -215,7 +211,7 @@ def test_an_emitter_only_returns_views_the_op_declares():
 
     x = pt.vector("x", shape=(4,))
     v = np.arange(4.0)
-    # with a view_map, the default storage is a view (or a copy)
+    # with a view_map, the output may be a view
     (o,) = node_outputs(Passes(True)(x).owner)
     assert o.aliased_inputs == (0,)
     f = pytensor.function([x], Passes(True)(x) + 1, mode=STRICT)
@@ -223,7 +219,7 @@ def test_an_emitter_only_returns_views_the_op_declares():
     # without one, it is new memory, and the emitter has no view to return
     (o,) = node_outputs(Passes(False)(x).owner)
     assert o.aliased_inputs == ()
-    with pytest.raises(AttributeError, match="view"):
+    with pytest.raises(ValueError, match="view_map doesn't list it"):
         pytensor.function([x], Passes(False)(x) + 1, mode=STRICT)
 
 

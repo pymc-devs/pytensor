@@ -12,12 +12,7 @@ from pytensor.link.llvm.codegen.emit import (
     store,
     view_layout,
 )
-from pytensor.link.llvm.codegen.interface import (
-    InPlaceUpdate,
-    InputView,
-    llvm_emit,
-    llvm_outputs,
-)
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add
 from pytensor.tensor.subtensor import IncSubtensor, Subtensor, unflatten_index_variables
@@ -90,9 +85,9 @@ def _entries(op, node, inputs, first):
     return unflatten_index_variables(values, op.idx_list)
 
 
-@llvm_outputs.register(Subtensor)
+@llvm_layout.register(Subtensor)
 def _(op, node, input_layouts):
-    return [InputView(0, subtensor_layout(op, node, input_layouts[0]))]
+    return [subtensor_layout(op, node, input_layouts[0])]
 
 
 @llvm_emit.register(Subtensor)
@@ -100,16 +95,11 @@ def _(op, node, codegen, inputs, outputs):
     outputs[0].view(index(codegen, inputs[0], _entries(op, node, inputs, 1)))
 
 
-@llvm_outputs.register(IncSubtensor)
-def _(op, node, input_layouts):
-    return [InPlaceUpdate(0)]
-
-
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     y = inputs[1]
-    out = outputs[0].buffer_holding_input()
+    out = outputs[0].buffer_holding(inputs[0])
     view = index(cg, out, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type

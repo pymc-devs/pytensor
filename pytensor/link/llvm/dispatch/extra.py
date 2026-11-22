@@ -4,15 +4,9 @@ from __future__ import annotations
 
 import operator
 
-from pytensor.link.llvm.analysis.layout import Layout, split_layouts
+from pytensor.link.llvm.analysis.layout import split_layouts
 from pytensor.link.llvm.codegen.emit import Array, Codegen, constant, copy, size
-from pytensor.link.llvm.codegen.interface import (
-    InputView,
-    InputViewOutput,
-    NewBuffer,
-    llvm_emit,
-    llvm_outputs,
-)
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import ir
 from pytensor.tensor.basic import ExtractDiag, Nonzero, Split
@@ -70,28 +64,19 @@ def _diagonal(codegen: Codegen, op: ExtractDiag, source: Array) -> Array:
     return source.view(builder.gep_bytes(source.data, start), shape, strides)
 
 
-@llvm_outputs.register(ExtractDiag)
-def _(op, node, input_layouts):
-    if op.view:
-        return [InputView(0, Layout.dynamic(node.outputs[0].type.ndim))]
-    return [NewBuffer()]
-
-
 @llvm_emit.register(ExtractDiag)
 def _(op, node, codegen, inputs, outputs):
     (output,) = outputs
     diagonal = _diagonal(codegen, op, inputs[0])
-    if isinstance(output, InputViewOutput):
+    if op.view:
         output.view(diagonal)
     else:
         copy(codegen, diagonal, output.allocate(diagonal.shape))
 
 
-@llvm_outputs.register(Split)
+@llvm_layout.register(Split)
 def _(op, node, input_layouts):
-    return [
-        InputView(0, layout) for layout in split_layouts(op, node, input_layouts[0])
-    ]
+    return split_layouts(op, node, input_layouts[0])
 
 
 @llvm_emit.register(Split)
