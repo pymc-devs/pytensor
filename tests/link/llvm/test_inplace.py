@@ -21,7 +21,7 @@ pytest.importorskip("pytensor_llvm.ir")
 from pytensor_llvm import ir
 
 from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
-from pytensor.link.llvm.codegen.emit import for_each, load, store
+from pytensor.link.llvm.codegen.emit import load, store
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
 )
@@ -170,8 +170,7 @@ class Halve(Op):
 
 def _halve(cg, out):
     b = cg.b
-    for_each(
-        b,
+    cg.for_each(
         out.shape,
         [out],
         lambda p: store(
@@ -200,8 +199,7 @@ def _(op, node, cg, inputs, outputs):
     (x,) = inputs
     out = outputs[0].allocate(x.shape)
     b = cg.b
-    for_each(
-        b,
+    cg.for_each(
         x.shape,
         [x, out],
         lambda p: store(

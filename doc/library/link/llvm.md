@@ -461,7 +461,7 @@ r:` puts the code of the block into an outlined body function, called per chunk
 process-wide `Runtime`; `pytensor_llvm.set_threads`, `PYTENSOR_LLVM_THREADS`).
 Values of the enclosing function used inside are captured automatically (stored in an
 environment, loaded in the body), and the enclosing `ctx` stands for the chunk's own
-context there: emitters don't change. The loop builder (`for_each`, CAReduce's loops)
+context there: emitters don't change. The loop builder (`Codegen.for_each` and `Codegen.loop_nest`, given a `parallel_cost`)
 uses a region for its flat loop or its outermost loop when the cost estimate says it's
 worth it (statically when the shapes are; otherwise the runtime runs a single chunk
 directly), with chunks of about `CHUNK_COST`. So far: Elemwise, copies and partial
@@ -608,6 +608,10 @@ On top of it, in Python (`codegen/`):
   convert, `a.view(...)` with `a.view_layout(...)` for views, `a.loop_view(b, shape)`
   and `a.is_contiguous(b, shape)` for loops, `a.check_strides(cg, layout, what)` and
   `dst.copy_from(cg, src)`.
+* `emit.Codegen` is the context emitters get (`cg`): the builder `cg.b`, the module,
+  checks (`cg.check(ok, message)`, `cg.checked_index(i, n, message)`), temporaries
+  (`cg.temporary(scalar_type, shape)`) and loops (`cg.for_each(shape, arrays, body)`,
+  `cg.loop_nest(shape, arrays, body, order)`).
 * `emit.Slot` is an output slot, the struct a node fills with its result
   (`{data, lengths, strides, owner}`; the owner is null for a view):
   `Slot.alloca(b, ndim)`, `slot.read(b, scalar_type, shape, layout) -> Array`,

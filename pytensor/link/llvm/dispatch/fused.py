@@ -18,9 +18,7 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     advance,
     cast,
-    checked_index,
     constant,
-    for_each,
     index_bounds,
     load,
     loop_order,
@@ -213,8 +211,7 @@ def emit_fused(op, node, cg, inputs, outputs):
             init = constant(
                 b, spec.acc, identity_value(spec.scalar_op, spec.identity, spec.acc)
             )
-            for_each(
-                b,
+            cg.for_each(
                 oshape,
                 [acc],
                 lambda p, init=init, spec=spec: store(b, spec.acc, init, p[0]),
@@ -256,8 +253,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         return inputs[k].load(b, i).astype(ps.int64).value
 
     def checked(v, n, what, k):
-        return checked_index(
-            cg,
+        return cg.checked_index(
             v,
             n,
             f"FusedElemwise: index out of bounds ({what})",

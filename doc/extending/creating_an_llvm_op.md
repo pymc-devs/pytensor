@@ -667,9 +667,9 @@ else:
     ...  # a loop nest following the strides
 ```
 
-For loops that visit every element of several arrays, `for_each` in `codegen/emit.py`
-does exactly this: it picks a flat loop when the layouts allow it, a nest when they
-rule it out, and generates both with a check when they leave it open.
+For loops that visit every element of several arrays, `cg.for_each(shape, arrays,
+body)` does exactly this: it picks a flat loop when the layouts allow it, a nest when
+they rule it out, and generates both with a check when they leave it open.
 
 ### What an op says about its outputs
 

@@ -8,7 +8,6 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     c_strides,
     cast,
-    for_each,
     load,
     size,
     store,
@@ -105,7 +104,7 @@ def _(op, node, cg, inputs, outputs):
             p[1],
         )
 
-    for_each(b, shape, [src, out], body)
+    cg.for_each(shape, [src, out], body)
 
 
 @llvm_emit.register(AllocEmpty)

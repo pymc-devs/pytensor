@@ -21,7 +21,6 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     c_strides,
     cast,
-    for_each,
     load,
     size,
     store,
@@ -277,7 +276,7 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
         src = ps.int64 if v.type == ir.i64 else ps.float64
         store(b, out.scalar_type, cast(b, v, src, out.scalar_type), ptrs[len(views)])
 
-    for_each(b, shape, arrays, body)
+    cg.for_each(shape, arrays, body)
 
 
 def _ok(b, check, v):

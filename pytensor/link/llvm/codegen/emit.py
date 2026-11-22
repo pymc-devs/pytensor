@@ -358,7 +358,7 @@ class Array:
                 p[1],
             )
 
-        for_each(b, self.shape, [src, self], body, cg.parallel_policy(1.0))
+        cg.for_each(self.shape, [src, self], body, parallel_cost=1.0)
 
 
 def unknown_layout(shape) -> Layout:
@@ -437,22 +437,6 @@ def index_bounds(var):
     if var.type.dtype.startswith("uint"):
         return 0, None
     return None, None
-
-
-def checked_index(cg, i, n, message, bounds=(None, None)):
-    """Index `i` (i64) into an axis of length `n`: negative values wrap, out-of-range
-    ones fail with `message`. Generates only what `bounds` (`index_bounds`), a constant
-    `i` and a constant `n` don't already guarantee."""
-    b = cg.b
-    if i.const_int is not None:
-        bounds = (i.const_int, i.const_int)
-    lo, hi = bounds
-    if lo is None or lo < 0:
-        i = b.select(b.slt(i, 0), b.add(i, n), i)
-    nc = n.const_int
-    if lo is None or hi is None or nc is None or lo < -nc or hi >= nc:
-        cg.check(b.ult(i, n), message)  # also catches what is still negative
-    return i
 
 
 # ------------------------------------------------------------------ casts
@@ -818,6 +802,109 @@ class Codegen:
         data = self.temp_memory(nbytes, escapes)
         return Array.packed(b, scalar_type, data, shape, layout)
 
+    # ---- loops and indices
+
+    def for_each(self, shape, arrays, body, parallel_cost: float | None = None) -> None:
+        """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
+
+        `arrays` have strides over `shape` (0 where broadcast). The loops follow memory
+        order (`loop_order`). When every array is packed in that order this is one flat
+        loop over element indices (what the vectorizer likes). The layouts decide that
+        when they can; only arrays whose layout leaves it open are checked at run time,
+        and then both the flat loop and the nest are generated.
+
+        With `parallel_cost`, the cost of one element (`parallel_policy`), the loop (the
+        flat one, or the nest's outermost) runs in chunks that may run in parallel when
+        there's enough work. Iterations must not depend on each other."""
+        b = self.b
+        order = loop_order(shape, arrays)
+        policy = self._policy(shape, parallel_cost)
+        contig = b.const_bool(True)
+        for a in arrays:
+            contig = b.and_(contig, a.is_contiguous(b, shape, order))
+        c = contig.const_int
+        if c == 1:
+            self._flat_loop(shape, arrays, body, policy)
+        elif c == 0:
+            self._loop_nest(shape, arrays, body, order, policy=policy)
+        else:
+            b.if_else(
+                contig,
+                lambda: self._flat_loop(shape, arrays, body, policy),
+                lambda: self._loop_nest(shape, arrays, body, order, policy=policy),
+            )
+
+    def loop_nest(
+        self, shape, arrays, body, order, parallel_cost: float | None = None
+    ) -> None:
+        """Loops over the axes in `order` (outermost first; may be a subset of the axes),
+        calling `body(ptrs)` with the element pointers of `arrays` in the innermost
+        one. Unlike `for_each`, this never uses a flat loop. With `parallel_cost`, the
+        outermost loop runs in chunks that may run in parallel."""
+        policy = self._policy(shape, parallel_cost)
+        self._loop_nest(shape, arrays, body, order, policy=policy)
+
+    def checked_index(self, i, n, message, bounds=(None, None)):
+        """Index `i` (i64) into an axis of length `n`: negative values wrap, out-of-range
+        ones fail with `message`. Generates only what `bounds` (`index_bounds`), a
+        constant `i` and a constant `n` don't already guarantee."""
+        b = self.b
+        if i.const_int is not None:
+            bounds = (i.const_int, i.const_int)
+        lo, hi = bounds
+        if lo is None or lo < 0:
+            i = b.select(b.slt(i, 0), b.add(i, n), i)
+        nc = n.const_int
+        if lo is None or hi is None or nc is None or lo < -nc or hi >= nc:
+            self.check(b.ult(i, n), message)  # also catches what is still negative
+        return i
+
+    def _policy(self, shape, parallel_cost: float | None) -> ParallelPolicy | None:
+        if parallel_cost is None:
+            return None
+        policy = self.parallel_policy(parallel_cost)
+        if policy is not None and not policy.worth_it(size(self.b, shape)):
+            return None
+        return policy
+
+    def _flat_loop(self, shape, arrays, body, policy=None) -> None:
+        b = self.b
+        n = size(b, shape)
+
+        def at(i):
+            body([b.gep(memory_type(a.scalar_type), a.data, i) for a in arrays])
+
+        if policy is not None:
+            policy.range(b, n, b.i64(1), at)
+            return
+        with b.loop(n) as i:
+            at(i)
+
+    def _loop_nest(
+        self, shape, arrays, body, order, level=0, base=None, policy=None
+    ) -> None:
+        b = self.b
+        if base is None:
+            base = [a.data for a in arrays]
+        if level == len(order):
+            body(base)
+            return
+        axis = order[level]
+
+        def at(i):
+            ptrs = [
+                advance(b, p, i, a.strides[axis], a.scalar_type)
+                for p, a in zip(base, arrays, strict=True)
+            ]
+            self._loop_nest(shape, arrays, body, order, level + 1, ptrs)
+
+        if policy is not None and level == 0:
+            inner = size(b, [shape[a] for a in order[1:]])
+            policy.range(b, shape[axis], inner, at)
+            return
+        with b.loop(shape[axis]) as i:
+            at(i)
+
 
 # ------------------------------------------------------------------ loops
 
@@ -886,75 +973,6 @@ class ParallelPolicy:
         self.cg.check(b.eq(chunk.result, 0), None)
 
 
-def for_each(b, shape, arrays, body, policy: ParallelPolicy | None = None):
-    """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
-
-    `arrays` have strides over `shape` (0 where broadcast). The loops follow memory order
-    (`loop_order`). When every array is packed in that order this is one flat loop over
-    element indices (what the vectorizer likes). The layouts decide that when they can;
-    only arrays whose layout leaves it open are checked at run time, and then both the
-    flat loop and the nest are generated.
-
-    With `policy`, the loop (the flat one, or the nest's outermost) runs in chunks that may
-    run in parallel when there's enough work. Iterations must not depend on each other.
-    """
-    order = loop_order(shape, arrays)
-    if policy is not None and not policy.worth_it(size(b, shape)):
-        policy = None
-    contig = b.const_bool(True)
-    for a in arrays:
-        contig = b.and_(contig, a.is_contiguous(b, shape, order))
-    c = contig.const_int
-    if c == 1:
-        _flat(b, shape, arrays, body, policy)
-    elif c == 0:
-        _strided(b, shape, arrays, body, order, policy=policy)
-    else:
-        b.if_else(
-            contig,
-            lambda: _flat(b, shape, arrays, body, policy),
-            lambda: _strided(b, shape, arrays, body, order, policy=policy),
-        )
-
-
-def _flat(b, shape, arrays, body, policy=None):
-    n = size(b, shape)
-
-    def at(i):
-        body([b.gep(memory_type(a.scalar_type), a.data, i) for a in arrays])
-
-    if policy is not None:
-        policy.range(b, n, b.i64(1), at)
-        return
-    with b.loop(n) as i:
-        at(i)
-
-
-def _strided(b, shape, arrays, body, order, level=0, base=None, policy=None):
-    """Loops over the axes in `order` (outermost first; may be a subset of the axes).
-    With `policy`, the outermost loop runs in chunks that may run in parallel."""
-    if base is None:
-        base = [a.data for a in arrays]
-    if level == len(order):
-        body(base)
-        return
-    axis = order[level]
-
-    def at(i):
-        ptrs = [
-            advance(b, p, i, a.strides[axis], a.scalar_type)
-            for p, a in zip(base, arrays, strict=True)
-        ]
-        _strided(b, shape, arrays, body, order, level + 1, ptrs)
-
-    if policy is not None and level == 0:
-        inner = size(b, [shape[a] for a in order[1:]])
-        policy.range(b, shape[axis], inner, at)
-        return
-    with b.loop(shape[axis]) as i:
-        at(i)
-
-
 __all__ = [
     "Array",
     "Codegen",
@@ -963,9 +981,7 @@ __all__ = [
     "TensorRepr",
     "advance",
     "cast",
-    "checked_index",
     "constant",
-    "for_each",
     "index_bounds",
     "load",
     "loop_order",

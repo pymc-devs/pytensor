@@ -9,11 +9,9 @@ from pytensor.link.llvm.analysis.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.analysis.work import scalar_cost
 from pytensor.link.llvm.codegen.emit import (
     Array,
-    _strided,
     advance,
     cast,
     constant,
-    for_each,
     load,
     loop_order,
     memory_type,
@@ -105,7 +103,7 @@ def _(op, node, cg, inputs, outputs):
         for k, (v, d) in enumerate(zip(res, out_types, strict=True)):
             store(b, d, v, ptrs[n_in + k])
 
-    for_each(b, shape, operands, body, cg.parallel_policy(scalar_cost(op.scalar_op)))
+    cg.for_each(shape, operands, body, parallel_cost=scalar_cost(op.scalar_op))
 
 
 @llvm_emit.register(ps.ScalarOp)
@@ -179,7 +177,7 @@ def _(op, node, cg, inputs, outputs):
 
     # partial: accumulate into an array of the accumulator dtype
     acc_arr = res if acc == out_type else cg.temporary(acc, out_shape)
-    for_each(b, out_shape, [acc_arr], lambda p: store(b, acc, init, p[0]))
+    cg.for_each(out_shape, [acc_arr], lambda p: store(b, acc, init, p[0]))
     acc_strides, source, k = [], [], 0
     for is_reduced in reduced:
         if is_reduced:
@@ -207,14 +205,8 @@ def _(op, node, cg, inputs, outputs):
     loops = order[:-1] if reduced[inner] else order
     # the outermost loop may run in parallel when each iteration has its own
     # accumulators (it isn't over a reduced axis)
-    policy = (
-        cg.parallel_policy(scalar_cost(op.scalar_op))
-        if loops and not reduced[loops[0]]
-        else None
-    )
-    if policy is not None and not policy.worth_it(size(b, x.shape)):
-        policy = None
-    _strided(b, x.shape, [x, accs], body, loops, policy=policy)
+    cost = scalar_cost(op.scalar_op) if loops and not reduced[loops[0]] else None
+    cg.loop_nest(x.shape, [x, accs], body, loops, parallel_cost=cost)
     if acc != out_type:
         res.copy_from(cg, acc_arr)
 

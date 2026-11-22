@@ -47,7 +47,6 @@ from pytensor.link.llvm.codegen.emit import (
     advance,
     cast,
     constant,
-    for_each,
     load,
     store,
 )
@@ -216,7 +215,7 @@ def _select(b, cond, a: Array, other: Array) -> Array:
 def _fill_zero(cg, a: Array):
     b = cg.b
     zero = constant(b, a.scalar_type, 0)
-    for_each(b, a.shape, [a], lambda p: store(b, a.scalar_type, zero, p[0]))
+    cg.for_each(a.shape, [a], lambda p: store(b, a.scalar_type, zero, p[0]))
 
 
 def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:

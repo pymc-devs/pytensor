@@ -7,8 +7,6 @@ from pytensor.link.llvm.analysis.layout import subtensor_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     cast,
-    checked_index,
-    for_each,
     load,
     store,
 )
@@ -61,8 +59,7 @@ def index(cg, x: Array, entries) -> Array:
             shape.append(length)
             strides.append(b.mul(st, step, nsw=True))
         else:
-            i = checked_index(
-                cg,
+            i = cg.checked_index(
                 _i64(b, *e),
                 n,
                 f"index out of bounds for axis {axis}",
@@ -145,7 +142,7 @@ def _(op, node, cg, inputs, outputs):
             v = emit_scalar(scalar_add, b, [(load(b, dt, p[0]), dt), (v, dt)], [dt])[0]
         store(b, dt, v, p[0])
 
-    for_each(b, view.shape, [view, ys], body)
+    cg.for_each(view.shape, [view, ys], body)
 
 
 __all__ = ["index"]

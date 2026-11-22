@@ -16,8 +16,6 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     advance,
     cast,
-    checked_index,
-    for_each,
     index_bounds,
     load,
     store,
@@ -123,12 +121,8 @@ def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
         axis = pat.first + j
         n = base.shape[axis]
         i = cast(b, load(b, arr.scalar_type, ip), arr.scalar_type, ps.int64)
-        i = checked_index(
-            cg,
-            i,
-            n,
-            f"index out of bounds for axis {axis} ({what})",
-            pat.bounds[j],
+        i = cg.checked_index(
+            i, n, f"index out of bounds for axis {axis} ({what})", pat.bounds[j]
         )
         p = advance(b, p, i, base.strides[axis], base.scalar_type)
     return p
@@ -147,7 +141,7 @@ def _(op, node, cg, inputs, outputs):
         src = element(cg, x, pat, p[0], p[1 : 1 + k], "read")
         store(b, out.scalar_type, load(b, x.scalar_type, src), p[-1])
 
-    for_each(b, pat.view_shape, [base_op, *idx_ops, out], body)
+    cg.for_each(pat.view_shape, [base_op, *idx_ops, out], body)
 
 
 @llvm_emit.register(AdvancedIncSubtensor)
@@ -200,4 +194,4 @@ def _(op, node, cg, inputs, outputs):
         store(b, dt, v, dst)
 
     # sequential, so duplicate indices accumulate (inc) or the last one wins (set)
-    for_each(b, vs, [base_op, *idx_ops, ys], body)
+    cg.for_each(vs, [base_op, *idx_ops, ys], body)
