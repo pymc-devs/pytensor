@@ -2,14 +2,20 @@ import numpy as np
 import pytest
 
 import pytensor.scalar as ps
+import pytensor.tensor as pt
 from pytensor.compile.maker import function
 from pytensor.compile.mode import OPT_NONE, Mode, get_default_mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.basic import Alloc, alloc, as_tensor_variable, second
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.extra_ops import Repeat, Unique, repeat, unique
+from pytensor.tensor.extra_ops import CumOp, Repeat, Unique, repeat, unique
+from pytensor.tensor.rewriting.extra_ops import (
+    local_cumop_of_alloc,
+    local_useless_cumop,
+)
 from pytensor.tensor.type import dscalar
+from tests.unittest_tools import RewriteTester
 
 
 @pytest.mark.parametrize("return_index", [False])
@@ -229,3 +235,46 @@ def test_local_Unique_second(
 
     y_exp_val, y_val = y_fn(x_val)
     assert np.array_equal(y_exp_val, y_val)
+
+
+@pytest.mark.parametrize("mode", ["add", "mul"])
+@pytest.mark.parametrize(
+    "value_shape, axis, value_axis",
+    [
+        ((), 0, None),
+        ((3,), 0, None),
+        ((3,), 1, 0),
+        ((2, 1), 0, 0),
+        ((2, 1), 1, None),
+    ],
+)
+def test_local_cumop_of_alloc(mode, value_shape, axis, value_axis):
+    value = pt.tensor("value", shape=value_shape)
+    allocated = pt.alloc(value, 2, 3)
+    out = CumOp(axis=axis, mode=mode)(allocated)
+    result = RewriteTester(
+        [value], [out], include=None, custom_rewrite=local_cumop_of_alloc
+    )
+    if value_axis is not None:
+        expected = pt.alloc(CumOp(axis=value_axis, mode=mode)(value), 2, 3)
+    elif mode == "add":
+        pattern = ["x", "x"]
+        pattern[axis] = 0
+        n = allocated.owner.inputs[1 + axis]
+        k = pt.arange(1, n + 1, dtype=value.dtype).dimshuffle(pattern)
+        expected = pt.alloc(value * k, 2, 3)
+    else:
+        # cumprod along a broadcast axis is left alone
+        expected = out
+    result.assert_graph(expected)
+    rng = np.random.default_rng(0)
+    value_test = np.asarray(rng.uniform(0.5, 1.5, size=value_shape), dtype=value.dtype)
+    result.assert_eval(value_test)
+
+
+@pytest.mark.parametrize("mode", ["add", "mul"])
+def test_local_useless_cumop(mode):
+    x = pt.tensor("x", shape=(3, 1))
+    out = CumOp(axis=1, mode=mode)(x)
+    result = RewriteTester([x], [out], include=None, custom_rewrite=local_useless_cumop)
+    result.assert_graph(x)
