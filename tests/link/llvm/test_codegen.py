@@ -9,7 +9,8 @@ from pytensor.graph.basic import Constant
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.codegen import Passing, compile_node  # noqa: E402
+from pytensor.link.llvm.codegen import compile_node  # noqa: E402
+from pytensor.link.llvm.codegen.signature import Passing  # noqa: E402
 
 
 rng = np.random.default_rng(42)

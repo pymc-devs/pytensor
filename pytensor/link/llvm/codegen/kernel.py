@@ -221,4 +221,8 @@ def compile_node(
     return CompiledNode(compiled, node_function.signature)
 
 
-__all__ = ["CompiledNode", "build_kernel_wrapper", "compile_node"]
+__all__ = [
+    "CompiledNode",
+    "build_kernel_wrapper",
+    "compile_node",
+]

@@ -126,7 +126,7 @@ class SlotDestination(OutputDestination):
     aliased_inputs: tuple[int, ...] = ()
     #: Allocate in the scratch memory of the surrounding compiled unit instead of a
     #: runtime buffer. The slot's owner is then that scratch memory, which the unit
-    #: frees (`emit_steps`).
+    #: frees (`_emit_steps`).
     in_scratch_memory: bool = False
     #: The packed layout `allocate` produces. None: C-contiguous.
     allocation_layout: Layout | None = None
@@ -312,7 +312,6 @@ class ScalarDestination(OutputDestination):
 
 __all__ = [
     "OutputDestination",
-    "ProvidedDestination",
     "ScalarDestination",
     "SlotDestination",
 ]

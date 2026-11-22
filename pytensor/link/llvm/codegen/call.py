@@ -147,7 +147,7 @@ class _Argument(NamedTuple):
     slot_destination: SlotDestination | None = None
 
 
-def call_kernel(
+def _call_kernel(
     cg: Codegen,
     kernel: Kernel,
     index: int,
@@ -272,7 +272,7 @@ def call_destroying(
     inputs: Sequence[KernelInput],
     outputs: Sequence[OutputDestination | None],
 ) -> None:
-    """`call_kernel`, with copies of the inputs the kernel overwrites
+    """`_call_kernel`, with copies of the inputs the kernel overwrites
     (`Kernel.destroys`, positions in `inputs`): it may only write its outputs."""
     from pytensor.link.llvm.codegen.array import Array
 
@@ -283,7 +283,7 @@ def call_destroying(
             mine.copy_from(cg, a)
             a = mine
         ins.append((a, scalar_type))
-    call_kernel(cg, kernel, index, ins, outputs)
+    _call_kernel(cg, kernel, index, ins, outputs)
 
 
 def build_call_function(
@@ -359,10 +359,5 @@ def _tensor(representation: Representation) -> TensorRepr:
 
 __all__ = [
     "Kernel",
-    "KernelInput",
     "LinkTable",
-    "build_call_function",
-    "call_destroying",
-    "call_kernel",
-    "linked",
 ]

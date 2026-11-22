@@ -288,8 +288,7 @@ byte in memory and an `i1` in a register, and they know.
 ### The emitter
 
 ```python
-from pytensor.link.llvm.codegen.interface import llvm_emit
-from pytensor.link.llvm.codegen.num import Num
+from pytensor.link.llvm.codegen import Num, llvm_emit
 
 
 @llvm_emit.register(CumMax)
@@ -731,7 +730,7 @@ is known, so is the other:
 
 ```python
 from pytensor.link.llvm.analysis.layout import itemsize_of, shape_of
-from pytensor.link.llvm.codegen.interface import llvm_layout
+from pytensor.link.llvm.codegen import llvm_layout
 
 
 @llvm_layout.register(Reverse)

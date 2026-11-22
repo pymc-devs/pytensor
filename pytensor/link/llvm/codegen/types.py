@@ -166,10 +166,6 @@ class TensorRepr:
         return lengths
 
     @property
-    def contiguous(self) -> bool:
-        return self.layout.is_c(self.shape)
-
-    @property
     def ir_type(self) -> ir.Type:
         return _tensor_ir_type(self.ndim, len(self.dynamic_axes), len(self.stride_axes))
 
@@ -243,3 +239,18 @@ def kernel_params() -> list[ir.Type]:
 
 
 PTARRAY_SIZE = 40
+
+
+__all__ = [
+    "NoneRepr",
+    "Representation",
+    "ScalarRepr",
+    "TensorRepr",
+    "element_type",
+    "ir",
+    "is_absent",
+    "memory_type",
+    "repr_of",
+    "value_bits",
+    "value_type",
+]

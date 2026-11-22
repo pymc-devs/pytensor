@@ -416,4 +416,11 @@ def cast(b: ir.Builder, v: ir.Value, src: ScalarType, dst: ScalarType) -> ir.Val
     return v  # int8 <-> uint8
 
 
-__all__ = ["Num", "NumLike", "cast", "constant", "load", "store"]
+__all__ = [
+    "Num",
+    "NumLike",
+    "cast",
+    "constant",
+    "load",
+    "store",
+]

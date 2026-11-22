@@ -78,7 +78,7 @@ class GraphFunction:
         This emits code for the graph's constants at the current point, so call it
         before a loop that runs the graph, not inside the loop."""
         constants: dict[int, Array | ir.Value] = {}
-        entries = bind_constants(cg, planned.constants, constants)
+        entries = _bind_constants(cg, planned.constants, constants)
         produced_by = {
             vid: output
             for step in planned.steps
@@ -159,13 +159,13 @@ class GraphFunction:
                 slot_targets[vid] = out
                 target_of[vid] = k
 
-        memory, arena = temporaries_of(
+        memory, arena = _temporaries_of(
             cg, planned.steps, memory_targets, planned.out_ids
         )
 
         name = self.name if self._calls == 0 else f"{self.name}{self._calls}"
         self._calls += 1
-        written, owned = emit_steps(
+        written, owned = _emit_steps(
             cg,
             name,
             planned.steps,
@@ -280,13 +280,13 @@ def build_graph_function(
 # ------------------------------------------------------------------ emitting the steps
 #
 # The machinery `GraphFunction.emit_call` uses: it emits the steps of a graph one after
-# the other (`emit_steps`). For each step it calls the step's function, which is
+# the other (`_emit_steps`). For each step it calls the step's function, which is
 # inlined: either the node's generated code, or a call of the step's kernel. Where the
 # steps' results go:
 #
 # * a result the step writes into memory it is given goes into memory a graph output
 #   provides (`memory_targets`, e.g. a row of a Scan's buffer) if that memory has the
-#   layout the step needs, else into a temporary (`temporaries_of`: on the stack, or in
+#   layout the step needs, else into a temporary (`_temporaries_of`: on the stack, or in
 #   an arena shared by values that are never needed at the same time);
 # * a result the step allocates itself goes straight into a graph output's slot if the
 #   output takes it (`slot_targets`, `OutputDestination.slot_for_new_memory`), else
@@ -295,7 +295,7 @@ def build_graph_function(
 # * 0-d constants are written into the code.
 
 
-#: the cells of a profile (`emit_steps`'s `profile`): profiling on (nonzero),
+#: the cells of a profile (`_emit_steps`'s `profile`): profiling on (nonzero),
 #: number of calls, then nanoseconds per step
 PROFILE_ON, PROFILE_CALLS, PROFILE_ITEMS = 0, 1, 2
 
@@ -307,7 +307,7 @@ def _writes_into(memory: Array, output: Output) -> bool:
     return memory.layout.implies(tensor.layout, tensor.shape, memory.itemsize)
 
 
-def temporaries_of(
+def _temporaries_of(
     cg: Codegen,
     steps: Sequence[Step],
     memory_targets: Mapping[int, Array],
@@ -346,7 +346,7 @@ class _SlotRead:
     in_scratch: bool = False
 
 
-def bind_constants(
+def _bind_constants(
     cg: Codegen,
     constants: Mapping[int, tuple[TensorType | ScalarType, Any]],
     values: dict[int, Array | ir.Value],
@@ -388,7 +388,7 @@ def bind_constants(
     return entries
 
 
-def emit_steps(
+def _emit_steps(
     cg: Codegen,
     name: str,
     steps: Sequence[Step],
@@ -410,7 +410,7 @@ def emit_steps(
     * `slot_targets`: vid -> `OutputDestination`: whose slot a value a step allocates
       may be allocated into, if the destination takes it (`slot_for_new_memory`);
     * `memory`: {vid: pointer}: where the other values written into given memory go
-      (`temporaries_of`); others get temporary memory of their own;
+      (`_temporaries_of`); others get temporary memory of their own;
     * `profile`: the link entry of the profile cells (`PROFILE_*`): while profiling is
       on, each step's wall time is added to its cell.
 
@@ -618,5 +618,4 @@ __all__ = [
     "PROFILE_ON",
     "GraphFunction",
     "build_graph_function",
-    "emit_steps",
 ]

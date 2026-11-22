@@ -62,15 +62,6 @@ class Array:
         """The lengths as ints, None where not constant."""
         return [s.const_int for s in self.shape]
 
-    def with_strides(
-        self,
-        shape: Sequence[ir.Value],
-        strides: Sequence[ir.Value],
-        layout: Layout | None = None,
-    ) -> Array:
-        """The same memory with other lengths/strides (e.g. a broadcast view)."""
-        return self.view(self.data, shape, strides, layout)
-
     def with_layout(self, layout: Layout) -> Array:
         """Return the same array, claiming `layout` for its strides."""
         return replace(self, layout=layout)
@@ -536,3 +527,11 @@ class Slot:
     def release(self, b: ir.Builder, ctx: ir.Value) -> None:
         """Give up the owner (a no-op for null)."""
         b.rt_decref(ctx, self.owner(b))
+
+
+__all__ = [
+    "Array",
+    "advance",
+    "c_strides",
+    "size",
+]

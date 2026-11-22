@@ -303,13 +303,9 @@ def node_signature(
 __all__ = [
     "Output",
     "Passing",
-    "Representation",
     "Signature",
-    "can_update_in_place",
-    "destroyed_inputs",
     "known_layouts",
     "node_outputs",
     "node_signature",
     "skipped_inputs",
-    "view_inputs",
 ]

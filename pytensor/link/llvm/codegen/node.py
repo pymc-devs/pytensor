@@ -67,7 +67,7 @@ class NodeFunction:
     constants: dict[int, int] = field(default_factory=dict)
 
 
-def debug_name(node: Apply) -> str:
+def _debug_name(node: Apply) -> str:
     """The name of the function of `node` in debug information: the node with the names
     of its inputs (shortened). A compiled unit is named after the nodes inside it."""
     from pytensor.compile.builders import Execution
@@ -122,7 +122,7 @@ def build_node_function(
         signature.param_types(),
         ir.i32,
         inline=ir.Inline.Always,
-        debug_name=debug_name(node),
+        debug_name=_debug_name(node),
     )
     b = function.builder()
     params = iter(function.params)
@@ -309,4 +309,7 @@ def _handle(
     )
 
 
-__all__ = ["NodeFunction", "build_node_function", "debug_name"]
+__all__ = [
+    "NodeFunction",
+    "build_node_function",
+]

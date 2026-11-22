@@ -196,7 +196,7 @@ def test_layout_check_catches_a_wrong_claim():
 def test_specialized_signature_passes_fewer_strides():
     x = pt.dmatrix("x")
     node = pt.exp(x).owner
-    from pytensor.link.llvm.codegen import node_signature
+    from pytensor.link.llvm.codegen.signature import node_signature
 
     any_ = node_signature(node)
     c = node_signature(node, input_layouts=[C(2)])
