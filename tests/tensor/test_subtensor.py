@@ -1101,7 +1101,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
         idx = lvector()
         t = n[idx]
 
-        f = self.function([idx], t, op=AdvancedSubtensor)
+        mode = self.mode.excluding(
+            "local_advanced_subtensor_remove_broadcastable_index",
+            "local_advanced_inc_subtensor_remove_broadcastable_index",
+        )
+        f = self.function([idx], t, op=AdvancedSubtensor, mode=mode)
         topo = f.maker.fgraph.toposort()
         topo_ = [node for node in topo if not isinstance(node.op, DeepCopyOp)]
         assert len(topo_) == 1
@@ -1118,7 +1122,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         # Test the gradient
         c = t.sum()
         gn = pytensor.grad(c, n)
-        g = self.function([idx], gn, op=AdvancedIncSubtensor)
+        g = self.function([idx], gn, op=AdvancedIncSubtensor, mode=mode)
         g_0 = g([0])
         assert g_0.shape == (1, 3)
         assert np.allclose(g_0, 1)
@@ -1722,6 +1726,24 @@ class TestIncSubtensor:
     the new (read: not deprecated) inc_subtensor, set_subtensor
     functions.
     """
+
+    @pytest.mark.parametrize(
+        "op, index_dtype, index_shape, indexed_ndim",
+        [
+            pytest.param(IncSubtensor, "int64", (), 1, id="scalar"),
+            pytest.param(AdvancedIncSubtensor, "int64", (None, None), 3, id="matrix"),
+            pytest.param(AdvancedIncSubtensor, "bool", (None, None), 1, id="mask"),
+        ],
+    )
+    def test_update_rank(self, op, index_dtype, index_shape, indexed_ndim):
+        x = matrix("x")
+        idx = tensor("idx", dtype=index_dtype, shape=index_shape)
+        y = tensor("y", shape=(1,) * (indexed_ndim + 1))
+        write = op((0,))
+
+        with pytest.raises(TypeError, match=f"increment a {indexed_ndim}-dimensional"):
+            write(x, y, idx)
+        assert write(x, y.squeeze(0), idx).type == x.type
 
     def test_simple_2d(self):
         # Increments or sets part of a tensor by a scalar using full slice and
