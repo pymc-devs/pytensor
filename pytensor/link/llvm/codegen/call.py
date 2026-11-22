@@ -37,16 +37,17 @@ if TYPE_CHECKING:
         OutputDestination,
         SlotDestination,
     )
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
 
 
 #: An input of a kernel call: the value (None for one without data) and its type.
 type KernelInput = tuple[Array | ir.Value | None, ScalarType | None]
 
 
-@dataclass
+@dataclass(frozen=True)
 class Kernel:
-    """Something generated code can call through the kernel ABI: a Rust kernel, a numba
-    kernel, or generated code compiled on its own."""
+    """A kernel generated code can call through the kernel ABI, available now: a Rust
+    kernel or a numba kernel."""
 
     address: int
     #: the kernel's config (`const void* config` of the kernel ABI)
@@ -55,38 +56,46 @@ class Kernel:
     keepalive: object = None
 
 
+#: What generated code calls: a kernel available now, or generated code in a module of
+#: its own (`KernelModule`), compiled with the code calling it and linked then (`link`).
+type Callee = Kernel | KernelModule
+
+
 @dataclass
 class LinkTable:
     """The config of a generated kernel: pointer-sized entries holding the kernels it
     calls (address, then their config: two entries) and the contents of its array
-    constants (one entry). The IR only refers to entry positions."""
+    constants (one entry). The IR only refers to entry positions.
+
+    It is filled while code is generated, then fixed when its module is linked
+    (`kernel_module.link`): its address is known from then on, and the entries of
+    modules it calls are written then."""
 
     entries: list[int] = field(default_factory=list)
     _keep: list[object] = field(default_factory=list)
     _table: np.ndarray | None = None
-    #: (entry, kernel) of every kernel linked, for `relink`
-    _kernels: list[tuple[int, Kernel]] = field(default_factory=list)
+    #: (entry, module) of the modules linked, whose entries `link` writes
+    _modules: list[tuple[int, KernelModule]] = field(default_factory=list)
     #: (itemsize, contents) -> entry of the arrays linked (equal ones share one)
     _arrays: dict[tuple[int, bytes], int] = field(default_factory=dict)
 
-    def link_kernel(self, kernel: Kernel) -> int:
-        """The entry of `kernel`'s address (its config is in the next entry)."""
-        self.entries += [kernel.address, kernel.config]
-        self._keep.append(kernel)
-        self._kernels.append((len(self.entries) - 2, kernel))
-        return len(self.entries) - 2
-
-    def relink(self) -> None:
-        """Update the kernels' entries: for kernels whose address (or config) was set
-        after they were linked, once compiled. Before the table is used."""
-        for k, kernel in self._kernels:
-            self.entries[k : k + 2] = [kernel.address, kernel.config]
-        self._table = None
+    def link_kernel(self, callee: Callee) -> int:
+        """The entry of `callee`'s address (its config is in the next entry)."""
+        self._check_open()
+        k = len(self.entries)
+        if isinstance(callee, Kernel):
+            self.entries += [callee.address, callee.config]
+        else:
+            self.entries += [0, 0]
+            self._modules.append((k, callee))
+        self._keep.append(callee)
+        return k
 
     def link_array(self, array: np.ndarray, share: bool = True) -> int:
         """The entry holding the address of the contents of `array`, a C-contiguous
         buffer (kept alive with the table). With `share`, equal buffers (read only)
         share an entry (e.g. a matrix and its transpose, each packed in its own order)."""
+        self._check_open()
         if not array.flags.c_contiguous:
             raise ValueError("link_array takes C-contiguous arrays")
         key = (array.dtype.itemsize, array.tobytes()) if share else None
@@ -98,25 +107,36 @@ class LinkTable:
             self._arrays[key] = len(self.entries) - 1
         return self._arrays[key]
 
-    @property
-    def table(self) -> np.ndarray | None:
-        """The entries as a uint64 array (None if empty). Keep it (and `keepalive`)
-        alive while the code runs."""
-        if not self.entries:
-            return None
-        if self._table is None or len(self._table) != len(self.entries):
-            self._table = np.array(self.entries, dtype=np.uint64)
-        return self._table
+    def fix(self) -> None:
+        """Fix the table (`link`): no entries can be added, its address is final."""
+        if self._table is None:
+            self._table = np.array(self.entries or [0], dtype=np.uint64)
+
+    def write_module_entries(self) -> None:
+        """Write the address and config of every module linked (once all are fixed and
+        compiled: `link`)."""
+        table = self._fixed()
+        for k, module in self._modules:
+            table[k : k + 2] = [module.address, module.config]
+            self.entries[k : k + 2] = [module.address, module.config]
 
     @property
     def address(self) -> int:
-        """The table's address: the config of the kernel it belongs to (0 if empty)."""
-        t = self.table
-        return 0 if t is None else int(t.ctypes.data)
+        """The table's address: the config of the kernel it belongs to."""
+        return int(self._fixed().ctypes.data)
 
     @property
-    def keepalive(self) -> tuple[np.ndarray | None, list[object]]:
-        return (self.table, self._keep)
+    def keepalive(self) -> tuple[np.ndarray, list[object]]:
+        return (self._fixed(), self._keep)
+
+    def _fixed(self) -> np.ndarray:
+        if self._table is None:
+            raise ValueError("the link table isn't fixed yet (its module isn't linked)")
+        return self._table
+
+    def _check_open(self) -> None:
+        if self._table is not None:
+            raise ValueError("the link table is fixed: its module is linked")
 
 
 def linked(cg: Codegen, index: int) -> ir.Value:
@@ -139,7 +159,7 @@ class _Argument(NamedTuple):
 
 def call_kernel(
     cg: Codegen,
-    kernel: Kernel,
+    kernel: Callee,
     inputs: Sequence[KernelInput],
     outputs: Sequence[OutputDestination | None],
 ) -> None:
@@ -214,7 +234,7 @@ def call_kernel(
             )
         else:
             raise NotImplementedError(
-                f"{kernel.description}: a {type(destination).__name__} output"
+                f"{_name(kernel)}: a {type(destination).__name__} output"
             )
 
     args = b.alloca(ir.Type.array(ptarray, max(len(args_of), 1)))
@@ -255,7 +275,12 @@ def call_kernel(
         b.ret(rc)
 
 
+def _name(callee: Callee) -> str:
+    return callee.description if isinstance(callee, Kernel) else callee.module.name
+
+
 __all__ = [
+    "Callee",
     "Kernel",
     "LinkTable",
 ]

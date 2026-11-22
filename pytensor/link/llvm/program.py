@@ -33,10 +33,14 @@ from pytensor.link.llvm.codegen.graph import (
     build_graph_function,
 )
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
-from pytensor.link.llvm.codegen.kernel_module import CodegenOptions, KernelModule
+from pytensor.link.llvm.codegen.kernel_module import (
+    CodegenOptions,
+    KernelModule,
+    link,
+)
 from pytensor.link.llvm.codegen.plan import PlannedGraph
 from pytensor.link.llvm.codegen.signature import Output, Passing
-from pytensor.link.llvm.codegen.types import TensorRepr, ir, is_absent, repr_of
+from pytensor.link.llvm.codegen.types import TensorRepr, is_absent, repr_of
 from pytensor.link.llvm.planner import Planner
 
 
@@ -250,8 +254,8 @@ class Program:
     def __init__(
         self,
         types,
+        unit,
         node_function,
-        compiled,
         profile,
         steps,
         in_ids,
@@ -262,8 +266,8 @@ class Program:
         self.descriptions = [step.description for step in steps]
         self.arena_bytes = node_function.arena[1]
         self.profile_cells = profile
-        self.address = compiled.address("kernel")
-        self.config = node_function.links.address
+        self.address = unit.address
+        self.config = unit.config
 
         def shape(k):
             return [None if n is None else int(n) for n in types[k].shape]
@@ -279,7 +283,7 @@ class Program:
                 (np.dtype(types[k].dtype), shape(k), m is Passing.CALLER_BUFFER)
                 for k, m in zip(out_ids, modes, strict=True)
             ],
-            [compiled, node_function.links.keepalive],
+            [unit.compiled, unit.links.keepalive],
         )
         self._dump = _dump(
             types, node_function, steps, in_ids, contiguous, out_ids, modes
@@ -514,26 +518,21 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
     build_kernel_wrapper(unit, node_function)
     t1 = time.perf_counter()
 
-    # compile everything at once
-    for m, kernel in planner.modules:
-        m.label = "ptl:" + " ".join(kernel.description.split())[:160]  # perf maps
+    # compile and link everything at once
     unit.module.label = f"ptl:program[{len(steps)}]"
-    compiled = ir.compile_many(
-        [*(m for m, _ in planner.modules), unit.module], opt_level=opts.opt_level
-    )
-    for (_, kernel), c in zip(planner.modules, compiled[:-1], strict=True):
-        kernel.address = c.address("kernel")
-        kernel.keepalive = (kernel.keepalive, c)
-        stats.modules.append(GeneratedModule(kernel.description, c))
+    link([*planner.modules, unit], opts.opt_level)
+    for m in planner.modules:
+        assert m.compiled is not None
+        stats.modules.append(GeneratedModule(m.description, m.compiled))
     stats.n_modules = len(planner.modules)
-    stats.modules.append(GeneratedModule("program", compiled[-1]))
-    node_function.links.relink()
+    assert unit.compiled is not None
+    stats.modules.append(GeneratedModule("program", unit.compiled))
     stats.codegen_s = t1 - t0
     stats.compile_s = time.perf_counter() - t1
     return Program(
         types,
+        unit,
         node_function,
-        compiled[-1],
         profile,
         steps,
         in_ids,

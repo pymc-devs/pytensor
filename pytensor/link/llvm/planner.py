@@ -224,9 +224,9 @@ class Planner:
         self.opts = options
         self.stats = stats
         self.values = Values()
-        #: modules generated for nodes of the program, to compile with the program's
-        #: function: (module, the `Kernel` whose address is its "kernel")
-        self.modules: list = []
+        #: modules generated for steps of the program, to link with the program's
+        #: function (`kernel_module.link`)
+        self.modules: list[KernelModule] = []
         #: (inputs, outputs, layouts) -> PlannedGraph (`graph`)
         self._graphs: dict[tuple, PlannedGraph] = {}
         #: the program's graph (`program`), what views of its values there may be, and
@@ -473,9 +473,9 @@ class Planner:
         self, flat, folded, in_layouts, layouts, writable=frozenset()
     ) -> Step:
         """A step of the program whose code is generated and compiled in a module of
-        its own. Raises NotImplementedError if no emitter handles it. `folded`: the
-        constant scalar inputs compiled into the code; `writable`: the inputs it may
-        overwrite (`_writable_inputs`)."""
+        its own, compiled and linked with the program. `folded`: the constant scalar
+        inputs compiled into the code; `writable`: the inputs it may overwrite
+        (`_writable_inputs`)."""
         node = flat.node
         unit = KernelModule.new(
             f"node_{type(node.op).__name__}", self.opts.codegen, self.graph
@@ -498,9 +498,12 @@ class Planner:
                     and representation.ndim > 0
                 ]
             )
-        kernel = self._compiled(unit, function, desc)
+        unit.description = desc
+        unit.module.label = "ptl:" + " ".join(desc.split())[:160]  # perf maps
+        build_kernel_wrapper(unit, function)
+        self.modules.append(unit)
         implementation = OwnModule(
-            kernel, tuple(GENERATED.outputs(node, known_layouts(node, in_layouts)))
+            unit, tuple(GENERATED.outputs(node, known_layouts(node, in_layouts)))
         )
         binding = self._binding(node, flat.outputs, in_layouts, layouts)
         check_conforms(node, signature.outputs, binding)
@@ -513,14 +516,6 @@ class Planner:
             signature,
             desc,
         )
-
-    def _compiled(self, unit, node_function, description) -> Kernel:
-        """The kernel of `unit` (its function `kernel`, around `node_function`), to
-        compile with the program (its address is set then)."""
-        build_kernel_wrapper(unit, node_function)
-        kernel = Kernel(0, unit.links.address, description, unit.links.keepalive)
-        self.modules.append((unit.module, kernel))
-        return kernel
 
     # ------------------------------------------------------------ in place
 

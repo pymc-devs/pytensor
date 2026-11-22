@@ -57,6 +57,10 @@ class KernelModule:
     plan_graph: PlanGraph | None = None
     #: the module's link table: the kernels its code calls, its array constants
     links: LinkTable = field(default_factory=LinkTable)
+    #: what it runs, for stats and perf maps
+    description: str = ""
+    #: the compiled module, once linked (`link`)
+    compiled: ir.CompiledModule | None = None
 
     @classmethod
     def new(
@@ -70,7 +74,35 @@ class KernelModule:
         module = ir.Module(
             name, fastmath=options.fastmath, debug_info=options.debug_info
         )
-        return cls(module, options, plan_graph)
+        return cls(module, options, plan_graph, description=name)
+
+    @property
+    def address(self) -> int:
+        """The address of its kernel (the function `kernel`), once linked."""
+        if self.compiled is None:
+            raise ValueError(f"{self.module.name} isn't linked yet")
+        return self.compiled.address(KERNEL)
+
+    @property
+    def config(self) -> int:
+        """The config to call its kernel with: its link table, once linked."""
+        return self.links.address
 
 
-__all__ = ["CodegenOptions", "KernelModule", "PlanGraph"]
+#: The name of a module's kernel (`kernel.build_kernel_wrapper`).
+KERNEL = "kernel"
+
+
+def link(units: Sequence[KernelModule], opt_level: int = 3) -> None:
+    """Compile the modules `units` together and link them: fix their link tables, and
+    write into them the address and config of the modules they call (which must be
+    among `units`). Their kernels can be called from then on (`address`, `config`)."""
+    compiled = ir.compile_many([unit.module for unit in units], opt_level=opt_level)
+    for unit, c in zip(units, compiled, strict=True):
+        unit.compiled = c
+        unit.links.fix()
+    for unit in units:
+        unit.links.write_module_entries()
+
+
+__all__ = ["KERNEL", "CodegenOptions", "KernelModule", "PlanGraph", "link"]

@@ -28,10 +28,11 @@ from pytensor.link.llvm.codegen.types import element_type, is_absent
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.codegen.call import Kernel
+    from pytensor.link.llvm.codegen.call import Callee, Kernel
     from pytensor.link.llvm.codegen.context import Codegen
     from pytensor.link.llvm.codegen.destination import OutputDestination
     from pytensor.link.llvm.codegen.interface import EmitterInput
+    from pytensor.link.llvm.codegen.kernel_module import KernelModule
     from pytensor.link.llvm.codegen.signature import Signature
 
 
@@ -178,17 +179,20 @@ class Generated:
 GENERATED = Generated()
 
 
-@dataclass(frozen=True)
 class _KernelCall:
-    """What the implementations calling a kernel share: they call `kernel` through the
-    kernel ABI with the node's arguments, and their outputs are new memory."""
+    """What the implementations calling a kernel share: they call `callee` through the
+    kernel ABI with the node's arguments, and their outputs are new memory, as
+    `declarations` say."""
 
-    kernel: Kernel
     declarations: tuple[OutputDeclaration, ...]
 
     @property
+    def callee(self) -> Callee:
+        raise NotImplementedError
+
+    @property
     def description(self) -> str:
-        return self.kernel.description
+        raise NotImplementedError
 
     @property
     def may_view(self) -> bool:
@@ -229,7 +233,7 @@ class _KernelCall:
             values.append(
                 (value, None if is_absent(var.type) else element_type(var.type))
             )
-        call_kernel(cg, self.kernel, values, outputs)
+        call_kernel(cg, self.callee, values, outputs)
 
 
 @dataclass(frozen=True)
@@ -238,6 +242,17 @@ class RustKernel(_KernelCall):
     chose the layouts of its outputs, and whether it writes them into memory the caller
     provides."""
 
+    kernel: Kernel
+    declarations: tuple[OutputDeclaration, ...]
+
+    @property
+    def callee(self) -> Callee:
+        return self.kernel
+
+    @property
+    def description(self) -> str:
+        return self.kernel.description
+
 
 @dataclass(frozen=True)
 class NumbaKernel(_KernelCall):
@@ -245,20 +260,41 @@ class NumbaKernel(_KernelCall):
     outputs, in the layouts it was compiled for, and overwrites the inputs its op
     destroys."""
 
+    kernel: Kernel
+    declarations: tuple[OutputDeclaration, ...]
     #: the inputs its op destroys
     destroys: frozenset[int] = field(default=frozenset(), kw_only=True)
+
+    @property
+    def callee(self) -> Callee:
+        return self.kernel
+
+    @property
+    def description(self) -> str:
+        return self.kernel.description
 
     @property
     def always_overwrites(self) -> frozenset[int]:
         return self.destroys
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class OwnModule(_KernelCall):
-    """Generated code compiled in a module of its own (`inner`, with the same
-    signature), called like a kernel: a step of the program."""
+    """Generated code compiled in a module of its own (`unit`, built from `inner` with
+    the same signature), called like a kernel: a step of the program. The module is
+    linked with the program (`kernel_module.link`)."""
 
+    unit: KernelModule
+    declarations: tuple[OutputDeclaration, ...]
     inner: Implementation = field(default=GENERATED, kw_only=True)
+
+    @property
+    def callee(self) -> Callee:
+        return self.unit
+
+    @property
+    def description(self) -> str:
+        return self.unit.description
 
     @property
     def may_view(self) -> bool:

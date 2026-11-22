@@ -11,7 +11,12 @@ from pytensor.graph.basic import Apply
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, Slot
 from pytensor.link.llvm.codegen.context import Codegen
-from pytensor.link.llvm.codegen.kernel_module import CodegenOptions, KernelModule
+from pytensor.link.llvm.codegen.kernel_module import (
+    KERNEL,
+    CodegenOptions,
+    KernelModule,
+    link,
+)
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
@@ -28,7 +33,7 @@ from pytensor.link.llvm.codegen.types import (
 def build_kernel_wrapper(
     unit: KernelModule,
     node_function: NodeFunction,
-    name: str = "kernel",
+    name: str = KERNEL,
 ) -> ir.Function:
     """`int32 name(PtCtx*, PtArray* args, int32 n_inputs, int32 n_outputs, const void*
     config)` around `node_function`: the kernel ABI.
@@ -198,12 +203,23 @@ def _check_layout(
 
 @dataclass
 class CompiledNode:
-    compiled: ir.CompiledModule
+    """A node compiled as a kernel (`compile_node`)."""
+
+    unit: KernelModule
     signature: Signature
 
     @property
+    def compiled(self) -> ir.CompiledModule:
+        assert self.unit.compiled is not None
+        return self.unit.compiled
+
+    @property
     def address(self) -> int:
-        return self.compiled.address("kernel")
+        return self.unit.address
+
+    @property
+    def config(self) -> int:
+        return self.unit.config
 
 
 def compile_node(
@@ -220,8 +236,8 @@ def compile_node(
     )
     node_function = build_node_function(unit, node, "node", provided=provided)
     build_kernel_wrapper(unit, node_function)
-    compiled = unit.module.compile(opt_level=opt_level)
-    return CompiledNode(compiled, node_function.signature)
+    link([unit], opt_level)
+    return CompiledNode(unit, node_function.signature)
 
 
 __all__ = [

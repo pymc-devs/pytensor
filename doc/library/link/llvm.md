@@ -206,8 +206,11 @@ Addresses aren't part of the IR. A generated kernel's **link table** (`LinkTable
 pointer-sized entries: two per called kernel (its address, then its config), one per
 array constant (the address of its contents, packed in its memory order and kept alive
 with the table; equal ones share an entry). The IR loads entry `k` from `config`; the
-link table is the generated kernel's config. A program's table gets the addresses of
-the code compiled with it once that is compiled (`LinkTable.relink`).
+link table is the generated kernel's config. Everything generated into one module
+(`codegen/kernel_module.py`: `KernelModule`, with the options and the link table its
+code shares) becomes one kernel. The modules of a program are compiled and linked
+together (`link`): then every table is fixed, and the entries of the modules a program
+calls (`OwnModule` steps) get their addresses; nothing is patched later.
 
 Inside generated code the planner decides per node (`Planner.graph`, given the
 input layouts): generate it if we can (inlined: preferred; tried in a scratch module,
@@ -663,8 +666,8 @@ Then:
    graph outputs are produced in the caller's memory or allocated straight into their
    slots (`OutputDestination.slot_for_new_memory`; copied where they can't be), and array constants are
    in its link table.
-2. **Compile**: all generated modules, the program's function included, in one
-   parallel batch.
+2. **Compile and link**: all generated modules, the program's function included, in
+   one parallel batch (`kernel_module.link`).
 
 `program.dump()` prints a program: every value with its type and memory (input,
 constant, arena offset, output, allocated by its step, view of another value), then
