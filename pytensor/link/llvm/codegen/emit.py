@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from functools import cache
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
@@ -14,7 +15,6 @@ from pytensor.graph.basic import Constant
 from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
-    Slot,
     TensorRepr,
     ir,
     memory_type,
@@ -320,30 +320,6 @@ def store(b, scalar_type, value, ptr):
     b.store(value, ptr)
 
 
-def read_slot(
-    b, slot, scalar_type, static_shape, layout: Layout | None = None
-) -> Array:
-    """The array a kernel wrote into an output slot (static lengths stay constants;
-    with a known `layout`, only its dynamic strides are read)."""
-    nd = len(static_shape)
-    t = _slot_type(nd)
-    data = b.load(ir.ptr, b.field_ptr(t, slot, Slot.DATA))
-    lp, sp = b.field_ptr(t, slot, Slot.LENGTHS), b.field_ptr(t, slot, Slot.STRIDES)
-    shape = [
-        b.i64(s) if s is not None else b.load(ir.i64, b.gep(ir.i64, lp, a))
-        for a, s in enumerate(static_shape)
-    ]
-    if layout is None:
-        layout = Layout.unknown(static_shape)
-    else:
-        layout = Layout.make(static_shape, layout.order, layout.strides)
-    passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
-    strides = layout.stride_values(
-        b, np.dtype(scalar_type.dtype).itemsize, shape, passed
-    )
-    return Array(scalar_type, data, shape, strides, layout)
-
-
 def advance(b, p, i, stride, scalar_type):
     """`p + i * stride` (`stride` in bytes), addressed in elements of `scalar_type`.
 
@@ -459,19 +435,102 @@ def cast(b, v, src: ScalarType, dst: ScalarType):
     return v  # int8 <-> uint8
 
 
-def _slot_type(ndim):
-    from pytensor.link.llvm.codegen.types import slot_type
+# ------------------------------------------------------------------ output slots
 
-    return slot_type(ndim)
+
+@cache
+def _slot_ir_type(ndim: int):
+    return ir.Type.struct_(
+        [ir.ptr, ir.Type.array(ir.i64, ndim), ir.Type.array(ir.i64, ndim), ir.ptr]
+    )
+
+
+@dataclass(frozen=True)
+class Slot:
+    """An output slot, which a node fills with its result:
+    `{ptr data, [ndim x i64] lengths, [ndim x i64] strides, ptr owner}`.
+
+    The owner is the buffer reference of new memory, and null for a view. Whoever
+    created the slot releases the owner once the result is no longer needed."""
+
+    pointer: ir.Value
+    ndim: int
+
+    DATA: ClassVar[int] = 0
+    LENGTHS: ClassVar[int] = 1
+    STRIDES: ClassVar[int] = 2
+    OWNER: ClassVar[int] = 3
+
+    @staticmethod
+    def ir_type(ndim: int):
+        return _slot_ir_type(ndim)
+
+    @classmethod
+    def alloca(cls, b: ir.Builder, ndim: int) -> Slot:
+        """Return an empty slot (all fields null) on the stack."""
+        t = _slot_ir_type(ndim)
+        pointer = b.alloca(t)
+        b.store(b.zero(t), pointer)
+        return cls(pointer, ndim)
+
+    def field(self, b: ir.Builder, field: int) -> ir.Value:
+        """Return a pointer to `field` (`Slot.DATA`, ...)."""
+        return b.field_ptr(_slot_ir_type(self.ndim), self.pointer, field)
+
+    def data(self, b: ir.Builder) -> ir.Value:
+        return b.load(ir.ptr, self.field(b, Slot.DATA))
+
+    def owner(self, b: ir.Builder) -> ir.Value:
+        return b.load(ir.ptr, self.field(b, Slot.OWNER))
+
+    def write(self, b: ir.Builder, data, shape, strides) -> None:
+        """Store an array's data, lengths and strides (not its owner)."""
+        b.store(data, self.field(b, Slot.DATA))
+        lengths, stride_fields = (
+            self.field(b, Slot.LENGTHS),
+            self.field(b, Slot.STRIDES),
+        )
+        for axis in range(self.ndim):
+            b.store(shape[axis], b.gep(ir.i64, lengths, axis))
+            b.store(strides[axis], b.gep(ir.i64, stride_fields, axis))
+
+    def read(
+        self,
+        b: ir.Builder,
+        scalar_type: ScalarType,
+        static_shape,
+        layout: Layout | None = None,
+    ) -> Array:
+        """Return the array in the slot. Static lengths stay constants; with a known
+        `layout`, only its dynamic strides are read."""
+        data = self.data(b)
+        lp, sp = self.field(b, Slot.LENGTHS), self.field(b, Slot.STRIDES)
+        shape = [
+            b.i64(s) if s is not None else b.load(ir.i64, b.gep(ir.i64, lp, a))
+            for a, s in enumerate(static_shape)
+        ]
+        if layout is None:
+            layout = Layout.unknown(static_shape)
+        else:
+            layout = Layout.make(static_shape, layout.order, layout.strides)
+        passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
+        strides = layout.stride_values(
+            b, np.dtype(scalar_type.dtype).itemsize, shape, passed
+        )
+        return Array(scalar_type, data, shape, strides, layout)
+
+    def release(self, b: ir.Builder, ctx) -> None:
+        """Give up the owner (a no-op for null)."""
+        b.rt_decref(ctx, self.owner(b))
 
 
 # ------------------------------------------------------------------ the context
 
 
 class _ScratchScope(list):
-    """The memory to give back when a `scratch_scope` ends. Each entry is either
-    (ctx, pointer, None): scratch memory to free, or (ctx, slot, ndim): an output slot
-    whose buffer (allocated by a kernel) to release."""
+    """The memory to give back when a `scratch_scope` ends: (ctx, pointer) pairs of
+    scratch memory to free, and (ctx, slot) pairs of `Slot`s whose owner (allocated by
+    a kernel) to release."""
 
     def __init__(self, function: bool):
         super().__init__()
@@ -636,14 +695,14 @@ class Codegen:
         scopes = [sc for sc in self.scratch_scopes if sc.function or not function]
         if not scopes:
             raise ValueError("scratch memory outside of a scratch_scope")
-        scopes[-1].append((self.ctx, p, None))
+        scopes[-1].append((self.ctx, p))
 
-    def release_later(self, slot, ndim: int):
-        """Release the buffer a kernel allocated into the output slot `slot`, when the
-        innermost `scratch_scope` ends."""
+    def release_later(self, slot: Slot):
+        """Release the owner a kernel put into `slot`, when the innermost
+        `scratch_scope` ends."""
         if not self.scratch_scopes:
             raise ValueError("a buffer to release outside of a scratch_scope")
-        self.scratch_scopes[-1].append((self.ctx, slot, ndim))
+        self.scratch_scopes[-1].append((self.ctx, slot))
 
     @contextmanager
     def scratch_scope(self, function: bool = False):
@@ -659,10 +718,9 @@ class Codegen:
             self.scratch_scopes.pop()
         if not self.b.terminated:
             b = self.b
-            for ctx, p, ndim in reversed(taken):
-                if ndim is not None:
-                    owner = b.field_ptr(_slot_type(ndim), p, Slot.OWNER)
-                    b.rt_decref(ctx, b.load(ir.ptr, owner))
+            for ctx, p in reversed(taken):
+                if isinstance(p, Slot):
+                    p.release(b, ctx)
                     continue
                 # (folds away for checked scratch, and where a view left null)
                 with b.if_(b.ne(p, b.null())):

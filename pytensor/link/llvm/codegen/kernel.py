@@ -6,13 +6,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pytensor.link.llvm.codegen.emit import Array, Codegen, check_strides
+from pytensor.link.llvm.codegen.emit import Array, Codegen, Slot, check_strides
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.signature import Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
-    Slot,
     TensorRepr,
     dtype_code,
     ir,
@@ -143,28 +142,23 @@ def build_kernel_wrapper(
         if output.passing is Passing.CALLER_BUFFER:
             call_args.append(read(n_in + k, output.tensor))
         else:
-            slot = b.alloca(output.tensor.slot_type)
-            b.store(b.zero(output.tensor.slot_type), slot)
-            call_args.append(slot)
+            slot = Slot.alloca(b, output.tensor.ndim)
+            call_args.append(slot.pointer)
             slots.append((k, output, slot))
     rc = b.call(node_function.function, call_args)
     # copy the slots back, also on failure (the caller releases owners)
     for k, output, slot in slots:
         p = arg(n_in + k)
-        st = output.tensor.slot_type
         b.store(
-            b.load(ir.ptr, b.field_ptr(st, slot, Slot.DATA)),
+            slot.data(b),
             b.field_ptr(ptarray, p, PtArray.DATA),
         )
         shape_p, strides_p = field(p, 1), field(p, 2)
-        lp, sp = (
-            b.field_ptr(st, slot, Slot.LENGTHS),
-            b.field_ptr(st, slot, Slot.STRIDES),
-        )
+        lp, sp = slot.field(b, Slot.LENGTHS), slot.field(b, Slot.STRIDES)
         for a in range(output.tensor.ndim):
             b.store(b.load(ir.i64, b.gep(ir.i64, lp, a)), b.gep(ir.i64, shape_p, a))
             b.store(b.load(ir.i64, b.gep(ir.i64, sp, a)), b.gep(ir.i64, strides_p, a))
-        owner = b.load(ir.ptr, b.field_ptr(st, slot, Slot.OWNER))
+        owner = slot.owner(b)
         alias_arguments = signature.alias_arguments(output)
         if len(alias_arguments) == 1:
             # a view lies in the input's buffer, unless the kernel allocated one. (With

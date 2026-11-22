@@ -601,8 +601,11 @@ On top of it, in Python (`codegen/`):
   `x < y`, `x.astype(ps.float64)`, `cond.select(a, b)`, `x.maximum(y)`. They follow
   numpy for the type. Operands must have the same type; `==` stays identity (`x.eq(y)` compares) and a `Num` can't be a
   Python condition. Index arithmetic, which is always i64, uses the builder directly.
-* `types.Slot` and `types.PtArray` name the fields of the two structs emitters reach
-  into: `b.field_ptr(slot_type(nd), slot, Slot.OWNER)`.
+* `emit.Slot` is an output slot, the struct a node fills with its result
+  (`{data, lengths, strides, owner}`; the owner is null for a view):
+  `Slot.alloca(b, ndim)`, `slot.read(b, scalar_type, shape, layout) -> Array`,
+  `slot.write(...)`, `slot.owner(b)`, `slot.release(b, ctx)`. `types.PtArray` names
+  the fields of the kernel ABI's array struct.
 
 ## 8. Programs
 

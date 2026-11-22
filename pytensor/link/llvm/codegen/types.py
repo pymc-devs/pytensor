@@ -157,11 +157,6 @@ class TensorRepr:
     def ir_type(self):
         return _tensor_ir_type(self.ndim, len(self.dynamic_axes), len(self.stride_axes))
 
-    @property
-    def slot_type(self):
-        """The output slot a kernel fills: `{ptr, [n x i64] lengths, [n x i64] strides, ptr owner}`."""
-        return slot_type(self.ndim)
-
 
 @cache
 def _tensor_ir_type(ndim, n_lengths, n_strides):
@@ -169,20 +164,6 @@ def _tensor_ir_type(ndim, n_lengths, n_strides):
         return ir.ptr
     return ir.Type.struct_(
         [ir.ptr, ir.Type.array(ir.i64, n_lengths), ir.Type.array(ir.i64, n_strides)]
-    )
-
-
-class Slot:
-    """Fields of an output slot (`slot_type`), for `b.field_ptr(slot_type(nd), slot, Slot.OWNER)`."""
-
-    DATA, LENGTHS, STRIDES, OWNER = range(4)
-
-
-@cache
-def slot_type(ndim):
-    """The output slot a kernel fills: `{ptr data, [n x i64] lengths, [n x i64] strides, ptr owner}`."""
-    return ir.Type.struct_(
-        [ir.ptr, ir.Type.array(ir.i64, ndim), ir.Type.array(ir.i64, ndim), ir.ptr]
     )
 
 

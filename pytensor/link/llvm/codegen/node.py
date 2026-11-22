@@ -12,7 +12,13 @@ from pytensor.link.llvm.codegen.destination import (
     ScalarDestination,
     SlotDestination,
 )
-from pytensor.link.llvm.codegen.emit import Codegen, c_array, constant, store, unpack
+from pytensor.link.llvm.codegen.emit import (
+    Codegen,
+    c_array,
+    constant,
+    store,
+    unpack,
+)
 from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
     EmitterOutput,

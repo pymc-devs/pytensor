@@ -29,12 +29,12 @@ from pytensor.link.llvm.codegen.destination import (
 from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
+    Slot,
     c_array,
     constant,
     copy,
     pack,
     packed_array,
-    read_slot,
     store,
     unpack,
 )
@@ -42,12 +42,10 @@ from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
-    Slot,
     element_type,
     ir,
     memory_type,
     repr_of,
-    slot_type,
 )
 
 
@@ -176,8 +174,8 @@ class GraphFunction:
             memory=memory,
             profile=profile,
         )
-        for slot, ndim in owned:
-            cg.release_later(slot, ndim)
+        for slot in owned:
+            cg.release_later(slot)
 
         for k, (vid, out) in enumerate(zip(planned.out_ids, outputs, strict=True)):
             if out is None:
@@ -339,18 +337,10 @@ class _SlotRead:
     """A result to read back from a step's output slot after the step ran."""
 
     vid: int
-    slot: ir.Value
+    slot: Slot
     output: Output
     #: it is scratch memory of the generated node (freed with the surrounding scope)
     in_scratch: bool = False
-
-
-def release(cg, owned):
-    """Give up the buffers kernels allocated into `owned` slots ([(slot, ndim)])."""
-    for slot, nd in owned:
-        cg.b.rt_decref(
-            cg.ctx, cg.b.load(ir.ptr, cg.b.field_ptr(slot_type(nd), slot, Slot.OWNER))
-        )
 
 
 def bind_constants(cg, constants, values) -> dict:
@@ -428,7 +418,7 @@ def emit_steps(
     memory_targets = memory_targets or {}
     slot_targets = slot_targets or {}
     written: set[int] = set()
-    owned = []  # (slot, ndim): buffers kernels allocated
+    owned = []  # Slots whose owner a kernel allocated
     layouts = {}  # vid -> Layout of what the steps produced
     if profile is not None:
         cells = linked(cg, profile)
@@ -447,7 +437,7 @@ def emit_steps(
         # allocates differently into scratch memory): given memory of a graph output,
         # a graph output's slot, or neither.
         into_memory: dict[int, Array] = {}
-        into_slot: dict[int, ir.Value] = {}
+        into_slot: dict[int, Slot] = {}
         for j, (vid, output) in enumerate(results):
             if vid in written:
                 continue
@@ -544,11 +534,10 @@ def emit_steps(
                 if j in into_slot:
                     slot = into_slot[j]
                 else:
-                    slot = b.alloca(slot_type(ndim))
-                    b.store(b.zero(slot_type(ndim)), slot)
+                    slot = Slot.alloca(b, ndim)
                     if kernel is not None:
-                        owned.append((slot, ndim))
-                args.append(slot)
+                        owned.append(slot)
+                args.append(slot.pointer)
                 # (a scratch result of a generated node is scratch memory it took, or
                 # a view)
                 in_scratch = kernel is None and j in scratch
@@ -567,19 +556,16 @@ def emit_steps(
         failed = b.ne(rc, 0)
         with b.if_(failed):
             b.rt_error_context(ctx, " ".join(step.description.split())[:200])
-            release(cg, owned)
+            for slot in owned:
+                slot.release(b, ctx)
             b.ret(rc)
 
         for vid, pointer, output in scalar_reads:
             values[vid] = b.load(output.representation.ir_type, pointer)
         for read in slot_reads:
             tensor = read.output.tensor
-            array = read_slot(
-                b,
-                read.slot,
-                tensor.scalar_type,
-                list(tensor.shape),
-                layouts.get(read.vid),
+            array = read.slot.read(
+                b, tensor.scalar_type, list(tensor.shape), layouts.get(read.vid)
             )
             values[read.vid] = array
             if read.output.aliased_inputs:
@@ -587,15 +573,14 @@ def emit_steps(
                     values[step.arguments[a]]
                     for a in signature.alias_arguments(read.output)
                 ]
-                _maybe_view(b, array, sources, read.slot, tensor.ndim)
+                _maybe_view(b, array, sources, read.slot)
             if read.in_scratch:
                 # (`SlotDestination.in_scratch_memory`: the owner is the scratch)
-                owner = b.field_ptr(slot_type(tensor.ndim), read.slot, Slot.OWNER)
-                cg.free_later(b.load(ir.ptr, owner))
+                cg.free_later(read.slot.owner(b))
     return written, owned
 
 
-def _maybe_view(b, a: Array, sources: list, slot, ndim: int) -> None:
+def _maybe_view(b, a: Array, sources: list, slot: Slot) -> None:
     """Remember that `a` may be a view of an input of the graph.
 
     `a` was returned through `slot` by a node that may return a view of `sources`
@@ -606,8 +591,7 @@ def _maybe_view(b, a: Array, sources: list, slot, ndim: int) -> None:
     bases = {s.base if isinstance(s, Array) else None for s in sources}
     if len(bases) != 1 or None in bases:
         return
-    owner = b.load(ir.ptr, b.field_ptr(slot_type(ndim), slot, Slot.OWNER))
-    really = b.eq(owner, b.null())
+    really = b.eq(slot.owner(b), b.null())
     for s in sources:
         if s.base_if is not None:
             really = b.and_(really, s.base_if)

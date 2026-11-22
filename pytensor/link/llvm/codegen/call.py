@@ -21,12 +21,10 @@ import numpy as np
 from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
-    Slot,
     dtype_code,
     ir,
     memory_type,
     ptarray_type,
-    slot_type,
 )
 from pytensor.scalar.basic import ScalarType
 
@@ -130,7 +128,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
         ProvidedDestination,
         SlotDestination,
     )
-    from pytensor.link.llvm.codegen.emit import Array, store
+    from pytensor.link.llvm.codegen.emit import Array, Slot, store
 
     b = cg.b
     ptarray = ptarray_type()
@@ -182,12 +180,11 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
                 )
             )
         elif isinstance(destination, SlotDestination):
-            st = slot_type(destination.ndim)
             args_of.append(
                 (
                     b.null(),
-                    b.field_ptr(st, destination.slot, Slot.LENGTHS),
-                    b.field_ptr(st, destination.slot, Slot.STRIDES),
+                    destination.slot.field(b, Slot.LENGTHS),
+                    destination.slot.field(b, Slot.STRIDES),
                     destination.ndim,
                     destination.scalar_type,
                     destination,
@@ -220,14 +217,13 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     for p, (*_, destination) in zip(ptrs, args_of, strict=True):
         if destination is None:
             continue
-        st = slot_type(destination.ndim)
         b.store(
             b.load(ir.ptr, b.field_ptr(ptarray, p, PtArray.DATA)),
-            b.field_ptr(st, destination.slot, Slot.DATA),
+            destination.slot.field(b, Slot.DATA),
         )
         b.store(
             b.load(ir.ptr, b.field_ptr(ptarray, p, PtArray.OWNER)),
-            b.field_ptr(st, destination.slot, Slot.OWNER),
+            destination.slot.field(b, Slot.OWNER),
         )
         destination.done = True
     with b.if_(b.ne(rc, 0)):
@@ -260,7 +256,7 @@ def build_call_function(
         ProvidedDestination,
         SlotDestination,
     )
-    from pytensor.link.llvm.codegen.emit import Codegen, unpack
+    from pytensor.link.llvm.codegen.emit import Codegen, Slot, unpack
     from pytensor.link.llvm.codegen.node import NodeFunction
     from pytensor.link.llvm.codegen.signature import Passing
 
@@ -291,9 +287,8 @@ def build_call_function(
             outputs.append(
                 SlotDestination(
                     cg,
-                    next(params),
+                    Slot(next(params), output.representation.ndim),
                     output.representation.scalar_type,
-                    output.representation.ndim,
                     signature.alias_arguments(output),
                 )
             )

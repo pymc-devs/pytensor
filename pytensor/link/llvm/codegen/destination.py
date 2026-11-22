@@ -20,17 +20,15 @@ from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
+    Slot,
     copy,
     load,
     packed_array,
-    read_slot,
     size,
 )
 from pytensor.link.llvm.codegen.types import (
-    Slot,
     TensorRepr,
     ir,
-    slot_type,
 )
 from pytensor.scalar.basic import ScalarType
 
@@ -65,7 +63,7 @@ class OutputDestination:
     def finish(self) -> None:
         """Called when the producer is done."""
 
-    def slot_for_new_memory(self, representation: TensorRepr) -> ir.Value | None:
+    def slot_for_new_memory(self, representation: TensorRepr) -> Slot | None:
         """Return the slot a producer may allocate the result into directly, or None
         (the default).
 
@@ -122,9 +120,8 @@ class SlotDestination(OutputDestination):
     """An output slot the caller reads back: new memory, or a view of an input."""
 
     cg: Codegen
-    slot: ir.Value
+    slot: Slot
     scalar_type: ScalarType
-    ndim: int
     #: Positions of the node inputs the result may be a view of.
     aliased_inputs: tuple[int, ...] = ()
     #: Allocate in the scratch memory of the surrounding compiled unit instead of a
@@ -144,12 +141,13 @@ class SlotDestination(OutputDestination):
     def for_output(
         cls,
         cg: Codegen,
-        slot: ir.Value,
+        pointer: ir.Value,
         output,
         aliased_inputs: tuple[int, ...] = (),
         **kwargs,
     ) -> SlotDestination:
-        """Create the destination of `output`, a signature `Output` passed in a slot.
+        """Create the destination of `output`, a signature `Output` passed in the slot
+        at `pointer`.
 
         New memory is allocated in the output's layout if that layout fixes every
         stride (it is packed). Otherwise it is allocated C-contiguous, which then
@@ -158,16 +156,15 @@ class SlotDestination(OutputDestination):
         packed = output.layout.fully_packed(representation.shape)
         return cls(
             cg,
-            slot,
+            Slot(pointer, representation.ndim),
             representation.scalar_type,
-            representation.ndim,
             aliased_inputs=aliased_inputs,
             allocation_layout=output.layout if packed else None,
             required_layout=output.layout,
             **kwargs,
         )
 
-    def slot_for_new_memory(self, representation: TensorRepr) -> ir.Value | None:
+    def slot_for_new_memory(self, representation: TensorRepr) -> Slot | None:
         # Memory in scratch is freed by the surrounding unit; memory a kernel allocated
         # into the slot would not be. And the new memory must have the required layout.
         if self.in_scratch_memory or self.required_layout is None:
@@ -193,12 +190,12 @@ class SlotDestination(OutputDestination):
                 self.scalar_type, shape, self.allocation_layout, escapes=True
             )
             self._write(array.data, array.shape, array.strides)
-            b.store(array.data, self._field(Slot.OWNER))
+            b.store(array.data, self.slot.field(b, Slot.OWNER))
         else:
             nbytes = b.mul(
                 size(b, shape), np.dtype(self.scalar_type.dtype).itemsize, nsw=True
             )
-            data = b.rt_alloc(cg.ctx, nbytes, self._field(Slot.OWNER))
+            data = b.rt_alloc(cg.ctx, nbytes, self.slot.field(b, Slot.OWNER))
             cg.check(b.ne(data, b.null()), None)
             array = packed_array(
                 b, self.scalar_type, data, shape, self.allocation_layout
@@ -236,9 +233,7 @@ class SlotDestination(OutputDestination):
         self.cg.b.if_else(array.base_if, lambda: self.set_view(array), copied)
         # (the view and the copy both have the required layout)
         layout = self.required_layout or Layout.dynamic(self.ndim)
-        return read_slot(
-            self.cg.b, self.slot, self.scalar_type, array.static_shape(), layout
-        )
+        return self.slot.read(self.cg.b, self.scalar_type, array.static_shape(), layout)
 
     def set_view(self, array: Array) -> None:
         """Put `array` into the slot as it is, for a caller that knows the result may
@@ -254,34 +249,28 @@ class SlotDestination(OutputDestination):
 
     def data(self) -> ir.Value:
         """Return the data pointer in the slot (null until set)."""
-        return self.cg.b.load(ir.ptr, self._field(Slot.DATA))
+        return self.slot.data(self.cg.b)
 
     def owner(self) -> ir.Value:
         """Return the buffer reference in the slot (null for a view)."""
-        return self.cg.b.load(ir.ptr, self._field(Slot.OWNER))
+        return self.slot.owner(self.cg.b)
 
     def read(self) -> Array:
         """Return the array in the slot (after `allocate`), in `allocation_layout`."""
         layout = self.allocation_layout or Layout.c(self.ndim)
-        return read_slot(
-            self.cg.b, self.slot, self.scalar_type, [None] * self.ndim, layout
-        )
+        return self.slot.read(self.cg.b, self.scalar_type, [None] * self.ndim, layout)
 
     def set_length(self, axis: int, length: ir.Value) -> None:
         """Shorten `axis` of the array in the slot to `length`, keeping its strides."""
         b = self.cg.b
-        b.store(length, b.gep(ir.i64, self._field(Slot.LENGTHS), axis))
+        b.store(length, b.gep(ir.i64, self.slot.field(b, Slot.LENGTHS), axis))
 
-    def _field(self, field: int) -> ir.Value:
-        return self.cg.b.field_ptr(slot_type(self.ndim), self.slot, field)
+    @property
+    def ndim(self) -> int:
+        return self.slot.ndim
 
     def _write(self, data, shape, strides) -> None:
-        b = self.cg.b
-        b.store(data, self._field(Slot.DATA))
-        lengths, stride_fields = self._field(Slot.LENGTHS), self._field(Slot.STRIDES)
-        for axis in range(self.ndim):
-            b.store(shape[axis], b.gep(ir.i64, lengths, axis))
-            b.store(strides[axis], b.gep(ir.i64, stride_fields, axis))
+        self.slot.write(self.cg.b, data, shape, strides)
 
 
 @dataclass
