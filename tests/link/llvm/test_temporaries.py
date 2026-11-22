@@ -12,7 +12,7 @@ from pytensor.compile.mode import get_mode
 ir = pytest.importorskip("pytensor_llvm.ir")
 
 import pytensor.scalar as ps  # noqa: E402
-from pytensor.link.llvm.codegen.emit import (  # noqa: E402
+from pytensor.link.llvm.codegen.context import (  # noqa: E402
     STACK_BUDGET_BYTES,
     STACK_TEMPORARY_BYTES,
     Codegen,

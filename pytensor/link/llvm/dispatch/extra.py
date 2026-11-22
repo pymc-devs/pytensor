@@ -6,9 +6,10 @@ import operator
 
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import split_layouts
-from pytensor.link.llvm.codegen.emit import Array, Codegen, constant, size
+from pytensor.link.llvm.codegen.array import Array, size
+from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.num import Num
+from pytensor.link.llvm.codegen.num import Num, constant
 from pytensor.link.llvm.codegen.types import ir
 from pytensor.tensor.basic import ExtractDiag, Nonzero, Split
 from pytensor.tensor.extra_ops import CumOp

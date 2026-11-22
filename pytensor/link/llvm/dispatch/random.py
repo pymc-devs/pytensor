@@ -17,15 +17,9 @@ import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    c_strides,
-    cast,
-    load,
-    size,
-    store,
-)
+from pytensor.link.llvm.codegen.array import Array, c_strides, size
 from pytensor.link.llvm.codegen.interface import llvm_emit
+from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.codegen.types import ir, is_absent
 
 

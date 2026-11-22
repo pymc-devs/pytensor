@@ -6,17 +6,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pytensor.link.llvm.codegen.array import Array
+from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
     OutputDestination,
     ProvidedDestination,
     ScalarDestination,
     SlotDestination,
-)
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    Codegen,
-    constant,
-    store,
 )
 from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
@@ -25,6 +21,7 @@ from pytensor.link.llvm.codegen.interface import (
     TensorOutput,
     llvm_emit,
 )
+from pytensor.link.llvm.codegen.num import constant, store
 from pytensor.link.llvm.codegen.signature import (
     Output,
     Passing,

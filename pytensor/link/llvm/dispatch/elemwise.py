@@ -7,19 +7,11 @@ import numpy as np
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm.analysis.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.analysis.work import scalar_cost
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    advance,
-    cast,
-    constant,
-    load,
-    loop_order,
-    memory_type,
-    size,
-    store,
-)
+from pytensor.link.llvm.codegen.array import Array, advance, size
+from pytensor.link.llvm.codegen.context import loop_order
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.types import element_type
+from pytensor.link.llvm.codegen.num import cast, constant, load, store
+from pytensor.link.llvm.codegen.types import element_type, memory_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.elemwise import CAReduce, Elemwise
 

@@ -4,13 +4,9 @@ from __future__ import annotations
 
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import subtensor_layout
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    cast,
-    load,
-    store,
-)
+from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.codegen.types import element_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add

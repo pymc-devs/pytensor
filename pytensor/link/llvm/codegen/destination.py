@@ -17,13 +17,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    Codegen,
-    Slot,
-    load,
-    size,
-)
+from pytensor.link.llvm.codegen.array import Array, Slot, size
+from pytensor.link.llvm.codegen.context import Codegen
+from pytensor.link.llvm.codegen.num import load
 from pytensor.link.llvm.codegen.types import (
     TensorRepr,
     ir,

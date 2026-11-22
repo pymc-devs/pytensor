@@ -23,10 +23,10 @@ as a condition (`if x < y:`) raises; that decision belongs to the generated code
 from __future__ import annotations
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.codegen.emit import cast, constant
 from pytensor.link.llvm.codegen.types import (
     element_type,
     ir,
+    memory_type,
     value_type,
 )
 from pytensor.scalar.basic import ScalarType
@@ -318,3 +318,78 @@ class Num:
 
 
 __all__ = ["Num"]
+
+
+# ------------------------------------------------------------------ loading, storing and converting elements
+
+
+def load(b, scalar_type, ptr):
+    """Load an element; bools become i1."""
+    v = b.load(memory_type(scalar_type), ptr)
+    if scalar_type == ps.bool:
+        return b.ne(v, 0)
+    return v
+
+
+def store(b, scalar_type, value, ptr):
+    if scalar_type == ps.bool:
+        value = b.zext(value, ir.i8)
+    b.store(value, ptr)
+
+
+def constant(b, scalar_type, value):
+    if scalar_type in ps.float_types:
+        return b.const_float(value_type(scalar_type), float(value))
+    if scalar_type == ps.bool:
+        return b.const_bool(bool(value))
+    return b.const_int(value_type(scalar_type), int(value))
+
+
+def _float_to_int(b, v, dst: ScalarType):
+    """Float to integer, saturating; NaN gives 0. (`fptosi`/`fptoui` are poison for
+    values out of range.)"""
+    dt = value_type(dst)
+    if dst in ps.int_types:
+        lo, hi = -(2.0 ** (dt.bits - 1)), 2.0 ** (dt.bits - 1)
+        low_end, high_end = -(2 ** (dt.bits - 1)), 2 ** (dt.bits - 1) - 1
+        below = b.fcmp(ir.FCmp.OLT, v, lo)
+        lower_ok = b.fcmp(ir.FCmp.OGE, v, lo)
+        convert = b.fptosi
+    else:
+        # truncation takes (-1, 0) to 0, which is in range
+        lo, hi = -1.0, 2.0**dt.bits
+        low_end, high_end = 0, 2**dt.bits - 1
+        below = b.fcmp(ir.FCmp.OLE, v, lo)
+        lower_ok = b.fcmp(ir.FCmp.OGT, v, lo)
+        convert = b.fptoui
+    above = b.fcmp(ir.FCmp.OGE, v, hi)
+    # ordered compares: NaN is neither below, above nor in range, and converts 0.0
+    in_range = b.and_(lower_ok, b.fcmp(ir.FCmp.OLT, v, hi))
+    return b.select(
+        above,
+        high_end,
+        b.select(below, low_end, convert(b.select(in_range, v, 0.0), dt)),
+    )
+
+
+def cast(b, v, src: ScalarType, dst: ScalarType):
+    """Convert a value like numpy's astype."""
+    if src == dst:
+        return v
+    st, dt = value_type(src), value_type(dst)
+    if dst == ps.bool:
+        if src in ps.float_types:
+            return b.fcmp(ir.FCmp.UNE, v, 0.0)
+        return b.ne(v, 0)
+    if src in ps.float_types and dst in ps.float_types:
+        return b.fpext(v, dt) if dt.bits > st.bits else b.fptrunc(v, dt)
+    if dst in ps.float_types:
+        return b.sitofp(v, dt) if src in ps.int_types else b.uitofp(v, dt)
+    if src in ps.float_types:
+        return _float_to_int(b, v, dst)
+    # integer to integer (bool is i1, unsigned)
+    if dt.bits > st.bits:
+        return b.sext(v, dt) if src in ps.int_types else b.zext(v, dt)
+    if dt.bits < st.bits:
+        return b.trunc(v, dt)
+    return v  # int8 <-> uint8

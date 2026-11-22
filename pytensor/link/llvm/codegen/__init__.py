@@ -5,8 +5,10 @@ implementations are in `dispatch/`).
   gets (its inputs, one handle per output) -- start here;
 * `destination`: where results go (caller memory, output slots, scalars);
 * `types`: LLVM representations of PyTensor types;
-* `num`: numbers in generated code (an IR value with its dtype);
-* `emit`: arrays, errors, temporary memory, casts, loops;
+* `num`: numbers in generated code (an IR value with its type), and loading, storing
+  and converting elements;
+* `array`: arrays in generated code (`Array`) and the output slots nodes fill (`Slot`);
+* `context`: the state of generating code (`Codegen`): errors, temporary memory, loops;
 * `signature`: how a node's function is called (`Signature`, `node_outputs`);
 * `node`: the function of a node, around its emitter or kernel;
 * `kernel`: the kernel ABI wrapper around a function;

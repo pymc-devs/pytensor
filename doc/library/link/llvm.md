@@ -601,18 +601,18 @@ On top of it, in Python (`codegen/`):
   `x < y`, `x.astype(ps.float64)`, `cond.select(a, b)`, `x.maximum(y)`. They follow
   numpy for the type. Operands must have the same type; `==` stays identity (`x.eq(y)` compares) and a `Num` can't be a
   Python condition. Index arithmetic, which is always i64, uses the builder directly.
-* `emit.Array` is an array in generated code: data pointer, lengths, byte strides and
+* `array.Array` is an array in generated code: data pointer, lengths, byte strides and
   its `Layout`. Besides elements (`a.load(b, i, j)`, `a.store(b, v, i, j)`, `a.at(b, i)`)
   it has what code does with arrays: `Array.c(...)`, `Array.packed(b, ...)`,
   `Array.unpack(b, representation, value)` and `a.pack(b, representation)` to build and
   convert, `a.view(...)` with `a.view_layout(...)` for views, `a.loop_view(b, shape)`
   and `a.is_contiguous(b, shape)` for loops, `a.check_strides(cg, layout, what)` and
   `dst.copy_from(cg, src)`.
-* `emit.Codegen` is the context emitters get (`cg`): the builder `cg.b`, the module,
+* `context.Codegen` is the context emitters get (`cg`): the builder `cg.b`, the module,
   checks (`cg.check(ok, message)`, `cg.checked_index(i, n, message)`), temporaries
   (`cg.temporary(scalar_type, shape)`) and loops (`cg.for_each(shape, arrays, body)`,
   `cg.loop_nest(shape, arrays, body, order)`).
-* `emit.Slot` is an output slot, the struct a node fills with its result
+* `array.Slot` is an output slot, the struct a node fills with its result
   (`{data, lengths, strides, owner}`; the owner is null for a view):
   `Slot.alloca(b, ndim)`, `slot.read(b, scalar_type, shape, layout) -> Array`,
   `slot.write(...)`, `slot.owner(b)`, `slot.release(b, ctx)`. `types.PtArray` names
@@ -732,7 +732,7 @@ The same functions, with their machine code, go to a jitdump, `jit-<pid>.dump` i
 `PYTENSOR_LLVM_JITDUMP_DIR` (default `/tmp`), for `perf annotate`. With debug
 information (section 10a) each function also gets its source lines: a jitdump holds one
 file:line per address, so of the Python call stack in the debug information, the line
-of the innermost frame outside the generic helpers (`emit.py`, `interface.py`, `num.py`,
+of the innermost frame outside the generic helpers (`array.py`, `context.py`, `interface.py`, `num.py`,
 `types.py`), usually the op's emitter. The line tables are read from the object's DWARF
 (`gimli`, relocations applied, `addr2line` for the inlined frames). Usage:
 

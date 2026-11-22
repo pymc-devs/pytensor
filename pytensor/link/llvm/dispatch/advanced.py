@@ -12,15 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytensor.scalar.basic as ps
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    advance,
-    cast,
-    index_bounds,
-    load,
-    store,
-)
+from pytensor.link.llvm.codegen.array import Array, advance
+from pytensor.link.llvm.codegen.context import index_bounds
 from pytensor.link.llvm.codegen.interface import llvm_emit
+from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,

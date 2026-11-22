@@ -137,7 +137,7 @@ def test_debug_info():
     text = linker.ir(optimized=True, locations=True)
     assert "!dbg" not in text and "!DI" not in text
     # (inside the unit, nodes are named after its inner graph)
-    assert re.search(r"; emit\.py:\d+ \S+ <.* < Exp\(i0\) < .* < unit: Exp", text)
+    assert re.search(r"; (?:array|context)\.py:\d+ \S+ <.* < Exp\(i0\) < .* < unit: Exp", text)
     assert "; parallel body of Exp(i0)" in text
     remarks = linker.ir(optimized=True, remarks=True)
     assert re.search(r";     at .*fused\.py:\d+ .* < FusedElemwise", remarks)

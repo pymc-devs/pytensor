@@ -21,11 +21,11 @@ pytest.importorskip("pytensor_llvm.ir")
 from pytensor_llvm import ir
 
 from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
-from pytensor.link.llvm.codegen.emit import load, store
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
 )
 from pytensor.link.llvm.codegen.node import build_node_function
+from pytensor.link.llvm.codegen.num import load, store
 from pytensor.link.llvm.codegen.signature import (
     Passing,
     can_update_in_place,

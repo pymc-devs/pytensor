@@ -22,8 +22,9 @@ from dataclasses import dataclass
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.link.llvm.analysis.layout import itemsize_of, remove_axis, shape_of
 from pytensor.link.llvm.analysis.work import llvm_work
+from pytensor.link.llvm.codegen.array import Array, size
+from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import OutputDestination, SlotDestination
-from pytensor.link.llvm.codegen.emit import Array, Codegen, size
 from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.signature import known_layouts
 from pytensor.link.llvm.codegen.types import repr_of

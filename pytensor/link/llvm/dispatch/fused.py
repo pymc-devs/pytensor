@@ -14,20 +14,11 @@ from dataclasses import dataclass
 
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, Stride
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    advance,
-    cast,
-    constant,
-    index_bounds,
-    load,
-    loop_order,
-    memory_type,
-    size,
-    store,
-)
+from pytensor.link.llvm.codegen.array import Array, advance, size
+from pytensor.link.llvm.codegen.context import index_bounds, loop_order
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.types import element_type
+from pytensor.link.llvm.codegen.num import cast, constant, load, store
+from pytensor.link.llvm.codegen.types import element_type, memory_type
 from pytensor.link.llvm.dispatch.elemwise import identity_value
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import ScalarType, add

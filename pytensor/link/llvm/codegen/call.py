@@ -124,11 +124,12 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     Allocated and view outputs land in their output slots, owner included, also when the
     call fails (the caller releases them); a failure returns its code (the kernel set
     the message). The kernel's scratch is released after the call."""
+    from pytensor.link.llvm.codegen.array import Array, Slot
     from pytensor.link.llvm.codegen.destination import (
         ProvidedDestination,
         SlotDestination,
     )
-    from pytensor.link.llvm.codegen.emit import Array, Slot, store
+    from pytensor.link.llvm.codegen.num import store
 
     b = cg.b
     ptarray = ptarray_type()
@@ -233,7 +234,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
 def call_destroying(cg, kernel: Kernel, index: int, inputs: list, outputs: list):
     """`call_kernel`, with copies of the inputs the kernel overwrites
     (`Kernel.destroys`, positions in `inputs`): it may only write its outputs."""
-    from pytensor.link.llvm.codegen.emit import Array
+    from pytensor.link.llvm.codegen.array import Array
 
     ins = []
     for pos, (a, scalar_type) in enumerate(inputs):
@@ -252,11 +253,12 @@ def build_call_function(
     code runs a kernel that isn't a node's (a compiled unit, a separately compiled
     node), and nodes the planner gives a kernel. `index`: the kernel's entry
     in `links` (default: linked here). Returns a `NodeFunction`."""
+    from pytensor.link.llvm.codegen.array import Array, Slot
+    from pytensor.link.llvm.codegen.context import Codegen
     from pytensor.link.llvm.codegen.destination import (
         ProvidedDestination,
         SlotDestination,
     )
-    from pytensor.link.llvm.codegen.emit import Array, Codegen, Slot
     from pytensor.link.llvm.codegen.node import NodeFunction
     from pytensor.link.llvm.codegen.signature import Passing
 

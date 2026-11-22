@@ -22,18 +22,14 @@ import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.analysis.liveness import temporary_lives
+from pytensor.link.llvm.codegen.array import Array, Slot
+from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
     ProvidedDestination,
     SlotDestination,
 )
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    Codegen,
-    Slot,
-    constant,
-    store,
-)
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
+from pytensor.link.llvm.codegen.num import constant, store
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,

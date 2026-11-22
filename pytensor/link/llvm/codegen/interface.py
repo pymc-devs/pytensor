@@ -37,7 +37,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.emit import Array, Codegen
+from pytensor.link.llvm.codegen.array import Array
+from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.types import ir
 from pytensor.scalar.basic import ScalarType
 

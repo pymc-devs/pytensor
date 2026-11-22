@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pytensor.link.llvm.codegen.emit import Array, Codegen, Slot
+from pytensor.link.llvm.codegen.array import Array, Slot
+from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.signature import Passing, Signature
 from pytensor.link.llvm.codegen.types import (

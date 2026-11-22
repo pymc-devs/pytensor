@@ -21,8 +21,9 @@ from pytensor.link.llvm.analysis.liveness import (  # noqa: E402
     lifetimes,
     place_temporaries,
 )
-from pytensor.link.llvm.codegen.emit import Array, load, unknown_layout  # noqa: E402
+from pytensor.link.llvm.codegen.array import Array, unknown_layout  # noqa: E402
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout  # noqa: E402
+from pytensor.link.llvm.codegen.num import load  # noqa: E402
 from pytensor.link.llvm.codegen.signature import (  # noqa: E402
     Output,
     Passing,

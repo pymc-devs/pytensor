@@ -15,8 +15,7 @@ from functools import reduce, singledispatch
 import pytensor.scalar.basic as ps
 import pytensor.scalar.math as psm
 from pytensor.graph.basic import Constant
-from pytensor.link.llvm.codegen.emit import cast, constant
-from pytensor.link.llvm.codegen.num import Num
+from pytensor.link.llvm.codegen.num import Num, cast, constant
 from pytensor.link.llvm.codegen.types import (
     element_type,
     ir,

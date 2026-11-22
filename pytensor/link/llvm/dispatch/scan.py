@@ -36,25 +36,19 @@ import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, remove_axis
+from pytensor.link.llvm.codegen.array import Array, advance
+from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
     OutputDestination,
     ScalarDestination,
     SlotDestination,
-)
-from pytensor.link.llvm.codegen.emit import (
-    Array,
-    Codegen,
-    advance,
-    cast,
-    constant,
-    load,
-    store,
 )
 from pytensor.link.llvm.codegen.interface import (
     destinations,
     llvm_emit,
     llvm_layout,
 )
+from pytensor.link.llvm.codegen.num import cast, constant, load, store
 from pytensor.link.llvm.codegen.types import element_type, ir, is_absent, value_type
 
 
