@@ -1,8 +1,8 @@
 """Scalar ops: one emitter per PyTensor scalar op class.
 
-An emitter gets the builder, the arguments as (value, dtype) pairs and the output dtypes
-PyTensor computed, and returns the output values. Most ops compute in the output dtype:
-`nums(b, args, out)` gives the arguments as `Num`s of that dtype, whose operators pick
+An emitter gets the builder, the arguments as (value, ScalarType) pairs and the output
+types PyTensor computed, and returns the output values. Most ops compute in the output
+type: `nums(b, args, out)` gives the arguments as `Num`s of that type, whose operators pick
 the instructions.
 """
 
@@ -18,10 +18,8 @@ from pytensor.graph.basic import Constant
 from pytensor.link.llvm.codegen.emit import cast, constant
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import (
-    check_dtype,
+    element_type,
     ir,
-    is_float,
-    is_signed,
     value_type,
 )
 from pytensor.link.llvm.dispatch import gamma
@@ -29,26 +27,27 @@ from pytensor.scalar.loop import ScalarLoop
 
 
 @singledispatch
-def llvm_scalar(op, b, args: list, out_dtypes: list) -> list:
+def llvm_scalar(op, b, args: list, out_types: list) -> list:
     raise NotImplementedError(f"LLVM backend: scalar op {op} is not supported")
 
 
-def emit_scalar(op, b, args, out_dtypes):
-    for d in out_dtypes:
-        check_dtype(d)
-    return llvm_scalar(op, b, args, out_dtypes)
+def emit_scalar(op, b, args, out_types):
+    """Emit scalar op `op` on `args` ((value, ScalarType) pairs) for outputs of
+    `out_types`; return the output values."""
+    out_types = [element_type(t) for t in out_types]
+    return llvm_scalar(op, b, args, out_types)
 
 
 def _single(fn):
-    """Register helper: fn(b, args, out_dtype) -> value (or a Num of the output dtype)."""
+    """Register helper: fn(b, args, out_type) -> value (or a Num of the output type)."""
 
-    def wrapper(op, b, args, out_dtypes):
-        (out,) = out_dtypes
+    def wrapper(op, b, args, out_types):
+        (out,) = out_types
         result = fn(b, args, out)
         if isinstance(result, Num):
-            if result.dtype != out:
+            if result.scalar_type != out:
                 raise AssertionError(
-                    f"scalar op {op}: emitted {result.dtype} for an output of {out}"
+                    f"scalar op {op}: emitted {result.scalar_type} for an output of {out}"
                 )
             result = result.value
         return [result]
@@ -66,25 +65,27 @@ def register(*classes):
     return deco
 
 
-def conv(b, args, k, dtype):
+def conv(b, args, k, scalar_type):
     v, d = args[k]
-    return cast(b, v, d, dtype)
+    return cast(b, v, d, scalar_type)
 
 
-def nums(b, args, dtype) -> list[Num]:
-    """The arguments converted to `dtype`."""
-    return [Num(b, v, d).astype(dtype) for v, d in args]
+def nums(b, args, scalar_type) -> list[Num]:
+    """The arguments converted to `scalar_type`."""
+    return [Num(b, v, d).astype(scalar_type) for v, d in args]
 
 
-def require_float(dtype, what):
-    if not is_float(dtype):
-        raise NotImplementedError(f"LLVM backend: {what} with output dtype {dtype}")
+def require_float(scalar_type, what):
+    if scalar_type not in ps.float_types:
+        raise NotImplementedError(
+            f"LLVM backend: {what} with output dtype {scalar_type}"
+        )
 
 
-def _upcast(*dtypes):
+def _upcast(*types):
     import numpy as np
 
-    return str(np.result_type(*dtypes))
+    return element_type(str(np.result_type(*(t.dtype for t in types))))
 
 
 # ------------------------------------------------------------------ arithmetic
@@ -129,18 +130,18 @@ def _(b, args, out):
 
 @register(ps.Pow)
 def _(b, args, out):
-    if is_float(out):
+    if out in ps.float_types:
         return b.libm(ir.Libm.Pow, [conv(b, args, 0, out), conv(b, args, 1, out)])
-    if out == "bool":
+    if out == ps.bool:
         raise NotImplementedError("LLVM backend: pow with output dtype bool")
     return int_pow(b, conv(b, args, 0, out), conv(b, args, 1, out), out)
 
 
-def int_pow(b, x, e, dtype):
+def int_pow(b, x, e, scalar_type):
     """x**e by squaring (wrapping like numpy). A negative e gives 1 for x == 1,
     +-1 for x == -1 and 0 otherwise, as an integer truncation of the real power."""
-    one, zero = constant(b, dtype, 1), constant(b, dtype, 0)
-    bits = value_type(dtype).bits
+    one, zero = constant(b, scalar_type, 1), constant(b, scalar_type, 0)
+    bits = value_type(scalar_type).bits
 
     def step(_i, acc, base, k):
         odd = b.ne(b.and_(k, one), zero)
@@ -152,11 +153,11 @@ def int_pow(b, x, e, dtype):
             b.eq(k2, zero),
         ]
 
-    acc, _, _, _ = b.fold(constant(b, "int64", bits), [one, x, e], step, until=True)
-    if not is_signed(dtype):
+    acc, _, _, _ = b.fold(constant(b, ps.int64, bits), [one, x, e], step, until=True)
+    if scalar_type not in ps.int_types:
         return acc
     neg = b.slt(e, zero)
-    minus_one = constant(b, dtype, -1)
+    minus_one = constant(b, scalar_type, -1)
     odd_e = b.ne(b.and_(e, one), zero)
     at_neg = b.select(
         b.eq(x, one),
@@ -357,29 +358,29 @@ register(ps.NEQ)(_comparison(Num.ne))
 @register(ps.IsNan)
 def _(b, args, out):
     x, d = args[0]
-    if not is_float(d):
+    if d not in ps.float_types:
         return constant(b, out, 0)
-    return cast(b, b.fcmp(ir.FCmp.UNO, x, x), "bool", out)
+    return cast(b, b.fcmp(ir.FCmp.UNO, x, x), ps.bool, out)
 
 
 @register(ps.IsInf)
 def _(b, args, out):
     x, d = args[0]
-    if not is_float(d):
+    if d not in ps.float_types:
         return constant(b, out, 0)
     c = b.fcmp(ir.FCmp.OEQ, ir_intrinsic(b, "Fabs", x), constant(b, d, math.inf))
-    return cast(b, c, "bool", out)
+    return cast(b, c, ps.bool, out)
 
 
 @register(ps.Switch)
 def _(b, args, out):
     x, y = nums(b, args[1:], out)
-    return Num(b, *args[0]).astype("bool").select(x, y)
+    return Num(b, *args[0]).astype(ps.bool).select(x, y)
 
 
 def _bitwise(op):
     def fn(b, args, out):
-        if is_float(out):
+        if out in ps.float_types:
             raise NotImplementedError(f"LLVM backend: bitwise op on {out}")
         return op(*nums(b, args, out))
 
@@ -406,17 +407,17 @@ def _(b, args, out):
 
 
 def emit_inner(b, fg, args):
-    """Emit the scalar graph `fg` on `args` ((value, dtype) per input); return the
-    (value, dtype) of each output."""
+    """Emit the scalar graph `fg` on `args` ((value, ScalarType) per input); return the
+    (value, ScalarType) of each output."""
     values = {}
     for i, (v, d) in zip(fg.inputs, args, strict=True):
-        values[i] = (cast(b, v, d, i.type.dtype), i.type.dtype)
+        values[i] = (cast(b, v, d, element_type(i.type)), element_type(i.type))
 
     def get(var):
         if var in values:
             return values[var]
         if isinstance(var, Constant):
-            d = check_dtype(var.type.dtype)
+            d = element_type(var.type)
             return constant(
                 b, d, var.data.item() if hasattr(var.data, "item") else var.data
             ), d
@@ -427,46 +428,46 @@ def emit_inner(b, fg, args):
             node.op,
             b,
             [get(i) for i in node.inputs],
-            [var.type.dtype for var in node.outputs],
+            [element_type(var.type) for var in node.outputs],
         )
         for var, v in zip(node.outputs, outs, strict=True):
-            values[var] = (v, var.type.dtype)
+            values[var] = (v, element_type(var.type))
     return [get(var) for var in fg.outputs]
 
 
 @llvm_scalar.register(ps.Composite)
-def _(op, b, args, out_dtypes):
+def _(op, b, args, out_types):
     outs = emit_inner(b, op.fgraph, args)
-    return [cast(b, v, d, od) for (v, d), od in zip(outs, out_dtypes, strict=True)]
+    return [cast(b, v, d, od) for (v, d), od in zip(outs, out_types, strict=True)]
 
 
 @llvm_scalar.register(ScalarLoop)
-def _(op, b, args, out_dtypes):
+def _(op, b, args, out_types):
     """The loop is a `fold` whose body is the inner graph, emitted inline; a while
     loop stops after the first step whose until flag is set (and returns the flag)."""
     (n, nd), *rest = args
     fg = op.fgraph
     n_carry = len(fg.outputs) - (1 if op.is_while else 0)
-    carry_dtypes = [i.type.dtype for i in fg.inputs[:n_carry]]
+    carry_types = [element_type(i.type) for i in fg.inputs[:n_carry]]
     init = [
         cast(b, v, d, cd)
-        for (v, d), cd in zip(rest[:n_carry], carry_dtypes, strict=True)
+        for (v, d), cd in zip(rest[:n_carry], carry_types, strict=True)
     ]
     fixed = rest[n_carry:]
 
     def body(_i, *carry):
-        outs = emit_inner(b, fg, [*zip(carry, carry_dtypes), *fixed])
+        outs = emit_inner(b, fg, [*zip(carry, carry_types), *fixed])
         new = [
             cast(b, v, d, cd)
-            for (v, d), cd in zip(outs[:n_carry], carry_dtypes, strict=True)
+            for (v, d), cd in zip(outs[:n_carry], carry_types, strict=True)
         ]
         if op.is_while:
-            new.append(cast(b, *outs[n_carry], "bool"))
+            new.append(cast(b, *outs[n_carry], ps.bool))
         return new
 
-    res = b.fold(cast(b, n, nd, "int64"), init, body, until=op.is_while)
-    dtypes = [*carry_dtypes, "bool"] if op.is_while else carry_dtypes
-    return [cast(b, v, d, od) for v, d, od in zip(res, dtypes, out_dtypes, strict=True)]
+    res = b.fold(cast(b, n, nd, ps.int64), init, body, until=op.is_while)
+    types = [*carry_types, ps.bool] if op.is_while else carry_types
+    return [cast(b, v, d, od) for v, d, od in zip(res, types, out_types, strict=True)]
 
 
 __all__ = ["emit_scalar", "llvm_scalar", "value_type"]

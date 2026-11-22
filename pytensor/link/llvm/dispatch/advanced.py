@@ -101,7 +101,7 @@ def operands(cg, base: Array, pat: Pattern):
     bst = list(base.strides[:first]) + [zero] * nb + list(base.strides[first + k :])
     source = [*range(first), *[None] * nb, *range(first + k, base.ndim)]
     layout = view_layout(base, pat.view_shape, bst, source)
-    base_op = Array(base.dtype, base.data, pat.view_shape, bst, layout)
+    base_op = Array(base.scalar_type, base.data, pat.view_shape, bst, layout)
     idx_ops = []
     for arr, var in pat.indices:
         off = nb - var.type.ndim
@@ -112,7 +112,7 @@ def operands(cg, base: Array, pat: Pattern):
                 st[first + off + d] = arr.strides[d]
                 source_shape[first + off + d] = d
         layout = view_layout(arr, pat.view_shape, st, source_shape)
-        idx_ops.append(Array(arr.dtype, arr.data, pat.view_shape, st, layout))
+        idx_ops.append(Array(arr.scalar_type, arr.data, pat.view_shape, st, layout))
     return base_op, idx_ops
 
 
@@ -124,7 +124,7 @@ def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
     for j, ((arr, var), ip) in enumerate(zip(pat.indices, idx_ptrs, strict=True)):
         axis = pat.first + j
         n = base.shape[axis]
-        i = cast(b, load(b, arr.dtype, ip), arr.dtype, "int64")
+        i = cast(b, load(b, arr.scalar_type, ip), arr.scalar_type, ps.int64)
         i = checked_index(
             cg,
             i,
@@ -132,7 +132,7 @@ def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
             f"index out of bounds for axis {axis} ({what})",
             pat.bounds[j],
         )
-        p = advance(b, p, i, base.strides[axis], base.dtype)
+        p = advance(b, p, i, base.strides[axis], base.scalar_type)
     return p
 
 
@@ -147,7 +147,7 @@ def _(op, node, cg, inputs, outputs):
 
     def body(p):
         src = element(cg, x, pat, p[0], p[1 : 1 + k], "read")
-        store(b, out.dtype, load(b, x.dtype, src), p[-1])
+        store(b, out.scalar_type, load(b, x.scalar_type, src), p[-1])
 
     for_each(b, pat.view_shape, [base_op, *idx_ops, out], body)
 
@@ -190,13 +190,13 @@ def _(op, node, cg, inputs, outputs):
         )
         yst.append(b.select(one, 0, y.strides[a]))
     source = [None] * off + list(range(yt.ndim))
-    ys = Array(y.dtype, y.data, vs, yst, view_layout(y, vs, yst, source))
+    ys = Array(y.scalar_type, y.data, vs, yst, view_layout(y, vs, yst, source))
     k = len(idx_ops)
-    dt = result.dtype
+    dt = result.scalar_type
 
     def body(p):
         dst = element(cg, result, pat, p[0], p[1 : 1 + k], "write")
-        v = cast(b, load(b, y.dtype, p[-1]), y.dtype, dt)
+        v = cast(b, load(b, y.scalar_type, p[-1]), y.scalar_type, dt)
         if not op.set_instead_of_inc:
             v = emit_scalar(ps.add, b, [(load(b, dt, dst), dt), (v, dt)], [dt])[0]
         store(b, dt, v, dst)

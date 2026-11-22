@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING
 
-import numpy as np
-
+import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.type import TensorType
@@ -32,76 +31,91 @@ else:
     ir = _IR()
 
 
-SUPPORTED_DTYPES = (
-    "float64",
-    "float32",
-    "int64",
-    "int32",
-    "int16",
-    "int8",
-    "uint8",
-    "bool",
-    "uint16",
-    "uint32",
-    "uint64",
+#: The element types the backend supports, in the order of their codes in the kernel
+#: ABI (`PT_FLOAT64` etc. in the C header, `DType::code` in Rust).
+SUPPORTED_TYPES: tuple[ScalarType, ...] = (
+    ps.float64,
+    ps.float32,
+    ps.int64,
+    ps.int32,
+    ps.int16,
+    ps.int8,
+    ps.uint8,
+    ps.bool,
+    ps.uint16,
+    ps.uint32,
+    ps.uint64,
 )
 
 
-def dtype_code(dtype: str) -> int:
-    """The code of `dtype` in the kernel ABI (`PtArray.dtype`; `PT_FLOAT64` etc. in the C
-    header, `DType::code` in Rust)."""
-    return SUPPORTED_DTYPES.index(check_dtype(dtype))
+def element_type(t) -> ScalarType:
+    """Return the type of the elements of `t`: a TensorType, a ScalarType, or a dtype
+    string (where one comes from outside the backend: numpy, a kernel's spec).
+
+    Raises NotImplementedError for types the backend doesn't support."""
+    scalar_type: ScalarType
+    if isinstance(t, TensorType):
+        scalar_type = t.to_scalar_type()
+    elif isinstance(t, str):
+        scalar_type = ps.get_scalar_type(t)
+    else:
+        scalar_type = t
+    if scalar_type not in SUPPORTED_TYPES:
+        raise NotImplementedError(
+            f"LLVM backend: dtype {scalar_type.dtype} is not supported"
+        )
+    return scalar_type
 
 
-def check_dtype(dtype: str) -> str:
-    if dtype not in SUPPORTED_DTYPES:
-        raise NotImplementedError(f"LLVM backend: dtype {dtype} is not supported")
-    return dtype
+def dtype_code(t: ScalarType) -> int:
+    """The code of `t` in the kernel ABI (`PtArray.dtype`)."""
+    return SUPPORTED_TYPES.index(element_type(t))
 
 
-def value_type(dtype: str):
-    """The LLVM type of a value of `dtype` in registers (bool is i1)."""
+def value_type(t: ScalarType):
+    """The LLVM type of a value of type `t` in registers (bool is i1)."""
+    return _value_types()[element_type(t)]
+
+
+@cache
+def _value_types() -> dict:
     return {
-        "float64": ir.f64,
-        "float32": ir.f32,
-        "int64": ir.i64,
-        "int32": ir.i32,
-        "int16": ir.i16,
-        "int8": ir.i8,
-        "uint8": ir.i8,
-        "uint16": ir.i16,
-        "uint32": ir.i32,
-        "uint64": ir.i64,
-        "bool": ir.i1,
-    }[check_dtype(dtype)]
+        ps.float64: ir.f64,
+        ps.float32: ir.f32,
+        ps.int64: ir.i64,
+        ps.int32: ir.i32,
+        ps.int16: ir.i16,
+        ps.int8: ir.i8,
+        ps.uint8: ir.i8,
+        ps.uint16: ir.i16,
+        ps.uint32: ir.i32,
+        ps.uint64: ir.i64,
+        ps.bool: ir.i1,
+    }
 
 
-def memory_type(dtype: str):
-    """The LLVM type of an element of `dtype` in memory (bool is a byte)."""
-    return ir.i8 if dtype == "bool" else value_type(dtype)
+def memory_type(t: ScalarType):
+    """The LLVM type of an element of type `t` in memory (bool is a byte)."""
+    return ir.i8 if t == ps.bool else value_type(t)
 
 
-def itemsize(dtype: str) -> int:
-    return np.dtype(check_dtype(dtype)).itemsize
-
-
-def is_signed(dtype: str) -> bool:
-    return dtype.startswith("int")
-
-
-def is_float(dtype: str) -> bool:
-    return dtype.startswith("float")
+def _check_scalar_type(t) -> None:
+    if not isinstance(t, ScalarType):
+        raise TypeError(f"expected a ScalarType, got {t!r}")
 
 
 @dataclass(frozen=True)
 class ScalarRepr:
     """A ScalarType value: the scalar, by value."""
 
-    dtype: str
+    scalar_type: ScalarType
+
+    def __post_init__(self):
+        _check_scalar_type(self.scalar_type)
 
     @property
     def ir_type(self):
-        return value_type(self.dtype)
+        return value_type(self.scalar_type)
 
 
 @dataclass(frozen=True)
@@ -109,10 +123,14 @@ class TensorRepr:
     """A TensorType value: `ptr` for 0-d, else `{ptr, [d x i64] lengths, [s x i64] strides}`
     with only the dynamic lengths and the strides the layout doesn't fix."""
 
-    dtype: str
+    #: the type of the elements
+    scalar_type: ScalarType
     shape: tuple[int | None, ...]
     #: what is known about the strides (canonical for `shape`, see `repr_of`)
     layout: Layout
+
+    def __post_init__(self):
+        _check_scalar_type(self.scalar_type)
 
     @property
     def ndim(self) -> int:
@@ -193,14 +211,14 @@ def repr_of(t, layout: Layout | None = None):
     if is_absent(t):
         return NoneRepr()
     if isinstance(t, ScalarType):
-        return ScalarRepr(check_dtype(t.dtype))
+        return ScalarRepr(element_type(t))
     if isinstance(t, TensorType):
         shape = tuple(None if s is None else int(s) for s in t.shape)
         if layout is None:
             layout = Layout.unknown(shape)
         else:
             layout = Layout.make(shape, layout.order, layout.strides)
-        return TensorRepr(check_dtype(t.dtype), shape, layout)
+        return TensorRepr(element_type(t), shape, layout)
     raise NotImplementedError(f"LLVM backend: no representation for {t}")
 
 

@@ -1,4 +1,4 @@
-"""`Num`: operators on values with a dtype, checked against numpy."""
+"""`Num`: operators on values of a ScalarType, checked against numpy."""
 
 import ctypes
 import operator
@@ -9,8 +9,14 @@ import pytest
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
+import pytensor.scalar as ps  # noqa: E402
 from pytensor.link.llvm.codegen.num import Num  # noqa: E402
-from pytensor.link.llvm.codegen.types import SUPPORTED_DTYPES, value_type  # noqa: E402
+from pytensor.link.llvm.codegen.types import SUPPORTED_TYPES, value_type  # noqa: E402
+
+
+#: the supported dtypes, as strings (the tests' parameters, and numpy's)
+SUPPORTED_DTYPES = [t.dtype for t in SUPPORTED_TYPES]
+T = ps.get_scalar_type  # dtype string -> ScalarType
 
 
 CTYPES = {
@@ -39,11 +45,11 @@ def compile_binary(dtype, fn, out=None):
     """A C function (x, y) -> fn(Num x, Num y) of `dtype`."""
     out = out or dtype
     m = ir.Module("num")
-    f = m.function("f", [value_type(dtype)] * 2, value_type(out), exported=True)
+    f = m.function("f", [value_type(T(dtype))] * 2, value_type(T(out)), exported=True)
     b = f.builder()
-    x, y = (Num(b, p, dtype) for p in f.params)
+    x, y = (Num(b, p, T(dtype)) for p in f.params)
     r = fn(x, y)
-    assert r.dtype == out
+    assert r.scalar_type == T(out)
     b.ret(r.value)
     c = m.compile()
     cf = ctypes.CFUNCTYPE(CTYPES[out], CTYPES[dtype], CTYPES[dtype])(c.address("f"))
@@ -161,14 +167,14 @@ def test_astype(src, dst):
             return False
         return not (np.isfinite(x) and np.iinfo(dst).min <= x <= np.iinfo(dst).max)
 
-    check(src, lambda x, y: x.astype(dst), lambda x, y: x, out=dst, skip=skip)
+    check(src, lambda x, y: x.astype(T(dst)), lambda x, y: x, out=dst, skip=skip)
 
 
 @pytest.mark.parametrize("src", ["float64", "float32"])
 @pytest.mark.parametrize("dst", INTS)
 def test_float_to_int_saturates(src, dst):
     info = np.iinfo(dst)
-    cf = compile_binary(src, lambda x, y: x.astype(dst), out=dst)
+    cf = compile_binary(src, lambda x, y: x.astype(T(dst)), out=dst)
     values = [0.0, -0.5, 0.9, -1.0, 127.9, 200.5, 300.0, -300.0, 4e4, -4e4, 3e9, -3e9]
     values += [1e30, -1e30, np.inf, -np.inf, np.nan, info.min, info.max]
     for v in values:
@@ -191,9 +197,9 @@ def test_mistakes_raise():
     f = m.function("f", [ir.i64, ir.f64, ir.i32], ir.i64)
     b = f.builder()
     i, x, j = (
-        Num(b, f.params[0], "int64"),
-        Num(b, f.params[1], "float64"),
-        Num(b, f.params[2], "int32"),
+        Num(b, f.params[0], ps.int64),
+        Num(b, f.params[1], ps.float64),
+        Num(b, f.params[2], ps.int32),
     )
     with pytest.raises(TypeError, match="convert one with astype"):
         i + j
@@ -211,14 +217,14 @@ def test_mistakes_raise():
     with pytest.raises(NotImplementedError, match="not defined for float64"):
         x & x
     # `==` is identity, so Nums can be dictionary keys
-    assert (i == i) is True and (i == Num(b, f.params[0], "int64")) is False
+    assert (i == i) is True and (i == Num(b, f.params[0], ps.int64)) is False
     assert {i: 1}[i] == 1
 
 
 def test_constants_stay_constants():
     m = ir.Module("num")
     b = m.function("f", [ir.i64], ir.i64).builder()
-    n = Num.const(b, "int64", 6)
+    n = Num.const(b, ps.int64, 6)
     assert (
         (n * 2 + 1).const_value == 13
         and (n // 4).const_value == 1
@@ -226,7 +232,7 @@ def test_constants_stay_constants():
     )
     assert (n < 7).const_value is True and (n < 7).select(n, 0).const_value == 6
     assert (
-        Num.const(b, "uint8", 255).const_value == 255
-        and Num.const(b, "uint64", 2**64 - 1).const_value == 2**64 - 1
-        and Num.const(b, "float64", 0.5).const_value == 0.5
+        Num.const(b, ps.uint8, 255).const_value == 255
+        and Num.const(b, ps.uint64, 2**64 - 1).const_value == 2**64 - 1
+        and Num.const(b, ps.float64, 0.5).const_value == 0.5
     )

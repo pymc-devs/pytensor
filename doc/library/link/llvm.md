@@ -590,11 +590,16 @@ A small LLVM wrapper (`rust/pytensor-llvm/src/ir`) on top of `llvm-sys`:
 On top of it, in Python (`codegen/`):
 
 * `types.ir` is the module itself, imported on first use: emitters write `ir.i64`.
-* `num.Num` is a value with its dtype. LLVM integers have no sign and floats have their
-  own instructions, so code that depends on the dtype (the scalar ops) is written with
-  operators, which pick the instruction: `x + y`, `x // y`, `x < y`, `x.astype(dtype)`,
-  `cond.select(a, b)`, `x.maximum(y)`. They follow numpy for the dtype. Operands must
-  have the same dtype; `==` stays identity (`x.eq(y)` compares) and a `Num` can't be a
+* Element types are PyTensor's own `ScalarType`s throughout the code generation
+  (`Array.scalar_type`, `TensorRepr.scalar_type`, `Num`); `types.element_type(t)`
+  turns a PyTensor type or a dtype string into one, and refuses dtypes the backend
+  doesn't support. Dtype strings only remain where values leave the backend (numpy, the
+  kernel ABI's dtype codes).
+* `num.Num` is a value with its type, PyTensor's `ScalarType`. LLVM integers have no
+  sign and floats have their own instructions, so code that depends on the type (the
+  scalar ops) is written with operators, which pick the instruction: `x + y`, `x // y`,
+  `x < y`, `x.astype(ps.float64)`, `cond.select(a, b)`, `x.maximum(y)`. They follow
+  numpy for the type. Operands must have the same type; `==` stays identity (`x.eq(y)` compares) and a `Num` can't be a
   Python condition. Index arithmetic, which is always i64, uses the builder directly.
 * `types.Slot` and `types.PtArray` name the fields of the two structs emitters reach
   into: `b.field_ptr(slot_type(nd), slot, Slot.OWNER)`.

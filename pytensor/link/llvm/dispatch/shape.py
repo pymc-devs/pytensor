@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import pytensor.scalar as ps
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.link.llvm.analysis.layout import dimshuffle_layout, same_layout
 from pytensor.link.llvm.codegen.emit import Array, cast, copy
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.types import element_type
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.shape import SpecifyShape
@@ -58,7 +60,7 @@ def _(op, node, cg, inputs, outputs):
         if length is None:
             continue
         value = length.load(b).value if isinstance(length, Array) else length
-        expected = cast(b, value, var.type.dtype, "int64")
+        expected = cast(b, value, element_type(var.type), ps.int64)
         cg.check(
             b.eq(source.shape[axis], expected),
             f"SpecifyShape: axis {axis} has the wrong length",

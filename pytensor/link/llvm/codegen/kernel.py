@@ -102,12 +102,12 @@ def build_kernel_wrapper(
                 ),
                 b.eq(
                     b.load(ir.i32, b.field_ptr(ptarray, p, PtArray.DTYPE)),
-                    b.i32(dtype_code(representation.dtype)),
+                    b.i32(dtype_code(representation.scalar_type)),
                 ),
             )
             cg.check(
                 ok,
-                f"argument check: argument {k} isn't a {representation.ndim}-d array of {representation.dtype}",
+                f"argument check: argument {k} isn't a {representation.ndim}-d array of {representation.scalar_type}",
             )
         reprs = [
             *input_tensors,
@@ -188,7 +188,9 @@ def _check_layout(cg, pointer, representation: TensorRepr, k):
     shape = [b.load(ir.i64, b.gep(ir.i64, shape_pointer, a)) for a in axes]
     strides = [b.load(ir.i64, b.gep(ir.i64, strides_pointer, a)) for a in axes]
     data = b.load(ir.ptr, b.field_ptr(ptarray, pointer, PtArray.DATA))
-    array = Array(representation.dtype, data, shape, strides, representation.layout)
+    array = Array(
+        representation.scalar_type, data, shape, strides, representation.layout
+    )
     check_strides(cg, array, representation.layout, f"argument {k}")
 
 

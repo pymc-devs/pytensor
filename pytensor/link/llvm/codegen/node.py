@@ -32,6 +32,7 @@ from pytensor.link.llvm.codegen.signature import (
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     TensorRepr,
+    element_type,
     ir,
     is_absent,
     memory_type,
@@ -142,7 +143,7 @@ def build_node_function(
             if links is None:
                 raise ValueError("a node function calling a kernel needs a links")
             kernel_inputs = [
-                (array, getattr(var.type, "dtype", None))
+                (array, None if is_absent(var.type) else element_type(var.type))
                 for array, var in zip(inputs, node.inputs, strict=True)
             ]
             call_destroying(
@@ -212,17 +213,17 @@ def _inputs(cg, node, signature, folded, writable, params, scopes) -> list:
     representations = iter(signature.inputs)
     inputs: list[EmitterInput] = []
     for position, var in enumerate(node.inputs):
-        dtype: str = getattr(var.type, "dtype", "")
         if is_absent(var.type):
             inputs.append(None)
         elif position in folded:
-            value = constant(b, dtype, folded[position])
+            scalar_type = element_type(var.type)
+            value = constant(b, scalar_type, folded[position])
             if isinstance(repr_of(var.type), ScalarRepr):
                 inputs.append(value)
             else:
-                memory = b.alloca(memory_type(dtype))
-                store(b, dtype, value, memory)
-                inputs.append(c_array(dtype, memory, [], []))
+                memory = b.alloca(memory_type(scalar_type))
+                store(b, scalar_type, value, memory)
+                inputs.append(c_array(scalar_type, memory, [], []))
         else:
             representation, param = next(representations), next(params)
             if isinstance(representation, ScalarRepr):
@@ -247,7 +248,9 @@ def _destinations(
         param = next(params)
         representation = output.representation
         if isinstance(representation, ScalarRepr):
-            destinations.append(ScalarDestination(cg, param, representation.dtype))
+            destinations.append(
+                ScalarDestination(cg, param, representation.scalar_type)
+            )
         elif output.passing is Passing.CALLER_BUFFER:
             array = unpack(cg.b, output.tensor, param)
             scopes.mark(array.data, f"o{j}")

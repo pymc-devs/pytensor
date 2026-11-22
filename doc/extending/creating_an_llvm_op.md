@@ -205,6 +205,7 @@ ordinary PyTensor op:
 
 ```python
 import pytensor
+import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.compile.mode import get_mode
 from pytensor.graph.basic import Apply
@@ -255,7 +256,8 @@ def _(op, node, cg, inputs, outputs): ...
 * `cg` is the code generation context. `cg.b` is the builder; `cg.check(ok, message)`
   makes the step fail with `message` unless `ok` holds.
 * `inputs` has one entry per input of the node. A tensor is an `Array`:
-  * `a.dtype`: the dtype as a string,
+  * `a.scalar_type`: the type of its elements, PyTensor's `ScalarType` (`ps.float64`,
+    ...),
   * `a.data`: the pointer to the first element,
   * `a.shape`: one `i64` value per axis, constants where the shape is static,
   * `a.strides`: one `i64` value per axis, in bytes, as in numpy; constants where the
@@ -301,7 +303,7 @@ def _(op, node, cg, inputs, outputs):
         """out[i] = max(best, x[i]); returns the new maximum."""
         value = x.load(b, i)
         if best is not None:
-            value = Num(b, best, x.dtype).maximum(value)
+            value = Num(b, best, x.scalar_type).maximum(value)
         out.store(b, value, i)
         return value.value
 
@@ -323,7 +325,7 @@ Line by line:
 * The maximum itself depends on the dtype: an intrinsic for floats, a signed or an
   unsigned compare for integers, an `or` for bools. `x.load` returns a `Num`, whose
   `maximum` picks. The carried value of a `fold` is a plain IR value, so it is wrapped
-  with `Num(b, best, x.dtype)` on the way in and unwrapped with `.value` on the way
+  with `Num(b, best, x.scalar_type)` on the way in and unwrapped with `.value` on the way
   out.
 * An empty vector has no first element, hence `b.if_(b.sgt(n, 0))`. For a static shape
   `n` is a constant and LLVM removes the branch.
@@ -431,7 +433,7 @@ Conditions known while generating are ordinary Python. To decline a node, raise
 `NotImplementedError`:
 
 ```py
-if x.dtype == "bool":
+if x.scalar_type == ps.bool:
     raise NotImplementedError("CumMax of booleans")
 ```
 
@@ -468,38 +470,38 @@ g = pytensor.function([x], softsign(x), mode=STRICT)
 np.testing.assert_allclose(g(np.array([-3.0, 0.0, 1.0])), [-0.75, 0.0, 0.5])
 ```
 
-`args` are the arguments as `(value, dtype)` pairs and `out` is the output dtype
-PyTensor computed. `nums(b, args, out)` converts the arguments to the output dtype and
-wraps them as `Num`s, and the emitter returns a `Num` (or a plain value) of that dtype.
+`args` are the arguments as `(value, ScalarType)` pairs and `out` is the output type
+PyTensor computed. `nums(b, args, out)` converts the arguments to the output type and
+wraps them as `Num`s, and the emitter returns a `Num` (or a plain value) of that type.
 
-A `Num` is a value together with its dtype. Its operators choose the instruction for
-the dtype and follow numpy:
+A `Num` is a value together with its type, a `ScalarType`. Its operators choose the
+instruction for the type and follow numpy:
 
 | | |
 |---|---|
 | `x + y`, `x - y`, `x * y`, `-x`, `abs(x)` | for booleans `+` is `or` and `*` is `and` |
 | `x / y` | floats only |
 | `x // y`, `x % y` | rounding to the floor; integers give 0 for a zero divisor |
-| `x < y`, `x <= y`, `x > y`, `x >= y`, `x.eq(y)`, `x.ne(y)` | a `Num` of dtype `bool` |
+| `x < y`, `x <= y`, `x > y`, `x >= y`, `x.eq(y)`, `x.ne(y)` | a `Num` of type `ps.bool` |
 | `x & y`, `x \| y`, `x ^ y`, `~x` | integers and booleans |
 | `cond.select(x, y)` | `x` where the boolean `cond` holds, else `y` |
 | `x.minimum(y)`, `x.maximum(y)` | like `numpy.minimum` and `numpy.maximum` |
-| `x.astype(dtype)` | like numpy's `astype` |
-| `x.value`, `x.dtype`, `x.const_value` | the IR value, the dtype, the Python value of a constant |
+| `x.astype(scalar_type)` | like numpy's `astype` |
+| `x.value`, `x.scalar_type`, `x.const_value` | the IR value, the type, the Python value of a constant |
 
 Three rules keep mistakes visible:
 
 ```python
-i = Num(b, probe.params[0], "int64")
+i = Num(b, probe.params[0], ps.int64)
 with pytest.raises(TypeError, match="convert one with astype"):
-    i + i.astype("int32")  # dtypes are never mixed silently
+    i + i.astype(ps.int32)  # types are never mixed silently
 with pytest.raises(TypeError, match="not a Python condition"):
     if i < 3:  # this decision belongs to the generated code
         pass
 assert (i == i) is True  # `==` is identity; `i.eq(j)` compares
 ```
 
-Use `Num` where the code depends on the dtype; elements loaded from an `Array` already
+Use `Num` where the code depends on the type; elements loaded from an `Array` already
 are `Num`s. Index arithmetic is always `i64` and reads fine with the builder directly,
 as in the `CumMax` emitter.
 
@@ -939,7 +941,7 @@ transposed result instead of a strided loop. For new memory the layout must be p
 
 ## 6. Temporary memory
 
-Some ops need memory besides their outputs while they run. `cg.temporary(dtype, shape)`
+Some ops need memory besides their outputs while they run. `cg.temporary(scalar_type, shape)`
 returns an `Array` for that: C-contiguous, uninitialized, and gone when the step ends.
 
 The example computes the mean of every column of a matrix. To read the matrix in
@@ -974,16 +976,16 @@ def _(op, node, cg, inputs, outputs):
     (x,) = inputs
     rows, columns = x.shape
     out = outputs[0].allocate([columns])
-    sums = cg.temporary("float64", [columns])
+    sums = cg.temporary(ps.float64, [columns])
     with b.loop(columns) as j:
         sums.store(b, 0.0, j)
     with b.loop(rows) as i:
         row = x.at(b, i)
         with b.loop(columns) as j:
-            sums.store(b, sums.load(b, j) + row.load(b, j).astype("float64"), j)
-    count = Num(b, rows, "int64").astype("float64")
+            sums.store(b, sums.load(b, j) + row.load(b, j).astype(ps.float64), j)
+    count = Num(b, rows, ps.int64).astype(ps.float64)
     with b.loop(columns) as j:
-        out.store(b, (sums.load(b, j) / count).astype(out.dtype), j)
+        out.store(b, (sums.load(b, j) / count).astype(out.scalar_type), j)
 ```
 
 `x.at(b, i)` is row `i` as a vector, so the inner loop reads `row.load(b, j)`; the
@@ -1040,7 +1042,7 @@ out the shape of the draws, broadcasts the parameters, checks them and loops. A
 distribution only supplies the function for one draw, as a `Sampler`:
 
 ```py
-Sampler(base, draw, param_dtypes, checks)
+Sampler(base, draw, param_types, checks)
 ```
 
 * `base` is `"uniform"` or `"normal"` for distributions that are a transformation of
@@ -1051,7 +1053,7 @@ Sampler(base, draw, param_dtypes, checks)
   builder, `b.rng(ir.Rng.Gamma, cg.ctx, [shape])`; the runtime has samplers for
   uniform, normal, gamma, beta, Poisson and binomial numbers.
 * `draw(b, cg, z, params)` returns the value of one draw: `z` is the base number (or
-  `None`), `params` are the parameters as IR values of `param_dtypes`.
+  `None`), `params` are the parameters as IR values of `param_types`.
 * `checks` has one entry per parameter: `None`, or `(kind, bound, message)` with kind
   `"ge"`, `"gt"` or `"unit"` (between 0 and 1).
 
@@ -1082,12 +1084,12 @@ def gumbel(b, cg, u, params):
 
 
 SAMPLERS[rb.GumbelRV] = Sampler(
-    "uniform", gumbel, ["float64", "float64"], [None, ("ge", 0.0, "scale < 0")]
+    "uniform", gumbel, [ps.float64, ps.float64], [None, ("ge", 0.0, "scale < 0")]
 )
 ```
 
 The parameters arrive as doubles, so the builder's float instructions are used
-directly; there is no dtype to dispatch on.
+directly; there is no type to dispatch on.
 
 ```python
 sample = pytensor.function([], draws, mode=STRICT)

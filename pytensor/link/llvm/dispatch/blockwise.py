@@ -27,6 +27,7 @@ from pytensor.link.llvm.codegen.emit import Array, Codegen, size
 from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.signature import known_layouts
 from pytensor.link.llvm.codegen.types import repr_of
+from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import constant
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import tensor
@@ -191,8 +192,8 @@ class _BatchRow(OutputDestination):
     row: Array | None = None
 
     @property
-    def dtype(self) -> str:  # type: ignore[override]
-        return self.out.dtype
+    def scalar_type(self) -> ScalarType:  # type: ignore[override]
+        return self.out.scalar_type
 
     def allocate(self, shape: list) -> Array:
         b = self.cg.b

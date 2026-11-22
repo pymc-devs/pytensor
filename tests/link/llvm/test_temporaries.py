@@ -11,6 +11,7 @@ from pytensor.compile.mode import get_mode
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
+import pytensor.scalar as ps  # noqa: E402
 from pytensor.link.llvm.codegen.emit import (  # noqa: E402
     STACK_BUDGET_BYTES,
     STACK_TEMPORARY_BYTES,
@@ -37,7 +38,7 @@ def counts(m):
 def test_small_static_temporaries_are_on_the_stack():
     m, b, cg, _n = codegen()
     cg.temp_memory(b.i64(8))
-    a = cg.temporary("float64", [4, b.i64(8)])  # Python ints are fine in shapes
+    a = cg.temporary(ps.float64, [4, b.i64(8)])  # Python ints are fine in shapes
     assert a.layout.is_c((4, 8)) and [s.const_int for s in a.strides] == [64, 8]
     cg.temp_memory(b.i64(STACK_TEMPORARY_BYTES))
     assert counts(m) == (3, 0)
@@ -52,7 +53,7 @@ def test_large_dynamic_and_escaping_temporaries_are_scratch():
         cg.temp_memory(b.i64(STACK_TEMPORARY_BYTES + 1))  # too large
         cg.temp_memory(b.mul(n, 8))  # size only known when running
         cg.temp_memory(b.i64(8), escapes=True)  # outlives the function
-        cg.temporary("float64", [n])
+        cg.temporary(ps.float64, [n])
         assert "@ptl_rt_scratch_free" not in m.ir()
     assert counts(m) == (0, 4)
     lines = m.ir().splitlines()

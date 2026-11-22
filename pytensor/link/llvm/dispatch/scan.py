@@ -32,6 +32,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
+import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, remove_axis
 from pytensor.link.llvm.codegen.destination import (
     OutputDestination,
@@ -54,7 +57,7 @@ from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
     llvm_layout,
 )
-from pytensor.link.llvm.codegen.types import ir, is_absent, itemsize, value_type
+from pytensor.link.llvm.codegen.types import element_type, ir, is_absent, value_type
 
 
 def register():
@@ -189,15 +192,15 @@ class _RowCounters:
         return next_rows
 
 
-def _as_i64(b, a, dtype):
+def _as_i64(b, a, scalar_type):
     """An integer 0-d array (or scalar value) as i64."""
-    v = load(b, dtype, a.data) if isinstance(a, Array) else a
-    return cast(b, v, dtype, "int64")
+    v = load(b, scalar_type, a.data) if isinstance(a, Array) else a
+    return cast(b, v, scalar_type, ps.int64)
 
 
 def _row_range(b, buf: Array, start, count) -> Array:
     """Rows `start .. start + count` of `buf`."""
-    p = advance(b, buf.data, start, buf.strides[0], buf.dtype)
+    p = advance(b, buf.data, start, buf.strides[0], buf.scalar_type)
     c = buf.layout.is_c(buf.static_shape())
     layout = Layout.c(buf.ndim) if c else Layout.dynamic(buf.ndim)
     return buf.view(p, [count, *buf.shape[1:]], buf.strides, layout)
@@ -213,8 +216,8 @@ def _select(b, cond, a: Array, other: Array) -> Array:
 
 def _fill_zero(cg, a: Array):
     b = cg.b
-    zero = constant(b, a.dtype, 0)
-    for_each(b, a.shape, [a], lambda p: store(b, a.dtype, zero, p[0]))
+    zero = constant(b, a.scalar_type, 0)
+    for_each(b, a.shape, [a], lambda p: store(b, a.scalar_type, zero, p[0]))
 
 
 def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
@@ -284,7 +287,7 @@ def _allocate_nit_sot_buffers(cg, op, node, inputs, outputs) -> list[_NitSotBuff
         op.inner_nitsot_outs(op.fgraph.outputs),
         strict=True,
     ):
-        n_rows = b.smax(_as_i64(b, length, length_var.type.dtype), 0)
+        n_rows = b.smax(_as_i64(b, length, element_type(length_var.type)), 0)
         nit = _NitSotBuffer(
             output=out,
             n_rows=n_rows,
@@ -344,8 +347,8 @@ class _StateRow(OutputDestination):
     target: Array | None = None
 
     @property
-    def dtype(self):
-        return self.row.dtype
+    def scalar_type(self):
+        return self.row.scalar_type
 
     def allocate(self, shape: list) -> Array:
         cg = self.cg
@@ -357,7 +360,7 @@ class _StateRow(OutputDestination):
         elif known is None and self.aside is not None:
             self.target = _select(cg.b, self.in_place, self.row, self.aside)
         else:
-            self.target = cg.temporary(self.row.dtype, list(self.row.shape))
+            self.target = cg.temporary(self.row.scalar_type, list(self.row.shape))
         return self.target
 
     def finish(self) -> None:
@@ -389,8 +392,8 @@ class _NitSotRow(OutputDestination):
     row: Array | None = None
 
     @property
-    def dtype(self):
-        return self.nit.output.dtype
+    def scalar_type(self):
+        return self.nit.output.scalar_type
 
     def allocate(self, shape: list) -> Array:
         b, nit = self.cg.b, self.nit
@@ -426,11 +429,11 @@ class _UntracedState(OutputDestination):
     value: Array | None = None
 
     @property
-    def dtype(self):
-        return self.out.dtype
+    def scalar_type(self):
+        return self.out.scalar_type
 
     def allocate(self, shape: list) -> Array:
-        self.value = self.cg.temporary(self.out.dtype, shape)
+        self.value = self.cg.temporary(self.out.scalar_type, shape)
         return self.value
 
     def finish(self) -> None:
@@ -472,7 +475,7 @@ def _rotate_and_trim(cg, out, buffer: Array, trace_len, is_while: bool):
         shift = b.urem(trace_len, n)
         with b.if_(b.sgt(shift, 0)), cg.scratch_scope():
             # in place, through a copy in temporary memory
-            aside = cg.temporary(buffer.dtype, list(buffer.shape))
+            aside = cg.temporary(buffer.scalar_type, list(buffer.shape))
             copy(cg, buffer, aside)
             rest = b.sub(n, shift)
             copy(cg, _row_range(b, aside, shift, rest), _row_range(b, buffer, 0, rest))
@@ -489,7 +492,9 @@ def _rotate_and_trim(cg, out, buffer: Array, trace_len, is_while: bool):
 
 def _row_layout(a: Array) -> Layout:
     """The layout of one row of `a` (what `a.at(b, i)` has)."""
-    return remove_axis(a.layout, 0, a.static_shape(), itemsize(a.dtype))
+    return remove_axis(
+        a.layout, 0, a.static_shape(), np.dtype(a.scalar_type.dtype).itemsize
+    )
 
 
 def emit_scan(op, node, cg, inputs, outputs):
@@ -500,7 +505,7 @@ def emit_scan(op, node, cg, inputs, outputs):
     ins = list(range(len(fgraph.inputs)))
     outs = list(range(len(fgraph.outputs)))
 
-    n_steps = b.smax(_as_i64(b, inputs[0], node.inputs[0].type.dtype), 0)
+    n_steps = b.smax(_as_i64(b, inputs[0], element_type(node.inputs[0].type)), 0)
     sequences = op.outer_seqs(inputs)
     for k, seq in enumerate(sequences):
         if seq.ndim < 1:
@@ -553,7 +558,7 @@ def emit_scan(op, node, cg, inputs, outputs):
         aside = None
         if in_place.const_int is None:
             if s.buffer.layout.is_c(s.buffer.static_shape()):
-                aside = cg.temporary(s.buffer.dtype, list(s.buffer.shape[1:]))
+                aside = cg.temporary(s.buffer.scalar_type, list(s.buffer.shape[1:]))
             else:
                 in_place = b.const_bool(False)
         write_plans.append((in_place, aside))
@@ -565,7 +570,7 @@ def emit_scan(op, node, cg, inputs, outputs):
         counters.add(b, nit.row_key(), nit.stored_rows, 0)
     # carried through the loop: (the steps taken, for a while-loop), the rows
     n_counts = 1 if info.as_while else 0
-    cond_dtype = fgraph.outputs[-1].type.dtype
+    cond_type = element_type(fgraph.outputs[-1].type)
 
     def step(i, *carried):
         rows = carried[n_counts:]
@@ -595,16 +600,14 @@ def emit_scan(op, node, cg, inputs, outputs):
                     args[k_in] = current
                     results[k_out] = _UntracedState(cg, out, current)
             if info.as_while:
-                cond = ScalarDestination(
-                    cg, b.alloca(value_type(cond_dtype)), cond_dtype
-                )
+                cond = ScalarDestination(cg, b.alloca(value_type(cond_type)), cond_type)
                 results[-1] = cond
 
             body.emit_call(cg, args, results)
 
             if info.as_while:
-                value = b.load(value_type(cond_dtype), cond.pointer)
-                stop = b.ne(cast(b, value, cond_dtype, "int8"), 0)
+                value = b.load(value_type(cond_type), cond.pointer)
+                stop = b.ne(cast(b, value, cond_type, ps.int8), 0)
         next_rows = counters.advance(b, rows)
         if info.as_while:
             return [b.add(carried[0], 1), *next_rows, stop]

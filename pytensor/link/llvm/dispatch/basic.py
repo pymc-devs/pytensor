@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, same_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
@@ -17,7 +18,7 @@ from pytensor.link.llvm.codegen.emit import (
     view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.types import ir, is_float
+from pytensor.link.llvm.codegen.types import element_type, ir
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
 from pytensor.tensor.shape import Reshape, Shape, Shape_i
@@ -33,7 +34,7 @@ def _scalar(b, a):
 @llvm_emit.register(Shape_i)
 def _(op, node, cg, inputs, outputs):
     out = outputs[0].allocate([])
-    out.store(cg.b, cast(cg.b, inputs[0].shape[op.i], "int64", out.dtype))
+    out.store(cg.b, cast(cg.b, inputs[0].shape[op.i], ps.int64, out.scalar_type))
 
 
 @llvm_emit.register(Shape)
@@ -42,7 +43,7 @@ def _(op, node, cg, inputs, outputs):
     x = inputs[0]
     out = outputs[0].allocate([b.i64(x.ndim)])
     for a, n in enumerate(x.shape):
-        out.store(b, cast(b, n, "int64", out.dtype), a)
+        out.store(b, cast(b, n, ps.int64, out.scalar_type), a)
 
 
 @llvm_emit.register(MakeVector)
@@ -50,7 +51,7 @@ def _(op, node, cg, inputs, outputs):
     b = cg.b
     out = outputs[0].allocate([b.i64(len(inputs))])
     for k, x in enumerate(inputs):
-        out.store(b, cast(b, _scalar(b, x), x.dtype, out.dtype), k)
+        out.store(b, cast(b, _scalar(b, x), x.scalar_type, out.scalar_type), k)
 
 
 def _shape_from(cg, node, values, first):
@@ -59,7 +60,7 @@ def _shape_from(cg, node, values, first):
     shape = []
     static = node.outputs[0].type.shape
     for a, x in enumerate(values[first:]):
-        n = cast(b, _scalar(b, x), x.dtype, "int64")
+        n = cast(b, _scalar(b, x), x.scalar_type, ps.int64)
         cg.check(b.sge(n, 0), "negative dimensions are not allowed")
         if static[a] is not None:
             cg.check(
@@ -96,10 +97,17 @@ def _(op, node, cg, inputs, outputs):
         else:
             strides.append(v.strides[a])
     source = [None] * off + list(range(v.ndim))
-    src = Array(v.dtype, v.data, shape, strides, view_layout(v, shape, strides, source))
+    src = Array(
+        v.scalar_type, v.data, shape, strides, view_layout(v, shape, strides, source)
+    )
 
     def body(p):
-        store(b, out.dtype, cast(b, load(b, v.dtype, p[0]), v.dtype, out.dtype), p[1])
+        store(
+            b,
+            out.scalar_type,
+            cast(b, load(b, v.scalar_type, p[0]), v.scalar_type, out.scalar_type),
+            p[1],
+        )
 
     for_each(b, shape, [src, out], body)
 
@@ -113,24 +121,24 @@ def _(op, node, cg, inputs, outputs):
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     start, stop, step = (_scalar(b, x) for x in inputs)
-    dts = [x.dtype for x in inputs]
-    out_dtype = node.outputs[0].type.dtype
+    types = [x.scalar_type for x in inputs]
+    out_type = element_type(node.outputs[0].type)
     i64 = ir.i64
-    if all(not is_float(d) for d in dts):
+    if all(d not in ps.float_types for d in types):
         start, stop, step = (
-            cast(b, v, d, "int64")
-            for v, d in zip((start, stop, step), dts, strict=True)
+            cast(b, v, d, ps.int64)
+            for v, d in zip((start, stop, step), types, strict=True)
         )
         cg.check(b.ne(step, 0), "arange: step can't be zero")
         # length = ceil((stop - start) / step), at least 0
         span = b.sub(stop, start)
         adj = b.select(b.sgt(step, 0), b.sub(step, 1), b.add(step, 1))
         n = b.smax(b.sdiv(b.add(span, adj), step), 0)
-        start_v, step_v, dt = start, step, "int64"
+        start_v, step_v, dt = start, step, ps.int64
     else:
         start, stop, step = (
-            cast(b, v, d, "float64")
-            for v, d in zip((start, stop, step), dts, strict=True)
+            cast(b, v, d, ps.float64)
+            for v, d in zip((start, stop, step), types, strict=True)
         )
         cg.check(b.fcmp(ir.FCmp.UNE, step, 0.0), "arange: step can't be zero")
         q = b.intrinsic(ir.Intrinsic.Ceil, [b.fdiv(b.fsub(stop, start), step)])
@@ -138,17 +146,17 @@ def _(op, node, cg, inputs, outputs):
         cg.check(ok, "arange: invalid or too large range")
         q = b.select(b.fcmp(ir.FCmp.OGT, q, 0.0), q, 0.0)
         n = b.fptosi(q, i64)
-        start_v, step_v, dt = start, step, "float64"
+        start_v, step_v, dt = start, step, ps.float64
     static = node.outputs[0].type.shape[0]
     if static is not None:
         cg.check(b.eq(n, static), "arange: length differs from the static shape")
     out = outputs[0].allocate([n])
     with b.loop(n) as i:
-        if dt == "int64":
+        if dt == ps.int64:
             v = b.add(start_v, b.mul(i, step_v))
         else:
             v = b.fadd(start_v, b.fmul(b.sitofp(i, ir.f64), step_v))
-        out.store(b, cast(b, v, dt, out_dtype), i)
+        out.store(b, cast(b, v, dt, out_type), i)
 
 
 @llvm_layout.register(Reshape)
@@ -165,7 +173,7 @@ def _(op, node, cg, inputs, outputs):
     x, shp = inputs
     total = size(b, x.shape)
     static = node.outputs[0].type.shape
-    raw = [shp.load(b, a).astype("int64").value for a in range(op.ndim)]
+    raw = [shp.load(b, a).astype(ps.int64).value for a in range(op.ndim)]
     # one -1 is inferred from the size
     known = b.i64(1)
     n_infer = b.i64(0)
@@ -188,7 +196,7 @@ def _(op, node, cg, inputs, outputs):
     contig = is_contiguous(b, x.shape, x)
 
     def view():
-        strides = c_strides(b, x.dtype, shape)
+        strides = c_strides(b, x.scalar_type, shape)
         out.set_view(x.view(x.data, shape, strides, Layout.c(len(shape))))
         return []
 
@@ -209,8 +217,8 @@ def _copy_reshaped(cg, src: Array, dst: Array):
     """Copy `src` into C-contiguous `dst` (same size, other shape), in C order: into
     `dst`'s memory seen with `src`'s shape."""
     shape = src.shape
-    strides = c_strides(cg.b, dst.dtype, shape)
-    copy(cg, src, c_array(dst.dtype, dst.data, shape, strides))
+    strides = c_strides(cg.b, dst.scalar_type, shape)
+    copy(cg, src, c_array(dst.scalar_type, dst.data, shape, strides))
 
 
 @llvm_emit.register(Join)
@@ -241,7 +249,7 @@ def _(op, node, cg, inputs, outputs):
     offset = b.i64(0)
     for x in inputs:
         dst = Array(
-            out.dtype,
+            out.scalar_type,
             b.gep_bytes(out.data, b.mul(offset, out.strides[axis], nsw=True)),
             x.shape,
             out.strides,
@@ -265,7 +273,7 @@ def _(op, node, cg, inputs, outputs):
     b = cg.b
     for condition, var in zip(inputs[1:], node.inputs[1:], strict=True):
         value = _scalar(b, condition)
-        dtype = var.type.dtype
-        ok = value if dtype == "bool" else cast(b, value, dtype, "bool")
+        scalar_type = element_type(var.type)
+        ok = value if scalar_type == ps.bool else cast(b, value, scalar_type, ps.bool)
         cg.check(ok, op.msg or "Assertion failed")
     outputs[0].set_view(inputs[0])

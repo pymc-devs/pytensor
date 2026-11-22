@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import operator
 
+import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import split_layouts
 from pytensor.link.llvm.codegen.emit import Array, Codegen, constant, copy, size
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
@@ -22,14 +23,16 @@ def _(op, node, cg, inputs, outputs):
         raise NotImplementedError("CumOp on a 0-d input")
     out = outputs[0].allocate(x.shape)
     combine = operator.add if op.mode == "add" else operator.mul
-    init = constant(b, out.dtype, 0 if op.mode == "add" else 1)
+    init = constant(b, out.scalar_type, 0 if op.mode == "add" else 1)
 
     def level(src: Array, dst: Array, axis: int):
         """Accumulate along `axis`, for every index of the other axes."""
         if src.ndim == 1:
 
             def step(i, acc):
-                new = combine(Num(b, acc, dst.dtype), src.load(b, i).astype(dst.dtype))
+                new = combine(
+                    Num(b, acc, dst.scalar_type), src.load(b, i).astype(dst.scalar_type)
+                )
                 dst.store(b, new, i)
                 return new.value
 
@@ -87,7 +90,7 @@ def _(op, node, cg, inputs, outputs):
     offset = b.i64(0)
     parts = []
     for k, var in enumerate(node.outputs):
-        length = splits.load(b, k).astype("int64").value
+        length = splits.load(b, k).astype(ps.int64).value
         cg.check(b.sge(length, 0), "Split: negative split size")
         static = var.type.shape[axis]
         if static is not None:
@@ -125,7 +128,7 @@ def _(op, node, cg, inputs, outputs):
         b.sgt(size(b, [x.shape[a] for a in reduced]), 0),
         "attempt to get argmax of an empty sequence",
     )
-    nan_aware = x.dtype.startswith("float")
+    nan_aware = x.scalar_type in ps.float_types
 
     def better(v: Num, best: Num) -> Num:
         if nan_aware:
@@ -137,7 +140,7 @@ def _(op, node, cg, inputs, outputs):
         if a.ndim == 1:
 
             def step(i, best, index, count):
-                v, best = a.load(b, i), Num(b, best, a.dtype)
+                v, best = a.load(b, i), Num(b, best, a.scalar_type)
                 take = better(v, best)
                 return [
                     take.select(v, best).value,
@@ -172,7 +175,7 @@ def _(op, node, cg, inputs, outputs):
     (x,) = inputs
 
     def nonzero(v: Num) -> Num:
-        return v if v.dtype == "bool" else v.ne(0)
+        return v if v.scalar_type == ps.bool else v.ne(0)
 
     def walk(a: Array, carried, index, visit):
         """Fold `visit(index, element, *carried)` over the elements of `a`, in C order."""

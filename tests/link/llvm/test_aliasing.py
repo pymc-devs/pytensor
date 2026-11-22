@@ -14,6 +14,7 @@ from pytensor.graph.op import Op
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
+import pytensor.scalar as ps  # noqa: E402
 from pytensor.link.llvm.analysis.layout import Layout  # noqa: E402
 from pytensor.link.llvm.analysis.liveness import (  # noqa: E402
     first_fit,
@@ -60,7 +61,7 @@ def step(inputs, outputs, passings, aliases=None):
     """A step as `analysis.liveness` sees it: arguments, outputs, how they are passed
     and the arguments they may be views of."""
     aliases = aliases or [()] * len(outputs)
-    representation = TensorRepr("float64", (8,), Layout.c(1))
+    representation = TensorRepr(ps.float64, (8,), Layout.c(1))
     outs = [
         Output(representation, passing, a)
         for passing, a in zip(passings, aliases, strict=True)
@@ -147,7 +148,7 @@ def _(op, node, input_layouts):
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     flag, x, y = inputs
-    with b.if_(b.ne(load(b, flag.dtype, flag.data), 0)):
+    with b.if_(b.ne(load(b, flag.scalar_type, flag.data), 0)):
         outputs[0].set_view(x)
     with b.else_():
         outputs[0].set_view(y)
@@ -229,11 +230,11 @@ def test_inputs_are_read_only():
     b = f.builder()
     shape, strides = [b.i64(4)], [b.i64(8)]
     layout = unknown_layout(shape)
-    x = Array("float64", f.params[0], shape, strides, layout, base=0, writable=False)
+    x = Array(ps.float64, f.params[0], shape, strides, layout, base=0, writable=False)
     with pytest.raises(ValueError, match="storing into an input"):
         x.store(b, 1.0, 0)
     with pytest.raises(ValueError, match="storing into an input"):
         x.at(b, 0).store(b, 1.0)  # views of an input are read-only too
     assert x.view(x.data, x.shape, x.strides).base == 0
     # other memory is fine
-    Array("float64", f.params[0], shape, strides, layout).store(b, 1.0, 0)
+    Array(ps.float64, f.params[0], shape, strides, layout).store(b, 1.0, 0)

@@ -8,6 +8,7 @@ import pytest
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
+import pytensor.scalar as ps  # noqa: E402
 from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 from pytensor.link.llvm.codegen.emit import (  # noqa: E402
     Array,
@@ -27,7 +28,15 @@ def run(build, *arrays):
     for a, p in zip(arrays, f.params, strict=True):
         shape = [b.i64(n) for n in a.shape]
         strides = [b.i64(s) for s in a.strides]
-        wrapped.append(Array(str(a.dtype), p, shape, strides, unknown_layout(shape)))
+        wrapped.append(
+            Array(
+                ps.get_scalar_type(str(a.dtype)),
+                p,
+                shape,
+                strides,
+                unknown_layout(shape),
+            )
+        )
     b.ret(build(b, *wrapped))
     c = m.compile()
     fn = ctypes.CFUNCTYPE(ctypes.c_double, *[ctypes.c_void_p] * len(arrays))(
@@ -58,7 +67,7 @@ def test_elements_are_nums_of_the_dtype(dtype):
     def build(b, xa, oa):
         with b.loop(5) as i:
             v = xa.load(b, i)
-            assert isinstance(v, Num) and v.dtype == dtype
+            assert isinstance(v, Num) and v.scalar_type == ps.get_scalar_type(dtype)
             oa.store(b, v, b.sub(4, i))  # reversed
         oa.store(b, 1, 0)  # a Python number takes the dtype
         oa.store(b, xa.load(b, 1).value, 1)  # a raw IR value
@@ -92,14 +101,14 @@ def test_at_keeps_what_the_layout_says():
     f = m.function("f", [ir.ptr, ir.i64, ir.i64], ir.f64)
     b = f.builder()
     p, n, i = f.params
-    c = Array("float64", p, [n, b.i64(4)], [b.i64(32), b.i64(8)], Layout.c(2))
+    c = Array(ps.float64, p, [n, b.i64(4)], [b.i64(32), b.i64(8)], Layout.c(2))
     assert c.at(b, i).layout.is_c((4,))  # a row of a C-contiguous matrix is contiguous
     column = c.at(b, i, axis=1)  # a column is strided
     assert str(column.layout) == "[32]" and column.strides[0].const_int == 32
-    unknown = Array("float64", p, [n, n], [n, n], unknown_layout([n, n]))
+    unknown = Array(ps.float64, p, [n, n], [n, n], unknown_layout([n, n]))
     assert unknown.at(b, 0).layout == Layout.make((None,), (0,), (DYNAMIC,))
     fortran = Array(
-        "float64",
+        ps.float64,
         p,
         [b.i64(3), n],
         [b.i64(8), b.i64(24)],
@@ -114,7 +123,7 @@ def test_views_keep_what_still_holds_of_the_layout():
     b = f.builder()
     p, n = f.params
     shape = [b.i64(2), b.i64(3), b.i64(4)]
-    c = Array("float64", p, shape, [b.i64(96), b.i64(32), b.i64(8)], Layout.c(3))
+    c = Array(ps.float64, p, shape, [b.i64(96), b.i64(32), b.i64(8)], Layout.c(3))
     # a slice along axis 1 (with c's strides): the axes inside it stay packed, the
     # outer one's stride counts all of c's axis 1
     part = [shape[0], n, shape[2]]
@@ -140,10 +149,10 @@ def test_mistakes_raise():
     f = m.function("f", [ir.ptr, ir.i64], ir.f64)
     b = f.builder()
     p, n = f.params
-    a = Array("float64", p, [n, n], [n, n], unknown_layout([n, n]))
+    a = Array(ps.float64, p, [n, n], [n, n], unknown_layout([n, n]))
     with pytest.raises(ValueError, match="1 indices for an array with 2 axes"):
         a.load(b, 0)
     with pytest.raises(TypeError, match="convert with astype"):
-        a.store(b, Num.const(b, "int64", 1), 0, 0)
+        a.store(b, Num.const(b, ps.int64, 1), 0, 0)
     with pytest.raises(IndexError):
         a.at(b, 0, axis=2)

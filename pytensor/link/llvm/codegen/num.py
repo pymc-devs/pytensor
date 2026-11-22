@@ -1,19 +1,19 @@
-"""Numbers in generated code: an IR value together with its dtype.
+"""Numbers in generated code: an IR value together with its type (a `ScalarType`).
 
 LLVM integers don't know whether they are signed, and floats and integers have
-different instructions. A `Num` carries the dtype, so emitters write the arithmetic
+different instructions. A `Num` carries the type, so emitters write the arithmetic
 and the operators pick the instruction:
 
-    i = Num(b, value, "int64")
+    i = Num(b, value, ps.int64)
     i = (i < 0).select(i + n, i)
     ok = (i >= 0) & (i < n)
 
-The operators follow numpy for the dtype: `+` of booleans is `or`, integer `//` and `%`
+The operators follow numpy for the type: `+` of booleans is `or`, integer `//` and `%`
 round to the floor and give 0 for a zero divisor, comparisons of floats are false for
 NaN. (Float `//` is `floor(x / y)`, like PyTensor's C code; numpy differs for infinite
 operands.)
-Both operands must have the same dtype: convert with `astype`. Python numbers take the
-dtype of the `Num` they meet.
+Both operands must have the same type: convert with `astype`. Python numbers take the
+type of the `Num` they meet.
 
 A `Num` is not a Python number: `==` compares identity (use `x.eq(y)`), and using one
 as a condition (`if x < y:`) raises; that decision belongs to the generated code
@@ -22,31 +22,33 @@ as a condition (`if x < y:`) raises; that decision belongs to the generated code
 
 from __future__ import annotations
 
+import pytensor.scalar as ps
 from pytensor.link.llvm.codegen.emit import cast, constant
 from pytensor.link.llvm.codegen.types import (
-    check_dtype,
+    element_type,
     ir,
-    is_float,
-    is_signed,
     value_type,
 )
+from pytensor.scalar.basic import ScalarType
 
 
 class Num:
-    __slots__ = ("b", "dtype", "value")
+    __slots__ = ("b", "scalar_type", "value")
 
-    def __init__(self, b, value, dtype: str):
+    def __init__(self, b, value, scalar_type: ScalarType):
         self.b = b
         self.value = value
-        self.dtype = check_dtype(dtype)
+        if not isinstance(scalar_type, ScalarType):
+            raise TypeError(f"expected a ScalarType, got {scalar_type!r}")
+        self.scalar_type = element_type(scalar_type)
 
     @classmethod
-    def const(cls, b, dtype: str, value) -> Num:
-        """The constant `value` of `dtype`."""
-        return cls(b, constant(b, dtype, value), dtype)
+    def const(cls, b, scalar_type: ScalarType, value) -> Num:
+        """The constant `value` of type `scalar_type`."""
+        return cls(b, constant(b, scalar_type, value), scalar_type)
 
     def __repr__(self):
-        return f"Num({self.dtype}, {self.value!r})"
+        return f"Num({self.scalar_type}, {self.value!r})"
 
     def __bool__(self):
         raise TypeError(
@@ -57,63 +59,67 @@ class Num:
     @property
     def const_value(self):
         """The Python value if this is a constant, else None."""
-        if is_float(self.dtype):
+        if self.scalar_type in ps.float_types:
             return self.value.const_float
         c = self.value.const_int
-        if c is not None and self.dtype == "bool":
+        if c is not None and self.scalar_type == ps.bool:
             return bool(c)
-        if c is not None and self.dtype.startswith("uint"):
-            return c % 2 ** value_type(self.dtype).bits
+        if c is not None and self.scalar_type in ps.uint_types:
+            return c % 2 ** value_type(self.scalar_type).bits
         return c
 
     # ------------------------------------------------------------ plumbing
 
     @property
     def _float(self) -> bool:
-        return is_float(self.dtype)
+        return self.scalar_type in ps.float_types
 
     @property
     def _bool(self) -> bool:
-        return self.dtype == "bool"
+        return self.scalar_type == ps.bool
 
-    def _new(self, value, dtype: str | None = None) -> Num:
-        return Num(self.b, value, self.dtype if dtype is None else dtype)
+    def _new(self, value, scalar_type: ScalarType | None = None) -> Num:
+        return Num(
+            self.b, value, self.scalar_type if scalar_type is None else scalar_type
+        )
 
     def _raw(self, other, what: str):
-        """The IR value of the other operand of `what`, in this dtype."""
+        """The IR value of the other operand of `what`, of this type."""
         if isinstance(other, Num):
-            if other.dtype != self.dtype:
+            if other.scalar_type != self.scalar_type:
                 raise TypeError(
-                    f"{what} of {self.dtype} and {other.dtype}: convert one with astype"
+                    f"{what} of {self.scalar_type} and {other.scalar_type}: convert one with astype"
                 )
             return other.value
         if isinstance(other, bool | int | float):
             if isinstance(other, float) and not self._float:
                 raise TypeError(
-                    f"{what} of {self.dtype} and the float {other}: convert with astype"
+                    f"{what} of {self.scalar_type} and the float {other}: convert with astype"
                 )
-            return constant(self.b, self.dtype, other)
+            return constant(self.b, self.scalar_type, other)
         raise TypeError(
-            f"{what} of a Num and {type(other).__name__}: wrap IR values as Num(b, value, dtype)"
+            f"{what} of a Num and {type(other).__name__}: wrap IR values as Num(b, value, scalar_type)"
         )
 
     def _no(self, what: str):
         # (NotImplementedError: the planner then looks for another implementation)
         return NotImplementedError(
-            f"LLVM backend: {what} is not defined for {self.dtype}"
+            f"LLVM backend: {what} is not defined for {self.scalar_type}"
         )
 
     # ------------------------------------------------------------ conversion
 
-    def astype(self, dtype: str) -> Num:
+    def astype(self, scalar_type: ScalarType) -> Num:
         """Converted like numpy's astype."""
-        return Num(self.b, cast(self.b, self.value, self.dtype, dtype), dtype)
+        return Num(
+            self.b, cast(self.b, self.value, self.scalar_type, scalar_type), scalar_type
+        )
 
     def select(self, a, b) -> Num:
         """`a` where this boolean is true, else `b` (both are evaluated)."""
         if not self._bool:
             raise TypeError(
-                f"select on a condition of dtype {self.dtype}: compare it first"
+                f"select on a condition of dtype {self.scalar_type}: compare it first"
             )
         like = a if isinstance(a, Num) else b
         if not isinstance(like, Num):
@@ -182,7 +188,7 @@ class Num:
             q = b.intrinsic(ir.Intrinsic.Floor, [b.fdiv(x, y)])
             return self._new(q if want_quotient else b.fsub(x, b.fmul(q, y)))
         y, is_zero = self._divisor(y)
-        if not is_signed(self.dtype):
+        if self.scalar_type not in ps.int_types:
             return self._new(
                 b.select(is_zero, 0, b.udiv(x, y) if want_quotient else b.urem(x, y))
             )
@@ -226,7 +232,7 @@ class Num:
         b, x = self.b, self.value
         if self._float:
             return self._new(b.intrinsic(ir.Intrinsic.Fabs, [x]))
-        if is_signed(self.dtype):
+        if self.scalar_type in ps.int_types:
             return self._new(b.select(b.slt(x, 0), b.neg(x), x))
         return self
 
@@ -262,9 +268,10 @@ class Num:
     def _compare(self, other, what, fpred, signed, unsigned) -> Num:
         b, x, y = self.b, self.value, self._raw(other, what)
         if self._float:
-            return self._new(b.fcmp(getattr(ir.FCmp, fpred), x, y), "bool")
+            return self._new(b.fcmp(getattr(ir.FCmp, fpred), x, y), ps.bool)
         return self._new(
-            getattr(b, signed if is_signed(self.dtype) else unsigned)(x, y), "bool"
+            getattr(b, signed if self.scalar_type in ps.int_types else unsigned)(x, y),
+            ps.bool,
         )
 
     def __lt__(self, other):
@@ -297,7 +304,7 @@ class Num:
             )
         if self._bool:
             return self._new(b.or_(x, y) if is_max else b.and_(x, y))
-        if is_signed(self.dtype):
+        if self.scalar_type in ps.int_types:
             return self._new(b.smax(x, y) if is_max else b.smin(x, y))
         return self._new(b.umax(x, y) if is_max else b.umin(x, y))
 

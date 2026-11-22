@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import subtensor_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
@@ -14,18 +15,19 @@ from pytensor.link.llvm.codegen.emit import (
     view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.types import element_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add
 from pytensor.tensor.subtensor import IncSubtensor, Subtensor, unflatten_index_variables
 
 
-def _i64(b, v, dtype):
-    return cast(b, v, dtype, "int64")
+def _i64(b, v, scalar_type):
+    return cast(b, v, scalar_type, ps.int64)
 
 
 def index(cg, x: Array, entries) -> Array:
-    """`x[entries]` as a view: `entries` hold (value, dtype) for integer indices and
-    slices of (value, dtype) / None, like `unflatten_index_variables` returns them."""
+    """`x[entries]` as a view: `entries` hold (value, ScalarType) for integer indices
+    and slices of (value, ScalarType) / None, like `unflatten_index_variables` returns them."""
     b = cg.b
     offset = b.i64(0)
     shape, strides = [], []
@@ -66,7 +68,7 @@ def index(cg, x: Array, entries) -> Array:
                 _i64(b, *e),
                 n,
                 f"index out of bounds for axis {axis}",
-                (0, None) if e[1].startswith("uint") else (None, None),
+                (0, None) if e[1] in ps.uint_types else (None, None),
             )
             offset = b.add(offset, b.mul(i, st, nsw=True))
         axis += 1
@@ -80,7 +82,7 @@ def index(cg, x: Array, entries) -> Array:
 
 def _entries(op, node, inputs, first):
     values = [
-        (v, var.type.dtype)
+        (v, element_type(var.type))
         for v, var in zip(inputs[first:], node.inputs[first:], strict=True)
     ]
     return unflatten_index_variables(values, op.idx_list)
@@ -131,16 +133,16 @@ def _(op, node, cg, inputs, outputs):
             ystrides.append(b.select(one, 0, y.strides[a]))
     source = [None] * off + list(range(ytype.ndim))
     ys = Array(
-        y.dtype,
+        y.scalar_type,
         y.data,
         view.shape,
         ystrides,
         view_layout(y, view.shape, ystrides, source),
     )
-    dt = result.dtype
+    dt = result.scalar_type
 
     def body(p):
-        v = cast(b, load(b, y.dtype, p[1]), y.dtype, dt)
+        v = cast(b, load(b, y.scalar_type, p[1]), y.scalar_type, dt)
         if not op.set_instead_of_inc:
             v = emit_scalar(scalar_add, b, [(load(b, dt, p[0]), dt), (v, dt)], [dt])[0]
         store(b, dt, v, p[0])

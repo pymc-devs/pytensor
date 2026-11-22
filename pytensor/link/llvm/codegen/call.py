@@ -28,6 +28,7 @@ from pytensor.link.llvm.codegen.types import (
     ptarray_type,
     slot_type,
 )
+from pytensor.scalar.basic import ScalarType
 
 
 @dataclass
@@ -119,7 +120,7 @@ def linked(cg, index: int):
 
 def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> None:
     """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
-    with `inputs` ((Array, scalar value or None for absent ones, dtype) pairs) and
+    with `inputs` ((Array, scalar value or None for absent ones, `ScalarType`) pairs) and
     `outputs` (`ProvidedDestination`, `SlotDestination`, or None).
 
     Allocated and view outputs land in their output slots, owner included, also when the
@@ -135,7 +136,9 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     ptarray = ptarray_type()
     i64 = ir.i64
     # per argument: (data, shape ptr, strides ptr, ndim, dtype, slot or None)
-    args_of: list[tuple[object, object, object, int, str, SlotDestination | None]] = []
+    args_of: list[
+        tuple[object, object, object, int, ScalarType, SlotDestination | None]
+    ] = []
     n_inputs = 0
 
     def storage(values):
@@ -144,7 +147,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
             b.store(v, b.gep(i64, p, k))
         return p
 
-    for a, dtype in inputs:
+    for a, scalar_type in inputs:
         if a is None:
             continue
         n_inputs += 1
@@ -155,14 +158,14 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
                     storage(a.shape),
                     storage(a.strides),
                     len(a.shape),
-                    dtype,
+                    scalar_type,
                     None,
                 )
             )
         else:  # a scalar: a 0-d array
-            p = b.alloca(memory_type(dtype))
-            store(b, dtype, a, p)
-            args_of.append((p, storage([]), storage([]), 0, dtype, None))
+            p = b.alloca(memory_type(scalar_type))
+            store(b, scalar_type, a, p)
+            args_of.append((p, storage([]), storage([]), 0, scalar_type, None))
     for destination in outputs:
         if destination is None:
             continue
@@ -174,7 +177,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
                     storage(a.shape),
                     storage(a.strides),
                     len(a.shape),
-                    a.dtype,
+                    a.scalar_type,
                     None,
                 )
             )
@@ -186,7 +189,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
                     b.field_ptr(st, destination.slot, Slot.LENGTHS),
                     b.field_ptr(st, destination.slot, Slot.STRIDES),
                     destination.ndim,
-                    destination.dtype,
+                    destination.scalar_type,
                     destination,
                 )
             )
@@ -197,14 +200,14 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
 
     args = b.alloca(ir.Type.array(ptarray, max(len(args_of), 1)))
     ptrs = []
-    for k, (data, shape, strides, nd, dtype, _) in enumerate(args_of):
+    for k, (data, shape, strides, nd, scalar_type, _) in enumerate(args_of):
         p = b.gep_bytes(args, k * PTARRAY_SIZE)
         b.store(data, b.field_ptr(ptarray, p, PtArray.DATA))
         b.store(shape, b.field_ptr(ptarray, p, PtArray.SHAPE))
         b.store(strides, b.field_ptr(ptarray, p, PtArray.STRIDES))
         b.store(b.null(), b.field_ptr(ptarray, p, PtArray.OWNER))
         b.store(b.i32(nd), b.field_ptr(ptarray, p, PtArray.NDIM))
-        b.store(b.i32(dtype_code(dtype)), b.field_ptr(ptarray, p, PtArray.DTYPE))
+        b.store(b.i32(dtype_code(scalar_type)), b.field_ptr(ptarray, p, PtArray.DTYPE))
         ptrs.append(p)
 
     fn = linked(cg, index)
@@ -237,12 +240,12 @@ def call_destroying(cg, kernel: Kernel, index: int, inputs: list, outputs: list)
     from pytensor.link.llvm.codegen.emit import Array, copy
 
     ins = []
-    for pos, (a, dtype) in enumerate(inputs):
+    for pos, (a, scalar_type) in enumerate(inputs):
         if pos in kernel.destroys and isinstance(a, Array):
-            mine = cg.temporary(a.dtype, a.shape)
+            mine = cg.temporary(a.scalar_type, a.shape)
             copy(cg, a, mine)
             a = mine
-        ins.append((a, dtype))
+        ins.append((a, scalar_type))
     call_kernel(cg, kernel, index, ins, outputs)
 
 
@@ -289,7 +292,7 @@ def build_call_function(
                 SlotDestination(
                     cg,
                     next(params),
-                    output.representation.dtype,
+                    output.representation.scalar_type,
                     output.representation.ndim,
                     signature.alias_arguments(output),
                 )
@@ -297,7 +300,9 @@ def build_call_function(
     if index is None:
         index = links.link_kernel(kernel)
     with cg.scratch_scope(function=True):
-        call_destroying(cg, kernel, index, [(a, a.dtype) for a in inputs], outputs)
+        call_destroying(
+            cg, kernel, index, [(a, a.scalar_type) for a in inputs], outputs
+        )
     b.ret(0)
     return NodeFunction(fn, signature, links)
 

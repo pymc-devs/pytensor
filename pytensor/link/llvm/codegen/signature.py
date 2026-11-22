@@ -90,7 +90,7 @@ class Output:
         return replace(
             self,
             representation=TensorRepr(
-                representation.dtype, representation.shape, layout
+                representation.scalar_type, representation.shape, layout
             ),
         )
 

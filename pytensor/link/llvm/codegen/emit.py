@@ -7,6 +7,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+import numpy as np
+
+import pytensor.scalar as ps
 from pytensor.graph.basic import Constant
 from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout
 from pytensor.link.llvm.codegen.types import (
@@ -14,12 +17,10 @@ from pytensor.link.llvm.codegen.types import (
     Slot,
     TensorRepr,
     ir,
-    is_float,
-    is_signed,
-    itemsize,
     memory_type,
     value_type,
 )
+from pytensor.scalar.basic import ScalarType
 
 
 if TYPE_CHECKING:
@@ -45,7 +46,8 @@ class Array:
     nothing); code uses it to pick loops (analysis/layout.py).
     """
 
-    dtype: str
+    #: the type of the elements
+    scalar_type: ScalarType
     data: ir.Value
     shape: list
     strides: list
@@ -59,6 +61,10 @@ class Array:
     #: `base_if` is an i1 that is true when it really is one. None means it certainly
     #: is (if `base` is set).
     base_if: ir.Value | None = None
+
+    def __post_init__(self):
+        if not isinstance(self.scalar_type, ScalarType):
+            raise TypeError(f"expected a ScalarType, got {self.scalar_type!r}")
 
     @property
     def ndim(self):
@@ -80,7 +86,7 @@ class Array:
         """An array in the same memory: `data` points into it. It belongs to the same
         input and is as writable as this one. `layout`: default nothing known."""
         return Array(
-            self.dtype,
+            self.scalar_type,
             data,
             list(shape),
             list(strides),
@@ -98,14 +104,14 @@ class Array:
             raise ValueError(f"{len(index)} indices for an array with {self.ndim} axes")
         p = self.data
         for i, stride in zip(index, self.strides, strict=True):
-            p = advance(b, p, i, stride, self.dtype)
+            p = advance(b, p, i, stride, self.scalar_type)
         return p
 
     def load(self, b, *index):
         """The element at `index`, as a `Num` of the array's dtype."""
         from pytensor.link.llvm.codegen.num import Num
 
-        return Num(b, load(b, self.dtype, self.ptr(b, *index)), self.dtype)
+        return Num(b, load(b, self.scalar_type, self.ptr(b, *index)), self.scalar_type)
 
     def store(self, b, value, *index):
         """Write `value` to the element at `index`: a `Num` of the array's dtype, an IR
@@ -113,19 +119,19 @@ class Array:
         from pytensor.link.llvm.codegen.num import Num
 
         if isinstance(value, Num):
-            if value.dtype != self.dtype:
+            if value.scalar_type != self.scalar_type:
                 raise TypeError(
-                    f"storing a {value.dtype} into an array of {self.dtype}: convert with astype"
+                    f"storing a {value.scalar_type} into an array of {self.scalar_type}: convert with astype"
                 )
             value = value.value
         elif isinstance(value, bool | int | float):
-            value = constant(b, self.dtype, value)
+            value = constant(b, self.scalar_type, value)
         if not self.writable:
             raise ValueError(
                 "storing into an input: inputs are only read, unless the op may "
                 "destroy them (`writable`). Write the output (`out.allocate(shape)`)"
             )
-        store(b, self.dtype, value, self.ptr(b, *index))
+        store(b, self.scalar_type, value, self.ptr(b, *index))
 
     def at(self, b, i, axis: int = 0) -> Array:
         """The sub-array at index `i` of `axis` (`a[i]`, `a[:, i]`, ...): a view with
@@ -135,19 +141,24 @@ class Array:
         axis = range(self.ndim)[axis]
         keep = [a for a in range(self.ndim) if a != axis]
         return self.view(
-            advance(b, self.data, i, self.strides[axis], self.dtype),
+            advance(b, self.data, i, self.strides[axis], self.scalar_type),
             [self.shape[a] for a in keep],
             [self.strides[a] for a in keep],
-            remove_axis(self.layout, axis, self.static_shape(), itemsize(self.dtype)),
+            remove_axis(
+                self.layout,
+                axis,
+                self.static_shape(),
+                np.dtype(self.scalar_type.dtype).itemsize,
+            ),
         )
 
 
-def c_array(dtype, data, shape, strides) -> Array:
+def c_array(scalar_type, data, shape, strides) -> Array:
     """A C-contiguous array (strides from `c_strides`)."""
-    return Array(dtype, data, list(shape), list(strides), Layout.c(len(shape)))
+    return Array(scalar_type, data, list(shape), list(strides), Layout.c(len(shape)))
 
 
-def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
+def packed_array(b, scalar_type, data, shape, layout: Layout | None = None) -> Array:
     """An array at `data` packed in `layout` (all axes packed; default C-contiguous)."""
     nd = len(shape)
     static = [n.const_int for n in shape]
@@ -157,10 +168,10 @@ def packed_array(b, dtype, data, shape, layout: Layout | None = None) -> Array:
     if not layout.fully_packed(static):
         raise ValueError(f"can't allocate an array of layout {layout}")
     return Array(
-        dtype,
+        scalar_type,
         data,
         list(shape),
-        layout.stride_values(b, itemsize(dtype), shape, {}),
+        layout.stride_values(b, np.dtype(scalar_type.dtype).itemsize, shape, {}),
         layout,
     )
 
@@ -230,7 +241,7 @@ def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
     kinds = [0 if ax in bcast else k for ax, k in enumerate(a.layout.strides)]
     loop_static = [n.const_int for n in shape]
     return Array(
-        a.dtype,
+        a.scalar_type,
         a.data,
         list(shape),
         strides,
@@ -238,10 +249,10 @@ def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
     )
 
 
-def c_strides(b, dtype, shape):
+def c_strides(b, scalar_type, shape):
     """C-contiguous byte strides for `shape` (i64 values)."""
     strides = [None] * len(shape)
-    acc = b.i64(itemsize(dtype))
+    acc = b.i64(np.dtype(scalar_type.dtype).itemsize)
     for a in reversed(range(len(shape))):
         strides[a] = acc
         acc = b.mul(acc, shape[a], nsw=True)
@@ -258,7 +269,7 @@ def size(b, shape):
 def unpack(b, representation: TensorRepr, value) -> Array:
     """The Array of a tensor value in its representation."""
     if representation.ndim == 0:
-        return Array(representation.dtype, value, [], [], Layout.c(0))
+        return Array(representation.scalar_type, value, [], [], Layout.c(0))
     data = b.extract(value, 0)
     lengths = b.extract(value, 1)
     shape, k = [], 0
@@ -273,9 +284,11 @@ def unpack(b, representation: TensorRepr, value) -> Array:
         st = b.extract(value, 2)
         passed = {a: b.extract(st, k) for k, a in enumerate(representation.stride_axes)}
     strides = representation.layout.stride_values(
-        b, itemsize(representation.dtype), shape, passed
+        b, np.dtype(representation.scalar_type.dtype).itemsize, shape, passed
     )
-    return Array(representation.dtype, data, shape, strides, representation.layout)
+    return Array(
+        representation.scalar_type, data, shape, strides, representation.layout
+    )
 
 
 def pack(b, representation: TensorRepr, a: Array):
@@ -293,21 +306,23 @@ def pack(b, representation: TensorRepr, a: Array):
     return b.aggregate(representation.ir_type, [a.data, lengths, strides])
 
 
-def load(b, dtype, ptr):
+def load(b, scalar_type, ptr):
     """Load an element; bools become i1."""
-    v = b.load(memory_type(dtype), ptr)
-    if dtype == "bool":
+    v = b.load(memory_type(scalar_type), ptr)
+    if scalar_type == ps.bool:
         return b.ne(v, 0)
     return v
 
 
-def store(b, dtype, value, ptr):
-    if dtype == "bool":
+def store(b, scalar_type, value, ptr):
+    if scalar_type == ps.bool:
         value = b.zext(value, ir.i8)
     b.store(value, ptr)
 
 
-def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Array:
+def read_slot(
+    b, slot, scalar_type, static_shape, layout: Layout | None = None
+) -> Array:
     """The array a kernel wrote into an output slot (static lengths stay constants;
     with a known `layout`, only its dynamic strides are read)."""
     nd = len(static_shape)
@@ -323,18 +338,20 @@ def read_slot(b, slot, dtype, static_shape, layout: Layout | None = None) -> Arr
     else:
         layout = Layout.make(static_shape, layout.order, layout.strides)
     passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
-    strides = layout.stride_values(b, itemsize(dtype), shape, passed)
-    return Array(dtype, data, shape, strides, layout)
+    strides = layout.stride_values(
+        b, np.dtype(scalar_type.dtype).itemsize, shape, passed
+    )
+    return Array(scalar_type, data, shape, strides, layout)
 
 
-def advance(b, p, i, stride, dtype):
-    """`p + i * stride` (`stride` in bytes), addressed in elements of `dtype`.
+def advance(b, p, i, stride, scalar_type):
+    """`p + i * stride` (`stride` in bytes), addressed in elements of `scalar_type`.
 
     Loops address their elements with this: LLVM's vectorizer versions a loop on a
     stride only known at run time by speculating that it is one *element*. With byte
     offsets it speculates a byte stride of 1, which never holds, and the vectorized loop
     never runs."""
-    isz = itemsize(dtype)
+    isz = np.dtype(scalar_type.dtype).itemsize
     if isinstance(i, int):
         i = b.i64(i)
     c = stride.const_int
@@ -347,7 +364,7 @@ def advance(b, p, i, stride, dtype):
     else:
         # strides of arrays are multiples of the itemsize (validated at the boundary)
         es = b.ashr(stride, isz.bit_length() - 1)
-    return b.gep(memory_type(dtype), p, b.mul(i, es, nsw=True))
+    return b.gep(memory_type(scalar_type), p, b.mul(i, es, nsw=True))
 
 
 # ------------------------------------------------------------------ indices
@@ -384,19 +401,19 @@ def checked_index(cg, i, n, message, bounds=(None, None)):
 # ------------------------------------------------------------------ casts
 
 
-def constant(b, dtype, value):
-    if is_float(dtype):
-        return b.const_float(value_type(dtype), float(value))
-    if dtype == "bool":
+def constant(b, scalar_type, value):
+    if scalar_type in ps.float_types:
+        return b.const_float(value_type(scalar_type), float(value))
+    if scalar_type == ps.bool:
         return b.const_bool(bool(value))
-    return b.const_int(value_type(dtype), int(value))
+    return b.const_int(value_type(scalar_type), int(value))
 
 
-def _float_to_int(b, v, dst: str):
+def _float_to_int(b, v, dst: ScalarType):
     """Float to integer, saturating; NaN gives 0. (`fptosi`/`fptoui` are poison for
     values out of range.)"""
     dt = value_type(dst)
-    if is_signed(dst):
+    if dst in ps.int_types:
         lo, hi = -(2.0 ** (dt.bits - 1)), 2.0 ** (dt.bits - 1)
         low_end, high_end = -(2 ** (dt.bits - 1)), 2 ** (dt.bits - 1) - 1
         below = b.fcmp(ir.FCmp.OLT, v, lo)
@@ -419,24 +436,24 @@ def _float_to_int(b, v, dst: str):
     )
 
 
-def cast(b, v, src: str, dst: str):
+def cast(b, v, src: ScalarType, dst: ScalarType):
     """Convert a value like numpy's astype."""
     if src == dst:
         return v
     st, dt = value_type(src), value_type(dst)
-    if dst == "bool":
-        if is_float(src):
+    if dst == ps.bool:
+        if src in ps.float_types:
             return b.fcmp(ir.FCmp.UNE, v, 0.0)
         return b.ne(v, 0)
-    if is_float(src) and is_float(dst):
+    if src in ps.float_types and dst in ps.float_types:
         return b.fpext(v, dt) if dt.bits > st.bits else b.fptrunc(v, dt)
-    if is_float(dst):
-        return b.sitofp(v, dt) if is_signed(src) else b.uitofp(v, dt)
-    if is_float(src):
+    if dst in ps.float_types:
+        return b.sitofp(v, dt) if src in ps.int_types else b.uitofp(v, dt)
+    if src in ps.float_types:
         return _float_to_int(b, v, dst)
     # integer to integer (bool is i1, unsigned)
     if dt.bits > st.bits:
-        return b.sext(v, dt) if is_signed(src) else b.zext(v, dt)
+        return b.sext(v, dt) if src in ps.int_types else b.zext(v, dt)
     if dt.bits < st.bits:
         return b.trunc(v, dt)
     return v  # int8 <-> uint8
@@ -652,15 +669,15 @@ class Codegen:
                     b.rt_scratch_free(ctx, p)
 
     def temporary(
-        self, dtype, shape, layout: Layout | None = None, escapes: bool = False
+        self, scalar_type, shape, layout: Layout | None = None, escapes: bool = False
     ) -> Array:
         """A temporary array (`temp_memory`), packed in `layout` (default C). `shape`:
         i64 values or Python ints."""
         b = self.b
         shape = [b.i64(n) if isinstance(n, int) else n for n in shape]
-        nbytes = b.mul(size(b, shape), itemsize(dtype), nsw=True)
+        nbytes = b.mul(size(b, shape), np.dtype(scalar_type.dtype).itemsize, nsw=True)
         data = self.temp_memory(nbytes, escapes)
-        return packed_array(b, dtype, data, shape, layout)
+        return packed_array(b, scalar_type, data, shape, layout)
 
 
 # ------------------------------------------------------------------ loops
@@ -684,7 +701,7 @@ def is_contiguous(b, shape, a: Array, order=None):
         if not all(st.const_int is not None for st in a.strides):
             return b.const_bool(False)
     ok = b.const_bool(True)
-    expect = b.i64(itemsize(a.dtype))
+    expect = b.i64(np.dtype(a.scalar_type.dtype).itemsize)
     for ax in reversed(order):
         if static[ax] == 1:
             continue
@@ -799,7 +816,7 @@ def _flat(b, shape, arrays, body, policy=None):
     n = size(b, shape)
 
     def at(i):
-        body([b.gep(memory_type(a.dtype), a.data, i) for a in arrays])
+        body([b.gep(memory_type(a.scalar_type), a.data, i) for a in arrays])
 
     if policy is not None:
         policy.range(b, n, b.i64(1), at)
@@ -820,7 +837,7 @@ def _strided(b, shape, arrays, body, order, level=0, base=None, policy=None):
 
     def at(i):
         ptrs = [
-            advance(b, p, i, a.strides[axis], a.dtype)
+            advance(b, p, i, a.strides[axis], a.scalar_type)
             for p, a in zip(base, arrays, strict=True)
         ]
         _strided(b, shape, arrays, body, order, level + 1, ptrs)
@@ -839,7 +856,10 @@ def copy(cg, src: Array, dst: Array):
 
     def body(p):
         store(
-            b, dst.dtype, cast(b, load(b, src.dtype, p[0]), src.dtype, dst.dtype), p[1]
+            b,
+            dst.scalar_type,
+            cast(b, load(b, src.scalar_type, p[0]), src.scalar_type, dst.scalar_type),
+            p[1],
         )
 
     for_each(b, dst.shape, [src, dst], body, cg.parallel_policy(1.0))
@@ -852,7 +872,10 @@ def check_strides(cg: Codegen, array: Array, layout: Layout, what: str) -> None:
     names the array in the error message."""
     b = cg.b
     expected = layout.stride_values(
-        b, itemsize(array.dtype), array.shape, dict(enumerate(array.strides))
+        b,
+        np.dtype(array.scalar_type.dtype).itemsize,
+        array.shape,
+        dict(enumerate(array.strides)),
     )
     matches = b.const_bool(True)
     empty = b.const_bool(False)

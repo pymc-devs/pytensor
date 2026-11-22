@@ -25,7 +25,7 @@ from pytensor.link.llvm.codegen.emit import (
     view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
-from pytensor.link.llvm.codegen.types import check_dtype
+from pytensor.link.llvm.codegen.types import element_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.elemwise import CAReduce, Elemwise
 
@@ -85,13 +85,13 @@ def _(op, node, cg, inputs, outputs):
             outs.append(output.overwrite(updated))
         else:
             outs.append(output.allocate(shape))
-    in_dtypes = [check_dtype(v.type.dtype) for v in node.inputs]
-    out_dtypes = [check_dtype(v.type.dtype) for v in node.outputs]
+    in_types = [element_type(v.type) for v in node.inputs]
+    out_types = [element_type(v.type) for v in node.outputs]
     # inputs that are one element for the whole loop are read once, before it
     fixed, operands, slot = [], [], []
     for var, x in zip(node.inputs, inputs, strict=True):
         if all(s == 1 for s in var.type.shape):
-            fixed.append(load(b, x.dtype, x.data))
+            fixed.append(load(b, x.scalar_type, x.data))
             slot.append(None)
         else:
             slot.append(len(operands))
@@ -103,10 +103,10 @@ def _(op, node, cg, inputs, outputs):
     def body(ptrs):
         args = [
             (fixed[k] if slot[k] is None else load(b, d, ptrs[slot[k]]), d)
-            for k, d in enumerate(in_dtypes)
+            for k, d in enumerate(in_types)
         ]
-        res = emit_scalar(op.scalar_op, b, args, out_dtypes)
-        for k, (v, d) in enumerate(zip(res, out_dtypes, strict=True)):
+        res = emit_scalar(op.scalar_op, b, args, out_types)
+        for k, (v, d) in enumerate(zip(res, out_types, strict=True)):
             store(b, d, v, ptrs[n_in + k])
 
     for_each(b, shape, operands, body, cg.parallel_policy(scalar_cost(op.scalar_op)))
@@ -116,12 +116,9 @@ def _(op, node, cg, inputs, outputs):
 def _(op, node, cg, inputs, outputs):
     """A scalar op applied to ScalarType values."""
     args = [
-        (v, check_dtype(var.type.dtype))
-        for v, var in zip(inputs, node.inputs, strict=True)
+        (v, element_type(var.type)) for v, var in zip(inputs, node.inputs, strict=True)
     ]
-    res = emit_scalar(
-        op, cg.b, args, [check_dtype(var.type.dtype) for var in node.outputs]
-    )
+    res = emit_scalar(op, cg.b, args, [element_type(var.type) for var in node.outputs])
     for out, v in zip(outputs, res, strict=True):
         out.set(v)
 
@@ -132,18 +129,18 @@ def _(op, node, cg, inputs, outputs):
 NO_EMPTY_REDUCTION = (ps.Maximum, ps.Minimum, ps.ScalarMaximum, ps.ScalarMinimum)
 
 
-def reduce_identity(op, acc_dtype):
-    return identity_value(op.scalar_op, op.scalar_op.identity, acc_dtype)
+def reduce_identity(op, acc_type):
+    return identity_value(op.scalar_op, op.scalar_op.identity, acc_type)
 
 
-def identity_value(scalar_op, ident, acc_dtype):
-    """The start value of a reduction, representable in `acc_dtype`."""
+def identity_value(scalar_op, ident, acc_type):
+    """The start value of a reduction, representable in `acc_type`."""
     if ident is None:
         raise NotImplementedError(
             f"LLVM backend: reduction with {scalar_op} has no identity"
         )
     ident = np.asarray(ident).item()
-    dt = np.dtype(acc_dtype)
+    dt = np.dtype(acc_type.dtype)
     if dt.kind in "iu" and not np.isfinite(ident):
         info = np.iinfo(dt)
         ident = info.min if ident < 0 else info.max
@@ -158,13 +155,13 @@ def _(op, node, cg, inputs, outputs):
     nd = x.ndim
     axes = sorted(range(nd) if op.axis is None else [a % nd for a in op.axis])
     reduced = [a in axes for a in range(nd)]
-    out_dtype = check_dtype(node.outputs[0].type.dtype)
-    acc = check_dtype(getattr(op, "acc_dtype", None) or out_dtype)
+    out_type = element_type(node.outputs[0].type)
+    acc = element_type(getattr(op, "acc_dtype", None) or out_type)
     init = constant(b, acc, reduce_identity(op, acc))
 
     def combine(a, v):
         return emit_scalar(
-            op.scalar_op, b, [(a, acc), (cast(b, v, x.dtype, acc), acc)], [acc]
+            op.scalar_op, b, [(a, acc), (cast(b, v, x.scalar_type, acc), acc)], [acc]
         )[0]
 
     out_shape = [x.shape[a] for a in range(nd) if not reduced[a]]
@@ -181,11 +178,11 @@ def _(op, node, cg, inputs, outputs):
     if not out_shape:
         # full reduction: accumulate in a register
         total = reduce_all(b, x, init, combine)
-        store(b, out_dtype, cast(b, total, acc, out_dtype), res.data)
+        store(b, out_type, cast(b, total, acc, out_type), res.data)
         return
 
     # partial: accumulate into an array of the accumulator dtype
-    acc_arr = res if acc == out_dtype else cg.temporary(acc, out_shape)
+    acc_arr = res if acc == out_type else cg.temporary(acc, out_shape)
     for_each(b, out_shape, [acc_arr], lambda p: store(b, acc, init, p[0]))
     acc_strides, source, k = [], [], 0
     for is_reduced in reduced:
@@ -208,7 +205,7 @@ def _(op, node, cg, inputs, outputs):
         if reduced[inner]:
             new = reduce_row(b, x, inner, p[0], cur, combine)
         else:
-            new = combine(cur, load(b, x.dtype, p[0]))
+            new = combine(cur, load(b, x.scalar_type, p[0]))
         store(b, acc, new, p[1])
 
     loops = order[:-1] if reduced[inner] else order
@@ -222,7 +219,7 @@ def _(op, node, cg, inputs, outputs):
     if policy is not None and not policy.worth_it(size(b, x.shape)):
         policy = None
     _strided(b, x.shape, [x, accs], body, loops, policy=policy)
-    if acc != out_dtype:
+    if acc != out_type:
         copy(cg, acc_arr, res)
 
 
@@ -230,11 +227,13 @@ def reduce_row(b, x: Array, axis, row, init, combine):
     """Combine the elements along `axis` of `x`, starting at `row`, into `init`. A unit
     stride gets its own loop: the vectorizer would otherwise use gathers."""
     n, st = x.shape[axis], x.strides[axis]
-    et = memory_type(x.dtype)
+    et = memory_type(x.scalar_type)
 
     def unit():
         return b.fold(
-            n, [init], lambda i, a: [combine(a, load(b, x.dtype, b.gep(et, row, i)))]
+            n,
+            [init],
+            lambda i, a: [combine(a, load(b, x.scalar_type, b.gep(et, row, i)))],
         )
 
     def strided():
@@ -242,11 +241,13 @@ def reduce_row(b, x: Array, axis, row, init, combine):
             n,
             [init],
             lambda i, a: [
-                combine(a, load(b, x.dtype, advance(b, row, i, st, x.dtype)))
+                combine(
+                    a, load(b, x.scalar_type, advance(b, row, i, st, x.scalar_type))
+                )
             ],
         )
 
-    isz = np.dtype(x.dtype).itemsize
+    isz = np.dtype(x.scalar_type.dtype).itemsize
     if st.const_int is not None:
         return (unit() if st.const_int == isz else strided())[0]
     return b.if_else(b.eq(st, isz), unit, strided)[0]
@@ -262,7 +263,12 @@ def reduce_all(b, x: Array, init, combine):
             size(b, x.shape),
             [init],
             lambda i, a: [
-                combine(a, load(b, x.dtype, b.gep(memory_type(x.dtype), x.data, i)))
+                combine(
+                    a,
+                    load(
+                        b, x.scalar_type, b.gep(memory_type(x.scalar_type), x.data, i)
+                    ),
+                )
             ],
         )
         return [result]
@@ -270,12 +276,14 @@ def reduce_all(b, x: Array, init, combine):
     def nest():
         def level(axis, p, a):
             if axis == x.ndim:
-                return combine(a, load(b, x.dtype, p))
+                return combine(a, load(b, x.scalar_type, p))
             (result,) = b.fold(
                 x.shape[axis],
                 [a],
                 lambda i, acc: [
-                    level(axis + 1, advance(b, p, i, x.strides[axis], x.dtype), acc)
+                    level(
+                        axis + 1, advance(b, p, i, x.strides[axis], x.scalar_type), acc
+                    )
                 ],
             )
             return result

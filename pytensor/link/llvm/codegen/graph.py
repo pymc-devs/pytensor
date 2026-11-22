@@ -43,8 +43,9 @@ from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
     Slot,
+    element_type,
     ir,
-    itemsize,
+    memory_type,
     repr_of,
     slot_type,
 )
@@ -304,7 +305,7 @@ def _writes_into(memory: Array, output: Output) -> bool:
     """Can a step write its output `output`, passed in a caller buffer, straight into
     `memory`? If `memory`'s layout implies the one the step needs."""
     tensor = output.tensor
-    size = itemsize(tensor.dtype)
+    size = np.dtype(tensor.scalar_type.dtype).itemsize
     return memory.layout.implies(tensor.layout, tensor.shape, size)
 
 
@@ -328,9 +329,8 @@ def temporaries_of(
             target = memory_targets.get(vid)
             if target is not None and _writes_into(target, output):
                 continue
-            sizes[vid] = int(np.prod(tensor.shape, dtype=np.int64)) * itemsize(
-                tensor.dtype
-            )
+            elements = int(np.prod(tensor.shape, dtype=np.int64))
+            sizes[vid] = elements * np.dtype(tensor.scalar_type.dtype).itemsize
     return cg.temporaries(sizes, temporary_lives(steps, sizes, kept))
 
 
@@ -362,14 +362,15 @@ def bind_constants(cg, constants, values) -> dict:
     for vid, (t, data) in constants.items():
         representation = repr_of(t)
         data = np.asarray(data, dtype=t.dtype)
+        scalar_type = element_type(t)
         if isinstance(representation, ScalarRepr) or data.ndim == 0:
-            value = constant(b, t.dtype, data.item())
+            value = constant(b, scalar_type, data.item())
             if isinstance(representation, ScalarRepr):
                 values[vid] = value
             else:
-                slot = b.alloca(_mem_type(t.dtype))
-                store(b, t.dtype, value, slot)
-                values[vid] = c_array(t.dtype, slot, [], [])
+                slot = b.alloca(memory_type(scalar_type))
+                store(b, scalar_type, value, slot)
+                values[vid] = c_array(scalar_type, slot, [], [])
         else:
             if cg.links is None:
                 raise NotImplementedError("array constants need a links")
@@ -381,7 +382,7 @@ def bind_constants(cg, constants, values) -> dict:
             arr = memory.transpose(np.argsort(order))
             entries[vid] = cg.links.link_array(memory)
             values[vid] = Array(
-                t.dtype,
+                scalar_type,
                 linked(cg, entries[vid]),
                 [b.i64(n) for n in arr.shape],
                 [b.i64(st) for st in arr.strides],
@@ -499,7 +500,7 @@ def emit_steps(
             if not value.layout.implies(
                 representation.layout,
                 representation.shape,
-                itemsize(representation.dtype),
+                np.dtype(representation.scalar_type.dtype).itemsize,
             ):
                 raise AssertionError(
                     f"{name}: {step.description} was planned for an input with layout "
@@ -526,10 +527,12 @@ def emit_steps(
                     if memory is not None and vid in memory:
                         lengths = [b.i64(m) for m in tensor.shape]
                         array = packed_array(
-                            b, tensor.dtype, memory[vid], lengths, layout
+                            b, tensor.scalar_type, memory[vid], lengths, layout
                         )
                     else:
-                        array = cg.temporary(tensor.dtype, list(tensor.shape), layout)
+                        array = cg.temporary(
+                            tensor.scalar_type, list(tensor.shape), layout
+                        )
                 values[vid] = array
                 args.append(pack(b, tensor, array))
             elif output.is_scalar:
@@ -572,7 +575,11 @@ def emit_steps(
         for read in slot_reads:
             tensor = read.output.tensor
             array = read_slot(
-                b, read.slot, tensor.dtype, list(tensor.shape), layouts.get(read.vid)
+                b,
+                read.slot,
+                tensor.scalar_type,
+                list(tensor.shape),
+                layouts.get(read.vid),
             )
             values[read.vid] = array
             if read.output.aliased_inputs:
@@ -605,12 +612,6 @@ def _maybe_view(b, a: Array, sources: list, slot, ndim: int) -> None:
         if s.base_if is not None:
             really = b.and_(really, s.base_if)
     a.base, a.writable, a.base_if = bases.pop(), False, really
-
-
-def _mem_type(dtype):
-    from pytensor.link.llvm.codegen.types import memory_type
-
-    return memory_type(dtype)
 
 
 __all__ = [

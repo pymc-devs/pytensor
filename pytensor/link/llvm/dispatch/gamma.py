@@ -12,21 +12,26 @@ from __future__ import annotations
 
 import numpy as np
 
+import pytensor.scalar as ps
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import ir, value_type
 from pytensor.scalar import _gamma_tables as gt
 
 
-def _tables(dtype):
-    if dtype == "float32":
+def _tables(scalar_type):
+    if scalar_type == ps.float32:
         return gt.LGAMMA32, gt.PSI32, gt.X0_HI32, gt.X0_LO32, gt.STIRLING32
     return gt.LGAMMA, gt.PSI, gt.X0_HI, gt.X0_LO, gt.STIRLING
 
 
 def _horner(coefs, s):
     """sum_k coefs[k] s^k; `coefs` are Nums or Python numbers (the top one a Num or
-    `s` decides the dtype)."""
-    p = coefs[-1] if isinstance(coefs[-1], Num) else Num.const(s.b, s.dtype, coefs[-1])
+    `s` decides the type)."""
+    p = (
+        coefs[-1]
+        if isinstance(coefs[-1], Num)
+        else Num.const(s.b, s.scalar_type, coefs[-1])
+    )
     for c in coefs[-2::-1]:
         p = p * s + c
     return p
@@ -34,19 +39,19 @@ def _horner(coefs, s):
 
 def _panel_series(b, table, y):
     """The Chebyshev panel of y in [1, 64) of `table` (32 panels an octave)."""
-    dtype, t = y.dtype, value_type(y.dtype)
+    scalar_type, t = y.scalar_type, value_type(y.scalar_type)
     ncols = table.shape[1]
 
     def load(ptr, i):
-        return Num(b, b.load(t, b.gep(t, ptr, i.value)), dtype)
+        return Num(b, b.load(t, b.gep(t, ptr, i.value)), scalar_type)
 
-    e = (y >= 2.0).astype("int64")
+    e = (y >= 2.0).astype(ps.int64)
     for edge in (4.0, 8.0, 16.0, 32.0):
-        e = e + (y >= edge).astype("int64")
+        e = e + (y >= edge).astype(ps.int64)
     inv_pow2 = b.const_array(t, [2.0**-k for k in range(6)])
     u = (y * load(inv_pow2, e) - 1.0) * 32.0
-    m = Num(b, b.fptosi(u.value, ir.i64), "int64")
-    s = (u - m.astype(dtype)) * 2.0 - 1.0
+    m = Num(b, b.fptosi(u.value, ir.i64), ps.int64)
+    s = (u - m.astype(scalar_type)) * 2.0 - 1.0
     ptr = b.const_array(t, table.ravel().tolist())
     base = (e * 32 + m) * ncols
     return _horner([load(ptr, base + k) for k in range(ncols)], s)
@@ -67,10 +72,10 @@ def _positive_or_rust(b, x, which, large, table):
 
 
 def _strict(fn):
-    def wrapper(b, x, dtype):
+    def wrapper(b, x, scalar_type):
         prev = b.strict_fp(True)
         try:
-            return fn(b, Num(b, x, dtype), dtype)
+            return fn(b, Num(b, x, scalar_type), scalar_type)
         finally:
             b.strict_fp(prev)
 
@@ -78,12 +83,12 @@ def _strict(fn):
 
 
 def _log(x):
-    return Num(x.b, x.b.libm(ir.Libm.Log, [x.value]), x.dtype)
+    return Num(x.b, x.b.libm(ir.Libm.Log, [x.value]), x.scalar_type)
 
 
 @_strict
-def gammaln(b, x, dtype):
-    lgamma_table, _, _, _, stirling = _tables(dtype)
+def gammaln(b, x, scalar_type):
+    lgamma_table, _, _, _, stirling = _tables(scalar_type)
 
     def large(x):
         inv = 1.0 / x
@@ -102,16 +107,18 @@ def gammaln(b, x, dtype):
             return (x * (x - 1.0) * f - _log(x)).value
 
         (result,) = b.if_else(ge1.value, above_one, below_one)
-        return Num(b, result, dtype)
+        return Num(b, result, scalar_type)
 
     return _positive_or_rust(b, x, ir.RustMath.GammaLn, large, table)
 
 
 @_strict
-def psi(b, x, dtype):
-    _, psi_table, x0_hi, x0_lo, stirling = _tables(dtype)
+def psi(b, x, scalar_type):
+    _, psi_table, x0_hi, x0_lo, stirling = _tables(scalar_type)
     # d/dx sum_k A_k x^-(2k + 1) = -x^-2 sum_k (2k + 1) A_k x^-2k
-    dstirling = (stirling * np.arange(1, 2 * stirling.size, 2)).astype(dtype)
+    dstirling = (stirling * np.arange(1, 2 * stirling.size, 2)).astype(
+        scalar_type.dtype
+    )
 
     def large(x):
         inv = 1.0 / x

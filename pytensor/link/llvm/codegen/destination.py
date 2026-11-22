@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
@@ -28,9 +30,9 @@ from pytensor.link.llvm.codegen.types import (
     Slot,
     TensorRepr,
     ir,
-    itemsize,
     slot_type,
 )
+from pytensor.scalar.basic import ScalarType
 
 
 class OutputDestination:
@@ -42,7 +44,7 @@ class OutputDestination:
     """
 
     cg: Codegen
-    dtype: str
+    scalar_type: ScalarType
 
     def allocate(self, shape: list[ir.Value]) -> Array:
         """Return memory of `shape` to write the result into."""
@@ -82,8 +84,8 @@ class ProvidedDestination(OutputDestination):
     array: Array
 
     @property
-    def dtype(self) -> str:  # type: ignore[override]
-        return self.array.dtype
+    def scalar_type(self) -> ScalarType:  # type: ignore[override]
+        return self.array.scalar_type
 
     def allocate(self, shape: list[ir.Value]) -> Array:
         """Return the provided memory, which must have `shape`.
@@ -121,7 +123,7 @@ class SlotDestination(OutputDestination):
 
     cg: Codegen
     slot: ir.Value
-    dtype: str
+    scalar_type: ScalarType
     ndim: int
     #: Positions of the node inputs the result may be a view of.
     aliased_inputs: tuple[int, ...] = ()
@@ -157,7 +159,7 @@ class SlotDestination(OutputDestination):
         return cls(
             cg,
             slot,
-            representation.dtype,
+            representation.scalar_type,
             representation.ndim,
             aliased_inputs=aliased_inputs,
             allocation_layout=output.layout if packed else None,
@@ -170,7 +172,10 @@ class SlotDestination(OutputDestination):
         # into the slot would not be. And the new memory must have the required layout.
         if self.in_scratch_memory or self.required_layout is None:
             return None
-        shape, size = representation.shape, itemsize(representation.dtype)
+        shape, size = (
+            representation.shape,
+            np.dtype(representation.scalar_type.dtype).itemsize,
+        )
         if not representation.layout.implies(self.required_layout, shape, size):
             return None
         self.done = True
@@ -185,15 +190,19 @@ class SlotDestination(OutputDestination):
         if self.in_scratch_memory:
             # The unit reads it after this node's function returned, and frees it.
             array = cg.temporary(
-                self.dtype, shape, self.allocation_layout, escapes=True
+                self.scalar_type, shape, self.allocation_layout, escapes=True
             )
             self._write(array.data, array.shape, array.strides)
             b.store(array.data, self._field(Slot.OWNER))
         else:
-            nbytes = b.mul(size(b, shape), itemsize(self.dtype), nsw=True)
+            nbytes = b.mul(
+                size(b, shape), np.dtype(self.scalar_type.dtype).itemsize, nsw=True
+            )
             data = b.rt_alloc(cg.ctx, nbytes, self._field(Slot.OWNER))
             cg.check(b.ne(data, b.null()), None)
-            array = packed_array(b, self.dtype, data, shape, self.allocation_layout)
+            array = packed_array(
+                b, self.scalar_type, data, shape, self.allocation_layout
+            )
             self._write(data, shape, array.strides)
         if self.alias_scopes is not None:
             b.mark_array(array.data, *self.alias_scopes)
@@ -201,12 +210,15 @@ class SlotDestination(OutputDestination):
         return array
 
     def assign(self, array: Array) -> Array:
-        if array.base not in self.aliased_inputs or array.dtype != self.dtype:
+        if (
+            array.base not in self.aliased_inputs
+            or array.scalar_type != self.scalar_type
+        ):
             return super().assign(array)
         if self.required_layout is not None:
             shape = array.static_shape()
             if not array.layout.implies(
-                self.required_layout, shape, itemsize(self.dtype)
+                self.required_layout, shape, np.dtype(self.scalar_type.dtype).itemsize
             ):
                 raise ValueError(
                     f"the view has layout {array.layout.describe(shape)}, but the "
@@ -224,7 +236,9 @@ class SlotDestination(OutputDestination):
         self.cg.b.if_else(array.base_if, lambda: self.set_view(array), copied)
         # (the view and the copy both have the required layout)
         layout = self.required_layout or Layout.dynamic(self.ndim)
-        return read_slot(self.cg.b, self.slot, self.dtype, array.static_shape(), layout)
+        return read_slot(
+            self.cg.b, self.slot, self.scalar_type, array.static_shape(), layout
+        )
 
     def set_view(self, array: Array) -> None:
         """Put `array` into the slot as it is, for a caller that knows the result may
@@ -249,7 +263,9 @@ class SlotDestination(OutputDestination):
     def read(self) -> Array:
         """Return the array in the slot (after `allocate`), in `allocation_layout`."""
         layout = self.allocation_layout or Layout.c(self.ndim)
-        return read_slot(self.cg.b, self.slot, self.dtype, [None] * self.ndim, layout)
+        return read_slot(
+            self.cg.b, self.slot, self.scalar_type, [None] * self.ndim, layout
+        )
 
     def set_length(self, axis: int, length: ir.Value) -> None:
         """Shorten `axis` of the array in the slot to `length`, keeping its strides."""
@@ -275,7 +291,7 @@ class ScalarDestination(OutputDestination):
 
     cg: Codegen
     pointer: ir.Value
-    dtype: str
+    scalar_type: ScalarType
     array: Array | None = None
     done: bool = False
 
@@ -286,16 +302,16 @@ class ScalarDestination(OutputDestination):
     def allocate(self, shape: list[ir.Value]) -> Array:
         if shape:
             raise ValueError("a ScalarType output has no axes")
-        self.array = self.cg.temporary(self.dtype, [])
+        self.array = self.cg.temporary(self.scalar_type, [])
         return self.array
 
     def assign(self, array: Array) -> Array:
-        self.set(load(self.cg.b, self.dtype, array.data))
+        self.set(load(self.cg.b, self.scalar_type, array.data))
         return array
 
     def finish(self) -> None:
         if self.array is not None:
-            self.set(load(self.cg.b, self.dtype, self.array.data))
+            self.set(load(self.cg.b, self.scalar_type, self.array.data))
         if not self.done:
             raise ValueError("an output was never set")
 

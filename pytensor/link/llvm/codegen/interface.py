@@ -34,9 +34,12 @@ from dataclasses import dataclass
 from functools import singledispatch
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.emit import Array, Codegen, check_strides
-from pytensor.link.llvm.codegen.types import ir, itemsize
+from pytensor.link.llvm.codegen.types import ir
+from pytensor.scalar.basic import ScalarType
 
 
 if TYPE_CHECKING:
@@ -96,8 +99,8 @@ class TensorOutput:
     allocated: bool = False
 
     @property
-    def dtype(self) -> str:
-        return self.destination.dtype
+    def scalar_type(self) -> ScalarType:
+        return self.destination.scalar_type
 
     def allocate(self, shape: list[ir.Value]) -> Array:
         """Return memory of `shape` for the result, in the output's layout. Call it
@@ -123,7 +126,7 @@ class TensorOutput:
             )
         cg = self.destination.cg
         shape = array.static_shape()
-        size = itemsize(array.dtype)
+        size = np.dtype(array.scalar_type.dtype).itemsize
         if not array.layout.implies(self.layout, shape, size):
             if _contradicts(array.layout, self.layout, shape, size):
                 raise ValueError(
@@ -173,8 +176,8 @@ class ScalarOutput:
     destination: ScalarDestination
 
     @property
-    def dtype(self) -> str:
-        return self.destination.dtype
+    def scalar_type(self) -> ScalarType:
+        return self.destination.scalar_type
 
     def set(self, value: ir.Value) -> None:
         """Make `value` the result."""

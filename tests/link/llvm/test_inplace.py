@@ -174,7 +174,9 @@ def _halve(cg, out):
         b,
         out.shape,
         [out],
-        lambda p: store(b, out.dtype, b.fmul(load(b, out.dtype, p[0]), 0.5), p[0]),
+        lambda p: store(
+            b, out.scalar_type, b.fmul(load(b, out.scalar_type, p[0]), 0.5), p[0]
+        ),
     )
 
 
@@ -202,7 +204,9 @@ def _(op, node, cg, inputs, outputs):
         b,
         x.shape,
         [x, out],
-        lambda p: store(b, out.dtype, b.fmul(load(b, x.dtype, p[0]), 0.5), p[1]),
+        lambda p: store(
+            b, out.scalar_type, b.fmul(load(b, x.scalar_type, p[0]), 0.5), p[1]
+        ),
     )
 
 
