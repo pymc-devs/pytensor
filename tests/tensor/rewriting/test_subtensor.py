@@ -32,6 +32,7 @@ from pytensor.tensor.rewriting.subtensor import (
     local_write_of_write_same_indices,
 )
 from pytensor.tensor.shape import (
+    Shape_i,
     SpecifyShape,
     specify_shape,
 )
@@ -712,6 +713,268 @@ def test_local_subtensor_remove_broadcastable_index():
         mode=mode,
     )
     f2(xn)
+
+
+class TestAdvancedSubtensorRemoveBroadcastableIndex:
+    def test_basic(self):
+        x = tensor("x", shape=(1,))
+        idx = tensor("idx", shape=(1,), dtype="int64")
+        outputs = [x[idx]]
+
+        result = utt.RewriteTester([x, idx], outputs)
+        result.assert_graph(x)
+        result.assert_eval(
+            np.array([7], dtype=x.dtype),
+            np.array([0], dtype=idx.dtype),
+        )
+
+    def test_symbolic_index(self):
+        x = tensor("x", shape=(1,))
+        idx = pt.lvector("idx")
+        outputs = [x[idx]]
+
+        result = utt.RewriteTester(
+            [x, idx], outputs, include=("ShapeOpt", "canonicalize")
+        )
+        result.assert_graph(pt.broadcast_to(x, (Shape_i(0)(idx),)))
+        for indices in ([], [0], [0, -1]):
+            result.assert_eval(
+                np.array([7], dtype=x.dtype),
+                np.array(indices, dtype=idx.dtype),
+            )
+
+    def test_split_axes(self):
+        x = tensor("x", shape=(1, 3, 1))
+        idx = tensor("idx", shape=(1,), dtype="int64")
+        outputs = [x[idx, 1:, idx]]
+
+        result = utt.RewriteTester([x, idx], outputs)
+        result.assert_graph(x[:, 1:].dimshuffle("x", 1))
+        result.assert_eval(
+            np.arange(3, dtype=x.dtype).reshape(x.type.shape),
+            np.array([-1], dtype=idx.dtype),
+        )
+
+    def test_mixed_indices(self):
+        x = tensor("x", shape=(1, 3))
+        i, j = pt.lvectors("i", "j")
+        outputs = [x[i, j], x[j, j], x[i[None], j]]
+
+        result = utt.RewriteTester([x, i, j], outputs)
+        zero = pt.constant(0, dtype="int64")
+        result.assert_graph(
+            x[zero, j],
+            x[zero, j],
+            x[zero, j[None]],
+        )
+        result.assert_eval(
+            np.array([[10, 20, 30]], dtype=x.dtype),
+            np.array([0, 0], dtype=i.dtype),
+            np.array([-1, 0], dtype=j.dtype),
+        )
+
+    def test_mixed_indices_need_broadcast(self):
+        x = tensor("x", shape=(1, 3))
+        i = tensor("i", shape=(2, 1), dtype="int64")
+        j = tensor("j", shape=(3,), dtype="int64")
+        outputs = [x[i, j]]
+
+        result = utt.RewriteTester([x, i, j], outputs)
+        result.assert_graph(*outputs)
+
+    def test_runtime_broadcast_shape_unsafe(self):
+        """Document the assumption about runtime broadcasting of index arrays."""
+        x = tensor("x", shape=(1, 1))
+        rows, cols = pt.lvectors("rows", "cols")
+        inputs = [x, rows, cols]
+        outputs = [x[rows, cols]]
+        include = ("ShapeOpt", "canonicalize")
+        base = x.dimshuffle("x")
+
+        # The rewrite uses the row index's length. On backends that still allow
+        # runtime broadcasting, the original gather can expand rows=[0] to match
+        # cols=[0, -1].
+        default = utt.RewriteTester(inputs, outputs, include=include)
+        default.assert_graph(pt.broadcast_to(base, (Shape_i(0)(rows),)))
+        safe = utt.RewriteTester(
+            inputs, outputs, include=include, exclude=("shape_unsafe",)
+        )
+        safe.assert_graph(*outputs)
+
+        # Static length one makes rows broadcastable, so cols determines the length.
+        rows = tensor("rows", shape=(1,), dtype="int64")
+        outputs = [x[rows, cols]]
+        result = utt.RewriteTester([x, rows, cols], outputs, include=include)
+        result.assert_graph(pt.broadcast_to(base, (Shape_i(0)(cols),)))
+        result.assert_eval(
+            np.array([[7]], dtype=x.dtype),
+            np.array([0], dtype=rows.dtype),
+            np.array([0, -1], dtype=cols.dtype),
+        )
+
+
+def test_extract_diag_of_broadcastable_axes():
+    x = tensor("x", shape=(1, 1, 3))
+    outputs = [x.diagonal(axis1=0, axis2=1)]
+
+    result = utt.RewriteTester([x], outputs, exclude=("shape_unsafe",))
+    result.assert_graph(x.dimshuffle(2, "x"))
+    result.assert_eval(np.arange(3, dtype=x.dtype).reshape(1, 1, 3))
+
+
+class TestAdvancedIncSubtensorRemoveBroadcastableIndex:
+    @pytest.mark.parametrize("set_instead_of_inc", [True, False], ids=["set", "inc"])
+    def test_basic(self, set_instead_of_inc):
+        x = tensor("x", shape=(1,))
+        idx = tensor("idx", shape=(1,), dtype="int64")
+        y = pt.scalar("y", dtype=x.dtype)
+        view = x[idx]
+        outputs = [view.set(y) if set_instead_of_inc else view.inc(y)]
+        expected = y[None] if set_instead_of_inc else x + y[None]
+
+        result = utt.RewriteTester([x, idx, y], outputs)
+        result.assert_graph(expected)
+        result.assert_eval(
+            np.array([10], dtype=x.dtype),
+            np.array([0], dtype=idx.dtype),
+            np.array(7, dtype=y.dtype),
+        )
+
+    def test_repeated_indices(self):
+        x = tensor("x", shape=(1,))
+        idx = tensor("idx", shape=(2,), dtype="int64")
+        y = tensor("y", shape=(2,), dtype=x.dtype)
+        view = x[idx]
+        outputs = [
+            view.set(y),
+            pt.inc_subtensor(view, y, ignore_duplicates=True),
+            view.inc(y),
+            view.inc(y[0]),
+        ]
+
+        result = utt.RewriteTester([x, idx, y], outputs)
+        last = y[1][None]
+        repeats = pt.constant([2], dtype=x.dtype)
+        result.assert_graph(
+            last,
+            x + last,
+            x + y.sum()[None],
+            x + repeats * y[0][None],
+        )
+        result.assert_eval(
+            np.array([10], dtype=x.dtype),
+            np.array([0, -1], dtype=idx.dtype),
+            np.array([3, 7], dtype=y.dtype),
+        )
+
+    def test_nonempty_symbolic_index(self):
+        x = tensor("x", shape=(1,))
+        n = pt.lscalar("n")
+        y = pt.scalar("y", dtype=x.dtype)
+        length = pt.maximum(n, 1)
+        idx = pt.zeros((length,), dtype="int64")
+        view = x[idx]
+        outputs = [view.set(y), view.inc(y)]
+
+        result = utt.RewriteTester(
+            [x, n, y], outputs, include=("ShapeOpt", "canonicalize")
+        )
+        repeats = pt.maximum(n[None], pt.constant([1], dtype=n.dtype)).astype(x.dtype)
+        result.assert_graph(
+            y[None],
+            x + y[None] * repeats,
+        )
+        for size in (0, 3):
+            result.assert_eval(
+                np.array([10], dtype=x.dtype),
+                np.array(size, dtype=n.dtype),
+                np.array(7, dtype=y.dtype),
+            )
+
+    def test_kept_axes_and_slice_bounds(self):
+        x = tensor("x", shape=(3, 1, 1, 4))
+        x_split = tensor("x_split", shape=(3, 1, 4, 1))
+        idx = tensor("idx", shape=(2,), dtype="int64")
+        start, stop = pt.lscalars("start", "stop")
+        y, y_split = pt.tensor3s("y", "y_split")
+        consecutive = x[start:, idx, idx, :stop].inc(y)
+        split = x_split[:, idx, start:stop, idx].set(y_split)
+
+        result = utt.RewriteTester(
+            [x, x_split, idx, start, stop, y, y_split], [consecutive, split]
+        )
+        result.assert_graph(
+            x[start:, :, :, :stop].inc(y.sum(1)[:, None, None, :]),
+            x_split[:, :, start:stop].set(y_split[-1][:, None, :, None]),
+        )
+        result.assert_eval(
+            np.arange(12, dtype=x.dtype).reshape(3, 1, 1, 4),
+            np.arange(12, dtype=x_split.dtype).reshape(3, 1, 4, 1),
+            np.array([0, -1], dtype=idx.dtype),
+            np.array(1, dtype=start.dtype),
+            np.array(3, dtype=stop.dtype),
+            np.arange(12, dtype=y.dtype).reshape(2, 2, 3) + 100,
+            np.arange(12, dtype=y_split.dtype).reshape(2, 3, 2) + 200,
+        )
+
+    def test_maybe_empty_symbolic_index(self):
+        x = tensor("x", shape=(1,))
+        idx = pt.lvector("idx")
+        y = pt.vector("y", dtype=x.dtype)
+        outputs = [x[idx].inc(y)]
+
+        result = utt.RewriteTester([x, idx, y], outputs)
+        result.assert_graph(x + y.sum()[None])
+        for indices in ([], [0, -1, 0]):
+            result.assert_eval(
+                np.array([10], dtype=x.dtype),
+                np.array(indices, dtype=idx.dtype),
+                np.full(len(indices), 7, dtype=y.dtype),
+            )
+
+    def test_maybe_empty_with_large_repeat_count(self):
+        x = tensor("x", shape=(1, 1), dtype="float16")
+        rows = tensor("rows", shape=(None, 1), dtype="int64")
+        cols = tensor("cols", shape=(1, 65536), dtype="int64")
+        y = tensor("y", shape=(None, 1), dtype=x.dtype)
+        outputs = [x[rows, cols].inc(y)]
+
+        result = utt.RewriteTester([x, rows, cols, y], outputs)
+        repeats = pt.constant([[65536]], dtype="float32")
+        total = y.squeeze(1).sum(dtype=y.dtype)[None, None]
+        result.assert_graph(x + (repeats * total).astype(x.dtype))
+        result.assert_eval(
+            np.array([[7]], dtype=x.dtype),
+            np.empty((0, 1), dtype=rows.dtype),
+            np.zeros(cols.type.shape, dtype=cols.dtype),
+            np.empty((0, 1), dtype=y.dtype),
+        )
+
+    def test_mixed_dtype_accumulation(self):
+        x = tensor("x", shape=(1,))
+        x_int8 = tensor("x_int8", shape=(1,), dtype="int8")
+        idx = tensor("idx", shape=(2,), dtype="int64")
+        y = pt.scalar("y", dtype="float32")
+        lossy = x_int8[idx].inc(y)
+
+        result = utt.RewriteTester([x, x_int8, idx, y], [x[idx].inc(y), lossy])
+        repeats = pt.constant([2], dtype=x.dtype)
+        result.assert_graph(x + repeats * y[None].astype(x.dtype), lossy)
+
+    def test_mixed_indices(self):
+        x = tensor("x", shape=(1, 3), dtype="int8")
+        idx = pt.lvector("idx")
+        y = pt.vector("y", dtype="float64")
+        outputs = [x[idx, idx].inc(y)]
+
+        result = utt.RewriteTester([x, idx, y], outputs)
+        zero = pt.constant(0, dtype="int64")
+        result.assert_graph(x[zero, idx].inc(y))
+        result.assert_eval(
+            np.array([[10, 20, 30]], dtype=x.dtype),
+            np.array([0, -1, 0], dtype=idx.dtype),
+            np.array([1.2, 2.4, 3.6], dtype=y.dtype),
+        )
 
 
 class TestSubtensorIncSubtensor:
