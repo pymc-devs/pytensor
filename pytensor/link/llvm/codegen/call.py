@@ -14,19 +14,38 @@ of the calling kernel's link table, which is its config.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
 from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
+    Representation,
+    TensorRepr,
     dtype_code,
     ir,
     memory_type,
     ptarray_type,
 )
 from pytensor.scalar.basic import ScalarType
+
+
+if TYPE_CHECKING:
+    from pytensor.link.llvm.codegen.array import Array
+    from pytensor.link.llvm.codegen.context import Codegen
+    from pytensor.link.llvm.codegen.destination import (
+        OutputDestination,
+        SlotDestination,
+    )
+    from pytensor.link.llvm.codegen.node import NodeFunction
+    from pytensor.link.llvm.codegen.signature import Output, Signature
+
+
+#: An input of a kernel call: the value (None for one without data) and its type.
+type KernelInput = tuple[Array | ir.Value | None, ScalarType | None]
 
 
 @dataclass
@@ -37,13 +56,13 @@ class Kernel:
     address: int
     #: the kernel's config (`const void* config` of the kernel ABI)
     config: int
-    #: what it produces, per node output (`Output`s)
-    outputs: list
+    #: what it produces, per node output
+    outputs: list[Output]
     description: str = ""
     keepalive: object = None
     #: node inputs the kernel overwrites (a numba implementation of an op that destroys
     #: them): generated code calling it passes copies
-    destroys: frozenset = frozenset()
+    destroys: frozenset[int] = frozenset()
 
 
 @dataclass
@@ -52,13 +71,13 @@ class LinkTable:
     calls (address, then their config: two entries) and the contents of its array
     constants (one entry). The IR only refers to entry positions."""
 
-    entries: list = field(default_factory=list)
-    _keep: list = field(default_factory=list)
+    entries: list[int] = field(default_factory=list)
+    _keep: list[object] = field(default_factory=list)
     _table: np.ndarray | None = None
     #: (entry, kernel) of every kernel linked, for `relink`
-    _kernels: list = field(default_factory=list)
-    #: contents -> entry of the arrays linked (equal ones share one)
-    _arrays: dict = field(default_factory=dict)
+    _kernels: list[tuple[int, Kernel]] = field(default_factory=list)
+    #: (itemsize, contents) -> entry of the arrays linked (equal ones share one)
+    _arrays: dict[tuple[int, bytes], int] = field(default_factory=dict)
 
     def link_kernel(self, kernel: Kernel) -> int:
         """The entry of `kernel`'s address (its config is in the next entry)."""
@@ -67,7 +86,7 @@ class LinkTable:
         self._kernels.append((len(self.entries) - 2, kernel))
         return len(self.entries) - 2
 
-    def relink(self):
+    def relink(self) -> None:
         """Update the kernels' entries: for kernels whose address (or config) was set
         after they were linked, once compiled. Before the table is used."""
         for k, kernel in self._kernels:
@@ -90,7 +109,7 @@ class LinkTable:
         return self._arrays[key]
 
     @property
-    def table(self):
+    def table(self) -> np.ndarray | None:
         """The entries as a uint64 array (None if empty). Keep it (and `keepalive`)
         alive while the code runs."""
         if not self.entries:
@@ -103,20 +122,38 @@ class LinkTable:
     def address(self) -> int:
         """The table's address: the config of the kernel it belongs to (0 if empty)."""
         t = self.table
-        return 0 if t is None else t.ctypes.data
+        return 0 if t is None else int(t.ctypes.data)
 
     @property
-    def keepalive(self):
+    def keepalive(self) -> tuple[np.ndarray | None, list[object]]:
         return (self.table, self._keep)
 
 
-def linked(cg, index: int):
+def linked(cg: Codegen, index: int) -> ir.Value:
     """The pointer in entry `index` of the link table."""
     b = cg.b
     return b.load(ir.ptr, b.gep_bytes(cg.config, 8 * index))
 
 
-def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> None:
+class _Argument(NamedTuple):
+    """One `PtArray` of a kernel call: what goes into its fields, and the slot to copy
+    an output back into (None for inputs and provided memory)."""
+
+    data: ir.Value
+    shape: ir.Value
+    strides: ir.Value
+    ndim: int
+    scalar_type: ScalarType
+    slot_destination: SlotDestination | None = None
+
+
+def call_kernel(
+    cg: Codegen,
+    kernel: Kernel,
+    index: int,
+    inputs: Sequence[KernelInput],
+    outputs: Sequence[OutputDestination | None],
+) -> None:
     """Call `kernel` (at entry `index` of the link table, see `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, `ScalarType`) pairs) and
     `outputs` (`ProvidedDestination`, `SlotDestination`, or None).
@@ -134,55 +171,50 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     b = cg.b
     ptarray = ptarray_type()
     i64 = ir.i64
-    # per argument: (data, shape ptr, strides ptr, ndim, dtype, slot or None)
-    args_of: list[
-        tuple[object, object, object, int, ScalarType, SlotDestination | None]
-    ] = []
+    args_of: list[_Argument] = []
     n_inputs = 0
 
-    def storage(values):
+    def storage(values: Sequence[ir.Value]) -> ir.Value:
         p = b.alloca(ir.Type.array(i64, max(len(values), 1)))
         for k, v in enumerate(values):
             b.store(v, b.gep(i64, p, k))
         return p
 
     for a, scalar_type in inputs:
-        if a is None:
+        if a is None or scalar_type is None:
             continue
         n_inputs += 1
         if isinstance(a, Array):
             args_of.append(
-                (
+                _Argument(
                     a.data,
                     storage(a.shape),
                     storage(a.strides),
                     len(a.shape),
                     scalar_type,
-                    None,
                 )
             )
         else:  # a scalar: a 0-d array
             p = b.alloca(memory_type(scalar_type))
             store(b, scalar_type, a, p)
-            args_of.append((p, storage([]), storage([]), 0, scalar_type, None))
+            args_of.append(_Argument(p, storage([]), storage([]), 0, scalar_type))
     for destination in outputs:
         if destination is None:
             continue
         if isinstance(destination, ProvidedDestination):
-            a = destination.array
+            array = destination.array
             args_of.append(
-                (
-                    a.data,
-                    storage(a.shape),
-                    storage(a.strides),
-                    len(a.shape),
-                    a.scalar_type,
-                    None,
+                _Argument(
+                    array.data,
+                    storage(array.shape),
+                    storage(array.strides),
+                    len(array.shape),
+                    array.scalar_type,
                 )
             )
         elif isinstance(destination, SlotDestination):
             args_of.append(
-                (
+                _Argument(
                     b.null(),
                     destination.slot.field(b, Slot.LENGTHS),
                     destination.slot.field(b, Slot.STRIDES),
@@ -197,7 +229,7 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
             )
 
     args = b.alloca(ir.Type.array(ptarray, max(len(args_of), 1)))
-    ptrs = []
+    ptrs: list[ir.Value] = []
     for k, (data, shape, strides, nd, scalar_type, _) in enumerate(args_of):
         p = b.gep_bytes(args, k * PTARRAY_SIZE)
         b.store(data, b.field_ptr(ptarray, p, PtArray.DATA))
@@ -213,9 +245,11 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
     mark = b.rt_scratch_mark(cg.ctx)
     counts = [b.i32(n_inputs), b.i32(len(args_of) - n_inputs)]
     rc = b.call_ptr(fn, [cg.ctx, args, *counts, config], ir.i32)
+    assert rc is not None  # (it returns an i32)
     b.rt_scratch_release(cg.ctx, mark)
 
-    for p, (*_, destination) in zip(ptrs, args_of, strict=True):
+    for p, argument in zip(ptrs, args_of, strict=True):
+        destination = argument.slot_destination
         if destination is None:
             continue
         b.store(
@@ -231,12 +265,18 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
         b.ret(rc)
 
 
-def call_destroying(cg, kernel: Kernel, index: int, inputs: list, outputs: list):
+def call_destroying(
+    cg: Codegen,
+    kernel: Kernel,
+    index: int,
+    inputs: Sequence[KernelInput],
+    outputs: Sequence[OutputDestination | None],
+) -> None:
     """`call_kernel`, with copies of the inputs the kernel overwrites
     (`Kernel.destroys`, positions in `inputs`): it may only write its outputs."""
     from pytensor.link.llvm.codegen.array import Array
 
-    ins = []
+    ins: list[KernelInput] = []
     for pos, (a, scalar_type) in enumerate(inputs):
         if pos in kernel.destroys and isinstance(a, Array):
             mine = cg.temporary(a.scalar_type, a.shape)
@@ -247,8 +287,13 @@ def call_destroying(cg, kernel: Kernel, index: int, inputs: list, outputs: list)
 
 
 def build_call_function(
-    module, name: str, signature, kernel: Kernel, links: LinkTable, index=None
-):
+    module: ir.Module,
+    name: str,
+    signature: Signature,
+    kernel: Kernel,
+    links: LinkTable,
+    index: int | None = None,
+) -> NodeFunction:
     """A function (always inlined) with `signature` that calls `kernel`: how generated
     code runs a kernel that isn't a node's (a compiled unit, a separately compiled
     node), and nodes the planner gives a kernel. `index`: the kernel's entry
@@ -274,24 +319,24 @@ def build_call_function(
     ctx, config = next(params), next(params)
     cg = Codegen(b, ctx, config, links=links, module=module, name=name)
     inputs = [
-        Array.unpack(b, representation, next(params))
+        Array.unpack(b, _tensor(representation), next(params))
         for representation in signature.inputs
     ]
     for pos, a in enumerate(inputs):
         a.base, a.writable = pos, False
-    outputs: list = []
+    outputs: list[OutputDestination | None] = []
     for output in signature.outputs:
         if output.is_absent:
             outputs.append(None)
         elif output.passing is Passing.CALLER_BUFFER:
-            array = Array.unpack(b, output.representation, next(params))
+            array = Array.unpack(b, output.tensor, next(params))
             outputs.append(ProvidedDestination(cg, array))
         else:
             outputs.append(
                 SlotDestination(
                     cg,
-                    Slot(next(params), output.representation.ndim),
-                    output.representation.scalar_type,
+                    Slot(next(params), output.tensor.ndim),
+                    output.tensor.scalar_type,
                     signature.alias_arguments(output),
                 )
             )
@@ -305,8 +350,16 @@ def build_call_function(
     return NodeFunction(fn, signature, links)
 
 
+def _tensor(representation: Representation) -> TensorRepr:
+    """The representation of a kernel's input: kernels only take tensors."""
+    if not isinstance(representation, TensorRepr):
+        raise TypeError(f"a kernel input that isn't a tensor: {representation}")
+    return representation
+
+
 __all__ = [
     "Kernel",
+    "KernelInput",
     "LinkTable",
     "build_call_function",
     "call_destroying",

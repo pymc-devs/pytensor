@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Constant, Variable
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, Slot, advance, size
 from pytensor.link.llvm.codegen.types import ir, memory_type
+from pytensor.scalar.basic import ScalarType
 
 
 if TYPE_CHECKING:
@@ -27,7 +29,15 @@ STACK_TEMPORARY_BYTES = 1024
 STACK_BUDGET_BYTES = 16 * 1024
 
 
-class _ScratchScope(list):
+#: The loop body of `Codegen.for_each` and `loop_nest`: called with the element
+#: pointers of the arrays, once per element (the loop index is in the generated code).
+type ElementBody = Callable[[list[ir.Value]], None]
+
+#: What is known about the values of an index: (minimum, maximum), None where unknown.
+type IndexBounds = tuple[int | None, int | None]
+
+
+class _ScratchScope(list[tuple[ir.Value, ir.Value | Slot]]):
     """The memory to give back when a `scratch_scope` ends: (ctx, pointer) pairs of
     scratch memory to free, and (ctx, slot) pairs of `Slot`s whose owner (allocated by
     a kernel) to release."""
@@ -65,7 +75,7 @@ class Codegen:
     name: str = ""
     #: the scratch memory taken in the scopes being emitted, innermost last: what to
     #: free at the end of each (`scratch_scope`)
-    scratch_scopes: list = field(default_factory=list)
+    scratch_scopes: list[_ScratchScope] = field(default_factory=list)
     _checks: int = field(default=0)
 
     def parallel_policy(self, per_element: float) -> ParallelPolicy | None:
@@ -77,13 +87,13 @@ class Codegen:
             else None
         )
 
-    def fail(self, message: str | None):
+    def fail(self, message: str | None) -> None:
         """Report `message` (unless a called kernel already did) and return 1."""
         if message is not None:
             self.b.rt_fail(self.ctx, message)
         self.b.ret(1)
 
-    def check(self, ok, message: str | None):
+    def check(self, ok: ir.Value, message: str | None) -> None:
         """Fail with `message` unless `ok` (i1). Constant conditions fold."""
         c = ok.const_int
         if c == 1:
@@ -92,7 +102,11 @@ class Codegen:
             self.fail(message)
 
     def graph_function(
-        self, inputs, outputs, in_layouts, name: str = "graph"
+        self,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+        in_layouts: Sequence[Layout | None],
+        name: str = "graph",
     ) -> GraphFunction:
         """Prepare an inner graph (a Scan's loop body, a Blockwise's core, ...) to be
         run from the function being generated. Run it with
@@ -114,7 +128,7 @@ class Codegen:
         body = self.planner.graph(inputs, outputs, in_layouts)
         return GraphFunction.bind(self, body, f"{self.name}_{name}")
 
-    def temp_memory(self, nbytes, escapes: bool = False):
+    def temp_memory(self, nbytes: ir.Value, escapes: bool = False) -> ir.Value:
         """Temporary memory of `nbytes` (i64), 64-byte aligned, uninitialized.
 
         Small memory of static size is on the stack of the function being generated:
@@ -144,7 +158,7 @@ class Codegen:
             self.free_later(p)
         return p
 
-    def _stack_memory(self, n: int):
+    def _stack_memory(self, n: int) -> ir.Value | None:
         """Stack memory for `n` bytes, or None if it shouldn't go on the stack.
 
         This is the rule `temp_memory` follows: memory goes on the stack if it is small
@@ -158,7 +172,9 @@ class Codegen:
         self.stack_bytes += rounded
         return self.b.alloca(ir.Type.array(ir.i8, max(n, 1)))
 
-    def temporaries(self, sizes: dict, lives: dict) -> tuple[dict, tuple[dict, int]]:
+    def temporaries(
+        self, sizes: dict[int, int], lives: dict[int, tuple[int, int]]
+    ) -> tuple[dict[int, ir.Value], tuple[dict[int, int], int]]:
         """Memory for several temporary values of a known size.
 
         * `sizes`: the size in bytes of each value ({key: bytes});
@@ -174,8 +190,8 @@ class Codegen:
         ({key: offset in the arena}, size of the arena in bytes)."""
         from pytensor.link.llvm.analysis.liveness import first_fit
 
-        memory = {}
-        shared = []
+        memory: dict[int, ir.Value] = {}
+        shared: list[tuple[int, int, int, int]] = []
         for key in sorted(sizes, key=lambda k: lives[k]):
             p = self._stack_memory(sizes[key])
             if p is None:
@@ -188,7 +204,7 @@ class Codegen:
             memory.update((k, self.b.gep_bytes(arena, at)) for k, at in offsets.items())
         return memory, (offsets, nbytes)
 
-    def free_later(self, p, function: bool = False):
+    def free_later(self, p: ir.Value, function: bool = False) -> None:
         """Free the scratch memory `p` when the innermost `scratch_scope` ends, or with
         `function` the innermost one of the function being generated (anything else
         than scratch is ignored when running)."""
@@ -197,7 +213,7 @@ class Codegen:
             raise ValueError("scratch memory outside of a scratch_scope")
         scopes[-1].append((self.ctx, p))
 
-    def release_later(self, slot: Slot):
+    def release_later(self, slot: Slot) -> None:
         """Release the owner a kernel put into `slot`, when the innermost
         `scratch_scope` ends."""
         if not self.scratch_scopes:
@@ -205,7 +221,7 @@ class Codegen:
         self.scratch_scopes[-1].append((self.ctx, slot))
 
     @contextmanager
-    def scratch_scope(self, function: bool = False):
+    def scratch_scope(self, function: bool = False) -> Iterator[None]:
         """The scratch memory taken inside is freed at its end (on the way out of the
         code emitted inside, unless that returned; on errors the caller's mark releases
         it). The code emitted inside must be one region of control flow: a function body
@@ -227,19 +243,29 @@ class Codegen:
                     b.rt_scratch_free(ctx, p)
 
     def temporary(
-        self, scalar_type, shape, layout: Layout | None = None, escapes: bool = False
+        self,
+        scalar_type: ScalarType,
+        shape: Sequence[ir.Value | int],
+        layout: Layout | None = None,
+        escapes: bool = False,
     ) -> Array:
         """A temporary array (`temp_memory`), packed in `layout` (default C). `shape`:
         i64 values or Python ints."""
         b = self.b
-        shape = [b.i64(n) if isinstance(n, int) else n for n in shape]
-        nbytes = b.mul(size(b, shape), np.dtype(scalar_type.dtype).itemsize, nsw=True)
+        lengths = [b.i64(n) if isinstance(n, int) else n for n in shape]
+        nbytes = b.mul(size(b, lengths), np.dtype(scalar_type.dtype).itemsize, nsw=True)
         data = self.temp_memory(nbytes, escapes)
-        return Array.packed(b, scalar_type, data, shape, layout)
+        return Array.packed(b, scalar_type, data, lengths, layout)
 
     # ---- loops and indices
 
-    def for_each(self, shape, arrays, body, parallel_cost: float | None = None) -> None:
+    def for_each(
+        self,
+        shape: Sequence[ir.Value],
+        arrays: Sequence[Array],
+        body: ElementBody,
+        parallel_cost: float | None = None,
+    ) -> None:
         """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
 
         `arrays` have strides over `shape` (0 where broadcast). The loops follow memory
@@ -270,7 +296,12 @@ class Codegen:
             )
 
     def loop_nest(
-        self, shape, arrays, body, order, parallel_cost: float | None = None
+        self,
+        shape: Sequence[ir.Value],
+        arrays: Sequence[Array],
+        body: ElementBody,
+        order: Sequence[int],
+        parallel_cost: float | None = None,
     ) -> None:
         """Loops over the axes in `order` (outermost first; may be a subset of the axes),
         calling `body(ptrs)` with the element pointers of `arrays` in the innermost
@@ -279,7 +310,13 @@ class Codegen:
         policy = self._policy(shape, parallel_cost)
         self._loop_nest(shape, arrays, body, order, policy=policy)
 
-    def checked_index(self, i, n, message, bounds=(None, None)):
+    def checked_index(
+        self,
+        i: ir.Value,
+        n: ir.Value,
+        message: str,
+        bounds: IndexBounds = (None, None),
+    ) -> ir.Value:
         """Index `i` (i64) into an axis of length `n`: negative values wrap, out-of-range
         ones fail with `message`. Generates only what `bounds` (`index_bounds`), a
         constant `i` and a constant `n` don't already guarantee."""
@@ -294,7 +331,9 @@ class Codegen:
             self.check(b.ult(i, n), message)  # also catches what is still negative
         return i
 
-    def _policy(self, shape, parallel_cost: float | None) -> ParallelPolicy | None:
+    def _policy(
+        self, shape: Sequence[ir.Value], parallel_cost: float | None
+    ) -> ParallelPolicy | None:
         if parallel_cost is None:
             return None
         policy = self.parallel_policy(parallel_cost)
@@ -302,11 +341,17 @@ class Codegen:
             return None
         return policy
 
-    def _flat_loop(self, shape, arrays, body, policy=None) -> None:
+    def _flat_loop(
+        self,
+        shape: Sequence[ir.Value],
+        arrays: Sequence[Array],
+        body: ElementBody,
+        policy: ParallelPolicy | None = None,
+    ) -> None:
         b = self.b
         n = size(b, shape)
 
-        def at(i):
+        def at(i: ir.Value) -> None:
             body([b.gep(memory_type(a.scalar_type), a.data, i) for a in arrays])
 
         if policy is not None:
@@ -316,7 +361,14 @@ class Codegen:
             at(i)
 
     def _loop_nest(
-        self, shape, arrays, body, order, level=0, base=None, policy=None
+        self,
+        shape: Sequence[ir.Value],
+        arrays: Sequence[Array],
+        body: ElementBody,
+        order: Sequence[int],
+        level: int = 0,
+        base: list[ir.Value] | None = None,
+        policy: ParallelPolicy | None = None,
     ) -> None:
         b = self.b
         if base is None:
@@ -325,11 +377,12 @@ class Codegen:
             body(base)
             return
         axis = order[level]
+        pointers = base
 
-        def at(i):
+        def at(i: ir.Value) -> None:
             ptrs = [
                 advance(b, p, i, a.strides[axis], a.scalar_type)
-                for p, a in zip(base, arrays, strict=True)
+                for p, a in zip(pointers, arrays, strict=True)
             ]
             self._loop_nest(shape, arrays, body, order, level + 1, ptrs)
 
@@ -344,12 +397,14 @@ class Codegen:
 # ------------------------------------------------------------------ loops
 
 
-def loop_order(shape, arrays) -> list[int]:
+def loop_order(shape: Sequence[ir.Value], arrays: Sequence[Array]) -> list[int]:
     """The axis order (outermost first) to loop in: the memory order most arrays share
     (by their packed axes; on a tie, the one of the later array, usually an output).
     Identity when nothing is known."""
     static = [n.const_int for n in shape]
-    votes = {}  # packed block (innermost first) -> (count, last position)
+    votes: dict[
+        tuple[int, ...], tuple[int, int]
+    ] = {}  # packed block (innermost first) -> (count, last position)
     for pos, a in enumerate(arrays):
         block = tuple(a.layout.packed_block(static))
         if block:
@@ -379,12 +434,12 @@ class ParallelPolicy:
     cg: Codegen
     per_element: float
 
-    def worth_it(self, n_elements) -> bool:
+    def worth_it(self, n_elements: ir.Value) -> bool:
         """False if the loop is statically too small for a parallel region."""
         n = n_elements.const_int
         return n is None or n * self.per_element >= MIN_PARALLEL_COST
 
-    def grain(self, b, elements_per_iteration):
+    def grain(self, b: ir.Builder, elements_per_iteration: ir.Value) -> ir.Value:
         """Iterations per chunk (i64), for iterations of `elements_per_iteration` items."""
         per = elements_per_iteration.const_int
         if per is not None:
@@ -392,10 +447,16 @@ class ParallelPolicy:
                 max(1, math.ceil(CHUNK_COST / (self.per_element * max(per, 1))))
             )
         target = max(1, math.ceil(CHUNK_COST / self.per_element))
-        per = b.smax(elements_per_iteration, 1)
-        return b.smax(b.sdiv(target, per), 1)
+        at_least_one = b.smax(elements_per_iteration, 1)
+        return b.smax(b.sdiv(target, at_least_one), 1)
 
-    def range(self, b, n, elements_per_iteration, body):
+    def range(
+        self,
+        b: ir.Builder,
+        n: ir.Value,
+        elements_per_iteration: ir.Value,
+        body: Callable[[ir.Value], None],
+    ) -> None:
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
         with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as chunk:
@@ -411,7 +472,7 @@ class ParallelPolicy:
 # ------------------------------------------------------------------ indices
 
 
-def index_bounds(var):
+def index_bounds(var: Variable) -> IndexBounds:
     """(min, max) known of the values of the integer index variable `var` (None where
     unknown): a constant's values, or at least 0 for an unsigned dtype."""
     if isinstance(var, Constant):

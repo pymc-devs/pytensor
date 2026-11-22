@@ -15,11 +15,13 @@ just a graph of steps. All of them are run the same way:
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from pytensor.graph.basic import Apply
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.analysis.liveness import temporary_lives
 from pytensor.link.llvm.codegen.array import Array, Slot
@@ -33,6 +35,7 @@ from pytensor.link.llvm.codegen.num import constant, store
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     ScalarRepr,
+    TensorRepr,
     element_type,
     ir,
     memory_type,
@@ -41,8 +44,12 @@ from pytensor.link.llvm.codegen.types import (
 
 
 if TYPE_CHECKING:
+    from pytensor.graph.type import Type
+    from pytensor.link.llvm.codegen.call import LinkTable
     from pytensor.link.llvm.codegen.destination import OutputDestination
-    from pytensor.link.llvm.planner import PlannedGraph
+    from pytensor.link.llvm.planner import PlannedGraph, Planner, Step
+    from pytensor.scalar.basic import ScalarType
+    from pytensor.tensor.type import TensorType
 
 
 @dataclass
@@ -57,20 +64,20 @@ class GraphFunction:
     #: prefix for the names of the LLVM functions made for its nodes
     name: str
     #: the values of the graph's constants (vid -> Array or IR value)
-    constants: dict
+    constants: dict[int, Array | ir.Value]
     #: for each value a node produces, how the node produces it (vid -> `Output`)
-    produced_by: dict = field(default_factory=dict)
+    produced_by: dict[int, Output] = field(default_factory=dict)
     #: where each array constant is in the link table (vid -> entry)
-    entries: dict = field(default_factory=dict)
+    entries: dict[int, int] = field(default_factory=dict)
     _calls: int = 0
 
     @classmethod
-    def bind(cls, cg, planned: PlannedGraph, name: str) -> GraphFunction:
+    def bind(cls, cg: Codegen, planned: PlannedGraph, name: str) -> GraphFunction:
         """Prepare the graph `planned` to be run from the function `cg` is building.
 
         This emits code for the graph's constants at the current point, so call it
         before a loop that runs the graph, not inside the loop."""
-        constants: dict = {}
+        constants: dict[int, Array | ir.Value] = {}
         entries = bind_constants(cg, planned.constants, constants)
         produced_by = {
             vid: output
@@ -80,13 +87,17 @@ class GraphFunction:
         return cls(planned, name, constants, produced_by, entries)
 
     @property
-    def nodes(self) -> list:
+    def nodes(self) -> list[Apply | None]:
         """The nodes of the graph, in the order they run."""
         return [step.node for step in self.planned.steps]
 
     def emit_call(
-        self, cg, inputs: list, outputs: list[OutputDestination | None], profile=None
-    ) -> tuple[frozenset, tuple[dict, int]]:
+        self,
+        cg: Codegen,
+        inputs: Sequence[Array | ir.Value | None],
+        outputs: Sequence[OutputDestination | None],
+        profile: int | None = None,
+    ) -> tuple[frozenset[int], tuple[dict[int, int], int]]:
         """Emit the code that runs the graph, into the function `cg` is building.
 
         Nodes with generated code are inlined; the others become calls of their
@@ -122,7 +133,7 @@ class GraphFunction:
         the arena that holds those not on the stack ({vid: offset}, size in bytes)."""
         planned = self.planned
         b = cg.b
-        values = dict(self.constants)
+        values: dict[int, Array | ir.Value] = dict(self.constants)
         for vid, v in zip(planned.in_ids, inputs, strict=True):
             if v is not None and vid not in values:
                 values[vid] = v
@@ -139,7 +150,7 @@ class GraphFunction:
             if out is None or produced is None or vid in target_of:
                 continue
             if produced.passing is Passing.CALLER_BUFFER:
-                shape = [b.i64(n) for n in produced.tensor.shape]
+                shape = [b.i64(n) for n in produced.tensor.fixed_shape]
                 given[k] = memory_targets[vid] = out.allocate(shape)
                 target_of[vid] = k
             elif (
@@ -156,7 +167,6 @@ class GraphFunction:
         self._calls += 1
         written, owned = emit_steps(
             cg,
-            cg.module,
             name,
             planned.steps,
             values,
@@ -174,12 +184,12 @@ class GraphFunction:
             if vid in written and target_of[vid] == k:
                 continue  # produced directly in the output
             value = values[vid]
-            if k in given:
-                given[k].copy_from(cg, value)
-            elif isinstance(value, Array):
-                out.assign(value)
-            else:
+            if not isinstance(value, Array):
                 out.set(value)
+            elif k in given:
+                given[k].copy_from(cg, value)
+            else:
+                out.assign(value)
         for out in outputs:
             if out is not None:
                 out.finish()
@@ -187,16 +197,16 @@ class GraphFunction:
 
 
 def build_graph_function(
-    module,
+    module: ir.Module,
     name: str,
     planned: PlannedGraph,
-    in_types: list,
-    in_layouts: list,
-    outputs: list,
+    in_types: Sequence[Type],
+    in_layouts: Sequence[Layout | None],
+    outputs: Sequence[Output],
+    links: LinkTable,
     parallel: bool = True,
-    links=None,
-    profile=None,
-    planner=None,
+    profile: np.ndarray | None = None,
+    planner: Planner | None = None,
 ) -> NodeFunction:
     """Build an LLVM function that runs the graph `planned` (the program's top level).
 
@@ -216,12 +226,12 @@ def build_graph_function(
     The returned `NodeFunction` also says where the temporary values went (`arena`,
     `temporaries`) and where the array constants are in the link table
     (`constants`)."""
-    in_reprs = [
-        repr_of(t, layout) for t, layout in zip(in_types, in_layouts, strict=True)
-    ]
-    for representation in [*in_reprs, *(output.representation for output in outputs)]:
-        if isinstance(representation, ScalarRepr):
-            raise NotImplementedError("ScalarType values can't cross the boundary")
+    in_reprs: list[TensorRepr] = []
+    for t, layout in zip(in_types, in_layouts, strict=True):
+        representation = repr_of(t, layout)
+        if not isinstance(representation, TensorRepr):
+            raise NotImplementedError(f"function inputs can't be {representation}")
+        in_reprs.append(representation)
     for output in outputs:
         if not output.is_tensor or output.aliased_inputs:
             raise NotImplementedError(f"function outputs can't be {output}")
@@ -240,13 +250,13 @@ def build_graph_function(
         module=module,
         name=name,
     )
-    inputs = []
+    inputs: list[Array | ir.Value | None] = []
     for pos, representation in enumerate(in_reprs):
         a = Array.unpack(b, representation, next(params))
         a.base, a.writable = pos, False
         inputs.append(a)
     outs: list[OutputDestination | None] = [
-        ProvidedDestination(cg, Array.unpack(b, output.representation, v))
+        ProvidedDestination(cg, Array.unpack(b, output.tensor, v))
         if output.passing is Passing.CALLER_BUFFER
         else SlotDestination.for_output(cg, v, output)
         for output, v in zip(outputs, params, strict=True)
@@ -294,20 +304,22 @@ def _writes_into(memory: Array, output: Output) -> bool:
     """Can a step write its output `output`, passed in a caller buffer, straight into
     `memory`? If `memory`'s layout implies the one the step needs."""
     tensor = output.tensor
-    size = np.dtype(tensor.scalar_type.dtype).itemsize
-    return memory.layout.implies(tensor.layout, tensor.shape, size)
+    return memory.layout.implies(tensor.layout, tensor.shape, memory.itemsize)
 
 
 def temporaries_of(
-    cg, steps, memory_targets: dict, kept
-) -> tuple[dict, tuple[dict, int]]:
+    cg: Codegen,
+    steps: Sequence[Step],
+    memory_targets: Mapping[int, Array],
+    kept: Collection[int],
+) -> tuple[dict[int, ir.Value], tuple[dict[int, int], int]]:
     """Memory for the temporary values of the steps `steps` (`Codegen.temporaries`).
 
     A temporary is a result a step writes into memory it is given, when it can't be
     memory a graph output provides (`memory_targets`, vid -> Array, see
     `_writes_into`). `kept`: the values still needed after the last step (the outputs).
     Returns what `Codegen.temporaries` returns."""
-    sizes = {}
+    sizes: dict[int, int] = {}
     for step in steps:
         for vid, output in zip(step.outputs, step.signature.outputs, strict=True):
             if output.passing is not Passing.CALLER_BUFFER:
@@ -318,7 +330,7 @@ def temporaries_of(
             target = memory_targets.get(vid)
             if target is not None and _writes_into(target, output):
                 continue
-            elements = int(np.prod(tensor.shape, dtype=np.int64))
+            elements = int(np.prod(tensor.fixed_shape, dtype=np.int64))
             sizes[vid] = elements * np.dtype(tensor.scalar_type.dtype).itemsize
     return cg.temporaries(sizes, temporary_lives(steps, sizes, kept))
 
@@ -334,12 +346,16 @@ class _SlotRead:
     in_scratch: bool = False
 
 
-def bind_constants(cg, constants, values) -> dict:
+def bind_constants(
+    cg: Codegen,
+    constants: Mapping[int, tuple[TensorType | ScalarType, Any]],
+    values: dict[int, Array | ir.Value],
+) -> dict[int, int]:
     """Values of `constants` ({vid: (type, ndarray)}): 0-d ones folded into the code,
     arrays from the links, in their memory order (`Layout.of_const`; equal ones share
     their memory). Returns {vid: link entry} of the arrays."""
     b = cg.b
-    entries = {}
+    entries: dict[int, int] = {}
     for vid, (t, data) in constants.items():
         representation = repr_of(t)
         data = np.asarray(data, dtype=t.dtype)
@@ -373,20 +389,19 @@ def bind_constants(cg, constants, values) -> dict:
 
 
 def emit_steps(
-    cg,
-    module,
-    name,
-    steps,
-    values,
-    memory_targets: dict | None = None,
-    slot_targets: dict | None = None,
-    memory=None,
-    profile=None,
-):
+    cg: Codegen,
+    name: str,
+    steps: Sequence[Step],
+    values: dict[int, Array | ir.Value],
+    memory_targets: Mapping[int, Array] | None = None,
+    slot_targets: Mapping[int, OutputDestination] | None = None,
+    memory: Mapping[int, ir.Value] | None = None,
+    profile: int | None = None,
+) -> tuple[set[int], list[Slot]]:
     """Emit the steps `steps` (`planner.Step`, in order) into the function
     being built in `cg`: each node's function is called (and inlined), or its kernel.
 
-    * `vals`: vid -> Array (tensors) or value (scalars); must hold every value the
+    * `values`: vid -> Array (tensors) or value (scalars); must hold every value the
       steps read but don't produce, with the layouts they were planned for; filled
       with what they produce;
     * `memory_targets`: vid -> Array: memory a value written into given memory may be
@@ -404,13 +419,15 @@ def emit_steps(
     when they are no longer used (on failure, they are released here)."""
     from pytensor.link.llvm.codegen.call import build_call_function, linked
 
-    b = cg.b
+    b, module = cg.b, cg.module
+    if module is None:
+        raise ValueError("emitting steps needs the module being built")
     ctx, config = cg.ctx, cg.config
     memory_targets = memory_targets or {}
     slot_targets = slot_targets or {}
     written: set[int] = set()
-    owned = []  # Slots whose owner a kernel allocated
-    layouts = {}  # vid -> Layout of what the steps produced
+    owned: list[Slot] = []  # whose owner a kernel allocated
+    layouts: dict[int, Layout] = {}  # of what the steps produced
     if profile is not None:
         cells = linked(cg, profile)
         profiling = b.ne(b.load(ir.i64, cells), b.i64(0))
@@ -452,6 +469,8 @@ def emit_steps(
         }
 
         if node is None:
+            if kernel is None or cg.links is None:
+                raise ValueError(f"{step.description}: no node and no kernel to call")
             node_function = build_call_function(
                 module, f"{name}_n{n}", signature, kernel, cg.links
             )
@@ -468,20 +487,20 @@ def emit_steps(
                 links=cg.links,
                 planner=cg.planner,
             )
-        args = [ctx, config]
+        args: list[ir.Value] = [ctx, config]
         for vid, representation in zip(step.arguments, signature.inputs, strict=True):
             if vid not in values:
                 raise ValueError(
                     f"{name}: {step.description} reads a value that isn't computed yet"
                 )
             value = values[vid]
-            if isinstance(representation, ScalarRepr):
+            if not isinstance(value, Array):
                 args.append(value)
                 continue
+            if not isinstance(representation, TensorRepr):
+                raise TypeError(f"{step.description}: an array for {representation}")
             if not value.layout.implies(
-                representation.layout,
-                representation.shape,
-                np.dtype(representation.scalar_type.dtype).itemsize,
+                representation.layout, representation.shape, value.itemsize
             ):
                 raise AssertionError(
                     f"{name}: {step.description} was planned for an input with layout "
@@ -489,7 +508,7 @@ def emit_steps(
                 )
             args.append(value.pack(b, representation))
 
-        scalar_reads = []  # (vid, pointer, output)
+        scalar_reads: list[tuple[int, ir.Value, ir.Type]] = []
         slot_reads: list[_SlotRead] = []
         for j, (vid, output) in enumerate(results):
             if output.is_absent:
@@ -506,20 +525,21 @@ def emit_steps(
                         else None
                     )
                     if memory is not None and vid in memory:
-                        lengths = [b.i64(m) for m in tensor.shape]
+                        lengths = [b.i64(m) for m in tensor.fixed_shape]
                         array = Array.packed(
                             b, tensor.scalar_type, memory[vid], lengths, layout
                         )
                     else:
                         array = cg.temporary(
-                            tensor.scalar_type, list(tensor.shape), layout
+                            tensor.scalar_type, list(tensor.fixed_shape), layout
                         )
                 values[vid] = array
                 args.append(array.pack(b, tensor))
-            elif output.is_scalar:
-                pointer = b.alloca(output.representation.ir_type)
+            elif isinstance(output.representation, ScalarRepr):
+                ir_type = output.representation.ir_type
+                pointer = b.alloca(ir_type)
                 args.append(pointer)
-                scalar_reads.append((vid, pointer, output))
+                scalar_reads.append((vid, pointer, ir_type))
             else:
                 ndim = output.tensor.ndim
                 if j in into_slot:
@@ -538,6 +558,7 @@ def emit_steps(
             with b.if_(profiling):
                 b.store(b.rt_clock_ns(), start)
         rc = b.call(node_function.function, args)
+        assert rc is not None  # (it returns an i32)
         if profile is not None:
             with b.if_(profiling):
                 b.rt_counter_add(
@@ -551,8 +572,8 @@ def emit_steps(
                 slot.release(b, ctx)
             b.ret(rc)
 
-        for vid, pointer, output in scalar_reads:
-            values[vid] = b.load(output.representation.ir_type, pointer)
+        for vid, pointer, ir_type in scalar_reads:
+            values[vid] = b.load(ir_type, pointer)
         for read in slot_reads:
             tensor = read.output.tensor
             array = read.slot.read(
@@ -571,7 +592,9 @@ def emit_steps(
     return written, owned
 
 
-def _maybe_view(b, a: Array, sources: list, slot: Slot) -> None:
+def _maybe_view(
+    b: ir.Builder, a: Array, sources: Sequence[Array | ir.Value], slot: Slot
+) -> None:
     """Remember that `a` may be a view of an input of the graph.
 
     `a` was returned through `slot` by a node that may return a view of `sources`
@@ -584,7 +607,7 @@ def _maybe_view(b, a: Array, sources: list, slot: Slot) -> None:
         return
     really = b.eq(slot.owner(b), b.null())
     for s in sources:
-        if s.base_if is not None:
+        if isinstance(s, Array) and s.base_if is not None:
             really = b.and_(really, s.base_if)
     a.base, a.writable, a.base_if = bases.pop(), False, really
 

@@ -27,7 +27,7 @@ from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import OutputDestination, SlotDestination
 from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.signature import known_layouts
-from pytensor.link.llvm.codegen.types import repr_of
+from pytensor.link.llvm.codegen.types import TensorRepr, repr_of
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import constant
 from pytensor.tensor.blockwise import Blockwise
@@ -75,7 +75,10 @@ def blockwise_core_layouts(node, in_layouts) -> list:
     batch_ndim = node.op.batch_ndim(node)
     layouts = []
     for var, layout in zip(node.inputs, known_layouts(node, in_layouts), strict=True):
-        layout = repr_of(var.type, layout).layout
+        representation = repr_of(var.type, layout)
+        if not isinstance(representation, TensorRepr):
+            raise NotImplementedError(f"Blockwise with a {var.type} input")
+        layout = representation.layout
         shape, isz = list(shape_of(var)), itemsize_of(var)
         for _ in range(batch_ndim):
             layout = remove_axis(layout, 0, shape, isz)

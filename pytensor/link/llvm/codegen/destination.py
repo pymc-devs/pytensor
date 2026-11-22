@@ -12,7 +12,9 @@ units) pass theirs on, or define their own (a row of a Scan's buffer).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -25,6 +27,10 @@ from pytensor.link.llvm.codegen.types import (
     ir,
 )
 from pytensor.scalar.basic import ScalarType
+
+
+if TYPE_CHECKING:
+    from pytensor.link.llvm.codegen.signature import Output
 
 
 class OutputDestination:
@@ -136,9 +142,10 @@ class SlotDestination(OutputDestination):
         cls,
         cg: Codegen,
         pointer: ir.Value,
-        output,
+        output: Output,
         aliased_inputs: tuple[int, ...] = (),
-        **kwargs,
+        in_scratch_memory: bool = False,
+        alias_scopes: tuple[str, list[str]] | None = None,
     ) -> SlotDestination:
         """Create the destination of `output`, a signature `Output` passed in the slot
         at `pointer`.
@@ -146,16 +153,18 @@ class SlotDestination(OutputDestination):
         New memory is allocated in the output's layout if that layout fixes every
         stride (it is packed). Otherwise it is allocated C-contiguous, which then
         implies the output's layout."""
-        representation = output.representation
-        packed = output.layout.fully_packed(representation.shape)
+        representation = output.tensor
+        layout = representation.layout
+        packed = layout.fully_packed(representation.shape)
         return cls(
             cg,
             Slot(pointer, representation.ndim),
             representation.scalar_type,
             aliased_inputs=aliased_inputs,
-            allocation_layout=output.layout if packed else None,
-            required_layout=output.layout,
-            **kwargs,
+            in_scratch_memory=in_scratch_memory,
+            allocation_layout=layout if packed else None,
+            required_layout=layout,
+            alias_scopes=alias_scopes,
         )
 
     def slot_for_new_memory(self, representation: TensorRepr) -> Slot | None:
@@ -263,7 +272,9 @@ class SlotDestination(OutputDestination):
     def ndim(self) -> int:
         return self.slot.ndim
 
-    def _write(self, data, shape, strides) -> None:
+    def _write(
+        self, data: ir.Value, shape: Sequence[ir.Value], strides: Sequence[ir.Value]
+    ) -> None:
         self.slot.write(self.cg.b, data, shape, strides)
 
 

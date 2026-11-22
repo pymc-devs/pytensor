@@ -29,6 +29,7 @@ The program's graph (`Planner.program`) and graphs inside generated code
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Any
 
 import numpy as np
 
@@ -207,11 +208,11 @@ class Step:
     node: Apply | None
     #: the values (vids) it reads: one per input of the node, or per argument of the
     #: code compiled on its own
-    inputs: list
+    inputs: list[int]
     #: the values it writes, one per output
-    outputs: list
+    outputs: list[int]
     #: the layouts of `inputs`
-    in_layouts: list
+    in_layouts: list[Layout | None]
     #: the kernel it calls; None: its code is generated (and inlined)
     kernel: Kernel | None
     #: the signature of its function: representations of inputs and outputs
@@ -220,7 +221,7 @@ class Step:
     description: str
 
     @property
-    def arguments(self) -> list:
+    def arguments(self) -> list[int]:
         """The values passed, one per input of the signature (inputs without data
         aren't passed)."""
         if self.node is None:
@@ -241,13 +242,13 @@ class PlannedGraph:
     Its steps are in the order they run, and refer to values by their vids."""
 
     #: the values (vids) of the graph's inputs and outputs
-    in_ids: list
-    out_ids: list
+    in_ids: list[int]
+    out_ids: list[int]
     steps: list[Step]
     #: {vid: (type, data)} of the constants the steps read
-    constants: dict
+    constants: dict[int, tuple[TensorType | ScalarType, Any]]
     #: the layouts of its values (vid -> Layout; constants: `Planner.layout`)
-    layouts: dict
+    layouts: dict[int, Layout | None]
 
 
 class Planner:

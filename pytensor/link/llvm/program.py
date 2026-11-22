@@ -35,7 +35,7 @@ from pytensor.link.llvm.codegen.graph import (
 )
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.signature import Output, Passing
-from pytensor.link.llvm.codegen.types import ir, is_absent, repr_of
+from pytensor.link.llvm.codegen.types import TensorRepr, ir, is_absent, repr_of
 from pytensor.link.llvm.planner import PlannedGraph, Planner
 
 
@@ -220,7 +220,8 @@ def _output_modes(steps, out_ids, types) -> list:
             declared[k] = output.passing
     modes = []
     for k in out_ids:
-        static = repr_of(types[k]).static
+        representation = repr_of(types[k])
+        static = isinstance(representation, TensorRepr) and representation.static
         default = Passing.CALLER_BUFFER if static else Passing.CALLEE_SLOT
         passing = declared.get(k, default)
         modes.append(

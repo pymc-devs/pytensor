@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pytensor.graph.basic import Apply
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
@@ -43,7 +46,8 @@ from pytensor.link.llvm.codegen.types import (
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.codegen.call import LinkTable
+    from pytensor.link.llvm.codegen.call import Kernel, LinkTable
+    from pytensor.link.llvm.planner import Planner
 
 
 @dataclass
@@ -54,16 +58,16 @@ class NodeFunction:
     links: LinkTable | None = None
     #: of a graph's function: the arena ({vid: offset} of the temporary values in it,
     #: its size in bytes)
-    arena: tuple = ({}, 0)
+    arena: tuple[dict[int, int], int] = ({}, 0)
     #: of a graph's function: the vids of all its temporary values (in the arena or
     #: on the stack)
-    temporaries: frozenset = frozenset()
+    temporaries: frozenset[int] = frozenset()
     #: of a graph's function: where its array constants are in the link table
     #: ({vid: entry})
-    constants: dict = field(default_factory=dict)
+    constants: dict[int, int] = field(default_factory=dict)
 
 
-def debug_name(node) -> str:
+def debug_name(node: Apply) -> str:
     """The name of the function of `node` in debug information: the node with the names
     of its inputs (shortened). A compiled unit is named after the nodes inside it."""
     from pytensor.compile.builders import Execution
@@ -76,19 +80,19 @@ def debug_name(node) -> str:
 
 
 def build_node_function(
-    module,
-    node,
+    module: ir.Module,
+    node: Apply,
     name: str,
-    scratch_outputs=frozenset(),
-    folded=None,
-    input_layouts=None,
-    provided=None,
-    parallel=True,
-    kernel=None,
-    links=None,
-    planner=None,
-    writable=frozenset(),
-    check_layouts=False,
+    scratch_outputs: Collection[int] = frozenset(),
+    folded: Mapping[int, float] | None = None,
+    input_layouts: Sequence[Layout | None] | None = None,
+    provided: Sequence[Layout | None] | None = None,
+    parallel: bool = True,
+    kernel: Kernel | None = None,
+    links: LinkTable | None = None,
+    planner: Planner | None = None,
+    writable: Collection[int] = frozenset(),
+    check_layouts: bool = False,
 ) -> NodeFunction:
     """Build the LLVM function of one node, always inlined.
 
@@ -176,7 +180,15 @@ class _AliasScopes:
     new memory, an input it may overwrite) overlaps no other array of the function;
     inputs that are only read may overlap each other."""
 
-    def __init__(self, b, name, node, signature, folded, writable):
+    def __init__(
+        self,
+        b: ir.Builder,
+        name: str,
+        node: Apply,
+        signature: Signature,
+        folded: Collection[int],
+        writable: Collection[int],
+    ):
         self.b = b
         b.alias_domain(name)
         arguments = _argument_positions(node, folded)
@@ -192,7 +204,7 @@ class _AliasScopes:
             f"o{j}" for j, output in enumerate(signature.outputs) if output.is_tensor
         ]
 
-    def mark(self, data, scope: str) -> None:
+    def mark(self, data: ir.Value, scope: str) -> None:
         """Mark the memory at `data` as the array `scope`."""
         if scope in self.read_only:
             self.b.mark_array(data, scope, self.written)
@@ -203,13 +215,21 @@ class _AliasScopes:
         return self.read_only + [w for w in self.written if w != scope]
 
 
-def _argument_positions(node, folded) -> list[int]:
+def _argument_positions(node: Apply, folded: Collection[int]) -> list[int]:
     """Return the node input position of each argument."""
     skipped = skipped_inputs(node, folded)
     return [k for k in range(len(node.inputs)) if k not in skipped]
 
 
-def _inputs(cg, node, signature, folded, writable, params, scopes) -> list:
+def _inputs(
+    cg: Codegen,
+    node: Apply,
+    signature: Signature,
+    folded: Mapping[int, float],
+    writable: Collection[int],
+    params: Iterator[ir.Value],
+    scopes: _AliasScopes,
+) -> list[EmitterInput]:
     """Return what the emitter gets for each input (interface.py)."""
     b = cg.b
     representations = iter(signature.inputs)
@@ -228,7 +248,7 @@ def _inputs(cg, node, signature, folded, writable, params, scopes) -> list:
                 inputs.append(Array.c(scalar_type, memory, [], []))
         else:
             representation, param = next(representations), next(params)
-            if isinstance(representation, ScalarRepr):
+            if not isinstance(representation, TensorRepr):  # a ScalarType value
                 inputs.append(param)
                 continue
             array = Array.unpack(b, representation, param)
@@ -239,7 +259,11 @@ def _inputs(cg, node, signature, folded, writable, params, scopes) -> list:
 
 
 def _destinations(
-    cg, signature: Signature, scratch_outputs, params, scopes
+    cg: Codegen,
+    signature: Signature,
+    scratch_outputs: Collection[int],
+    params: Iterator[ir.Value],
+    scopes: _AliasScopes,
 ) -> list[OutputDestination | None]:
     """Return where each output goes, from its parameter."""
     destinations: list[OutputDestination | None] = []
@@ -272,7 +296,7 @@ def _destinations(
 
 
 def _handle(
-    node, position: int, destination: OutputDestination, output: Output
+    node: Apply, position: int, destination: OutputDestination, output: Output
 ) -> EmitterOutput:
     """Return what the emitter gets for output `position` of `node`."""
     if isinstance(destination, ScalarDestination):

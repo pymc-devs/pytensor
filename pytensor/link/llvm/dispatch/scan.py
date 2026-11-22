@@ -97,8 +97,8 @@ class _StateBuffer:
     def add_rows(self, b, counters: _RowCounters):
         """Register the rows of its taps: tap `t` of iteration `i` is in row
         `(i + lookback + t) % len`."""
-        n = self.buffer.shape[0]
-        n = b.smax(n, 1) if n.const_int is None else max(n.const_int, 1)
+        length = self.buffer.shape[0]
+        n = b.smax(length, 1) if length.const_int is None else max(length.const_int, 1)
         for tap in {*self.read_taps, *self.write_taps}:
             counters.add(b, self.row_key(tap), n, self.lookback + tap)
 

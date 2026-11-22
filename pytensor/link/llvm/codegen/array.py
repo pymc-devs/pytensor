@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import cache
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
-from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout
+from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout, StrideKind
 from pytensor.link.llvm.codegen.num import Num, cast, constant, load, store
 from pytensor.link.llvm.codegen.types import TensorRepr, ir, memory_type
 from pytensor.scalar.basic import ScalarType
@@ -30,8 +31,10 @@ class Array:
     #: the type of the elements
     scalar_type: ScalarType
     data: ir.Value
-    shape: list
-    strides: list
+    #: one i64 per axis
+    shape: list[ir.Value]
+    #: one i64 per axis, in bytes
+    strides: list[ir.Value]
     layout: Layout
     #: the node input this memory belongs to (inputs and their views), if known
     base: int | None = None
@@ -43,19 +46,28 @@ class Array:
     #: is (if `base` is set).
     base_if: ir.Value | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.scalar_type, ScalarType):
             raise TypeError(f"expected a ScalarType, got {self.scalar_type!r}")
 
     @property
-    def ndim(self):
+    def ndim(self) -> int:
         return len(self.shape)
 
-    def static_shape(self):
+    @property
+    def itemsize(self) -> int:
+        return np.dtype(self.scalar_type.dtype).itemsize
+
+    def static_shape(self) -> list[int | None]:
         """The lengths as ints, None where not constant."""
         return [s.const_int for s in self.shape]
 
-    def with_strides(self, shape, strides, layout=None):
+    def with_strides(
+        self,
+        shape: Sequence[ir.Value],
+        strides: Sequence[ir.Value],
+        layout: Layout | None = None,
+    ) -> Array:
         """The same memory with other lengths/strides (e.g. a broadcast view)."""
         return self.view(self.data, shape, strides, layout)
 
@@ -63,7 +75,13 @@ class Array:
         """Return the same array, claiming `layout` for its strides."""
         return replace(self, layout=layout)
 
-    def view(self, data, shape, strides, layout=None) -> Array:
+    def view(
+        self,
+        data: ir.Value,
+        shape: Sequence[ir.Value],
+        strides: Sequence[ir.Value],
+        layout: Layout | None = None,
+    ) -> Array:
         """An array in the same memory: `data` points into it. It belongs to the same
         input and is as writable as this one. `layout`: default nothing known."""
         return Array(
@@ -79,7 +97,7 @@ class Array:
 
     # ---- elements (indices are i64 values or Python ints; nothing is bounds-checked)
 
-    def ptr(self, b, *index):
+    def ptr(self, b: ir.Builder, *index: ir.Value | int) -> ir.Value:
         """Address of the element at `index` (one index per axis)."""
         if len(index) != self.ndim:
             raise ValueError(f"{len(index)} indices for an array with {self.ndim} axes")
@@ -88,11 +106,13 @@ class Array:
             p = advance(b, p, i, stride, self.scalar_type)
         return p
 
-    def load(self, b, *index):
+    def load(self, b: ir.Builder, *index: ir.Value | int) -> Num:
         """The element at `index`, as a `Num` of the array's dtype."""
         return Num(b, load(b, self.scalar_type, self.ptr(b, *index)), self.scalar_type)
 
-    def store(self, b, value, *index):
+    def store(
+        self, b: ir.Builder, value: Num | ir.Value | float, *index: ir.Value | int
+    ) -> None:
         """Write `value` to the element at `index`: a `Num` of the array's dtype, an IR
         value of its type, or a Python number."""
         if isinstance(value, Num):
@@ -110,7 +130,7 @@ class Array:
             )
         store(b, self.scalar_type, value, self.ptr(b, *index))
 
-    def at(self, b, i, axis: int = 0) -> Array:
+    def at(self, b: ir.Builder, i: ir.Value | int, axis: int = 0) -> Array:
         """The sub-array at index `i` of `axis` (`a[i]`, `a[:, i]`, ...): a view with
         one axis less, with what its layout still says."""
         from pytensor.link.llvm.analysis.layout import remove_axis
@@ -125,20 +145,31 @@ class Array:
                 self.layout,
                 axis,
                 self.static_shape(),
-                np.dtype(self.scalar_type.dtype).itemsize,
+                self.itemsize,
             ),
         )
 
     # ---- construction and conversion
 
     @classmethod
-    def c(cls, scalar_type: ScalarType, data, shape, strides) -> Array:
+    def c(
+        cls,
+        scalar_type: ScalarType,
+        data: ir.Value,
+        shape: Sequence[ir.Value],
+        strides: Sequence[ir.Value],
+    ) -> Array:
         """A C-contiguous array (strides from `c_strides`)."""
         return cls(scalar_type, data, list(shape), list(strides), Layout.c(len(shape)))
 
     @classmethod
     def packed(
-        cls, b, scalar_type: ScalarType, data, shape, layout: Layout | None = None
+        cls,
+        b: ir.Builder,
+        scalar_type: ScalarType,
+        data: ir.Value,
+        shape: Sequence[ir.Value],
+        layout: Layout | None = None,
     ) -> Array:
         """An array at `data` packed in `layout` (all axes packed; default C-contiguous)."""
         nd = len(shape)
@@ -157,20 +188,23 @@ class Array:
         )
 
     @classmethod
-    def unpack(cls, b, representation: TensorRepr, value) -> Array:
+    def unpack(
+        cls, b: ir.Builder, representation: TensorRepr, value: ir.Value
+    ) -> Array:
         """The Array of a tensor value in its representation."""
         if representation.ndim == 0:
             return cls(representation.scalar_type, value, [], [], Layout.c(0))
         data = b.extract(value, 0)
         lengths = b.extract(value, 1)
-        shape, k = [], 0
+        shape: list[ir.Value] = []
+        k = 0
         for s in representation.shape:
             if s is None:
                 shape.append(b.extract(lengths, k))
                 k += 1
             else:
                 shape.append(b.i64(s))
-        passed = {}
+        passed: dict[int, ir.Value] = {}
         if representation.stride_axes:
             st = b.extract(value, 2)
             passed = {
@@ -183,7 +217,7 @@ class Array:
             representation.scalar_type, data, shape, strides, representation.layout
         )
 
-    def pack(self, b, representation: TensorRepr):
+    def pack(self, b: ir.Builder, representation: TensorRepr) -> ir.Value:
         """A tensor value in its representation."""
         if representation.ndim == 0:
             return self.data
@@ -199,7 +233,12 @@ class Array:
 
     # ---- views and layouts
 
-    def view_layout(self, shape, strides, source) -> Layout:
+    def view_layout(
+        self,
+        shape: Sequence[ir.Value],
+        strides: Sequence[ir.Value],
+        source: Sequence[int | None],
+    ) -> Layout:
         """The layout of a view of this array with `shape` and `strides` (i64 values) whose axis k
         is axis `source[k]` of this one (None: an axis of its own, e.g. a broadcast one).
 
@@ -213,7 +252,7 @@ class Array:
         }
         view_axis = {s: k for k, s in kept.items()}
         static = self.static_shape()
-        still_packed = set()
+        still_packed: set[int] = set()
         for ax in reversed(self.layout.order):
             if self.layout.strides[ax] is not PACKED:
                 break
@@ -224,7 +263,7 @@ class Array:
             still_packed.add(ax)
             if not _same_length(shape[view_axis[ax]], self.shape[ax]):
                 break
-        kinds: list = []
+        kinds: list[StrideKind | int] = []
         for k, st in enumerate(strides):
             s = kept.get(k)
             kind = DYNAMIC if s is None else self.layout.strides[s]
@@ -236,11 +275,14 @@ class Array:
         # own axes first; this array's axes in its memory order (which orders the packed ones)
         pos = {ax: i for i, ax in enumerate(self.layout.order)}
         order = sorted(
-            range(len(shape)), key=lambda k: (k in kept, pos.get(kept.get(k), k))
+            range(len(shape)),
+            key=lambda k: (k in kept, pos[kept[k]] if k in kept else k),
         )
         return Layout.make([n.const_int for n in shape], order, kinds)
 
-    def loop_view(self, b, shape, zero_axes=()) -> Array:
+    def loop_view(
+        self, b: ir.Builder, shape: Sequence[ir.Value], zero_axes: Sequence[int] = ()
+    ) -> Array:
         """This array iterated over the loop `shape`: axes of static length 1 here (broadcast)
         and `zero_axes` get stride 0; the layout records that."""
         zero = b.i64(0)
@@ -261,7 +303,12 @@ class Array:
             Layout.make(loop_static, self.layout.order, kinds),
         )
 
-    def is_contiguous(self, b, shape, order=None):
+    def is_contiguous(
+        self,
+        b: ir.Builder,
+        shape: Sequence[ir.Value],
+        order: Sequence[int] | None = None,
+    ) -> ir.Value:
         """i1: is this array packed over `shape` in axis `order` (outermost first; default C)? A
         constant when the layout settles it; else checked at run time."""
         nd = len(shape)
@@ -279,7 +326,7 @@ class Array:
             if not all(st.const_int is not None for st in self.strides):
                 return b.const_bool(False)
         ok = b.const_bool(True)
-        expect = b.i64(np.dtype(self.scalar_type.dtype).itemsize)
+        expect = b.i64(self.itemsize)
         for ax in reversed(order):
             if static[ax] == 1:
                 continue
@@ -302,7 +349,7 @@ class Array:
         b = cg.b
         expected = layout.stride_values(
             b,
-            np.dtype(self.scalar_type.dtype).itemsize,
+            self.itemsize,
             self.shape,
             dict(enumerate(self.strides)),
         )
@@ -325,7 +372,7 @@ class Array:
         """Copy (and convert) `src`, of the same shape, into this array."""
         b = cg.b
 
-        def body(p):
+        def body(p: list[ir.Value]) -> None:
             store(
                 b,
                 self.scalar_type,
@@ -338,33 +385,42 @@ class Array:
         cg.for_each(self.shape, [src, self], body, parallel_cost=1.0)
 
 
-def unknown_layout(shape) -> Layout:
+def unknown_layout(shape: Sequence[ir.Value]) -> Layout:
     """`Layout.unknown` for the lengths `shape` (i64 values)."""
     return Layout.unknown([n.const_int for n in shape])
 
 
-def _same_length(m, n) -> bool:
+def _same_length(m: ir.Value, n: ir.Value) -> bool:
     return m is n or (m.const_int is not None and m.const_int == n.const_int)
 
 
-def c_strides(b, scalar_type, shape):
+def c_strides(
+    b: ir.Builder, scalar_type: ScalarType, shape: Sequence[ir.Value]
+) -> list[ir.Value]:
     """C-contiguous byte strides for `shape` (i64 values)."""
-    strides = [None] * len(shape)
+    strides: list[ir.Value] = []
     acc = b.i64(np.dtype(scalar_type.dtype).itemsize)
-    for a in reversed(range(len(shape))):
-        strides[a] = acc
-        acc = b.mul(acc, shape[a], nsw=True)
-    return strides
+    for length in reversed(shape):
+        strides.append(acc)
+        acc = b.mul(acc, length, nsw=True)
+    return strides[::-1]
 
 
-def size(b, shape):
+def size(b: ir.Builder, shape: Sequence[ir.Value]) -> ir.Value:
+    """The number of elements of `shape` (i64 values)."""
     n = b.i64(1)
     for s in shape:
         n = b.mul(n, s, nsw=True)
     return n
 
 
-def advance(b, p, i, stride, scalar_type):
+def advance(
+    b: ir.Builder,
+    p: ir.Value,
+    i: ir.Value | int,
+    stride: ir.Value,
+    scalar_type: ScalarType,
+) -> ir.Value:
     """`p + i * stride` (`stride` in bytes), addressed in elements of `scalar_type`.
 
     Loops address their elements with this: LLVM's vectorizer versions a loop on a
@@ -378,7 +434,7 @@ def advance(b, p, i, stride, scalar_type):
     if c is not None:
         if c % isz:
             return b.gep_bytes(p, b.mul(i, stride, nsw=True))
-        es = c // isz
+        es: ir.Value | int = c // isz
     elif isz == 1:
         es = stride
     else:
@@ -391,7 +447,7 @@ def advance(b, p, i, stride, scalar_type):
 
 
 @cache
-def _slot_ir_type(ndim: int):
+def _slot_ir_type(ndim: int) -> ir.Type:
     return ir.Type.struct_(
         [ir.ptr, ir.Type.array(ir.i64, ndim), ir.Type.array(ir.i64, ndim), ir.ptr]
     )
@@ -414,7 +470,7 @@ class Slot:
     OWNER: ClassVar[int] = 3
 
     @staticmethod
-    def ir_type(ndim: int):
+    def ir_type(ndim: int) -> ir.Type:
         return _slot_ir_type(ndim)
 
     @classmethod
@@ -435,7 +491,13 @@ class Slot:
     def owner(self, b: ir.Builder) -> ir.Value:
         return b.load(ir.ptr, self.field(b, Slot.OWNER))
 
-    def write(self, b: ir.Builder, data, shape, strides) -> None:
+    def write(
+        self,
+        b: ir.Builder,
+        data: ir.Value,
+        shape: Sequence[ir.Value],
+        strides: Sequence[ir.Value],
+    ) -> None:
         """Store an array's data, lengths and strides (not its owner)."""
         b.store(data, self.field(b, Slot.DATA))
         lengths, stride_fields = (
@@ -450,7 +512,7 @@ class Slot:
         self,
         b: ir.Builder,
         scalar_type: ScalarType,
-        static_shape,
+        static_shape: Sequence[int | None],
         layout: Layout | None = None,
     ) -> Array:
         """Return the array in the slot. Static lengths stay constants; with a known
@@ -471,6 +533,6 @@ class Slot:
         )
         return Array(scalar_type, data, shape, strides, layout)
 
-    def release(self, b: ir.Builder, ctx) -> None:
+    def release(self, b: ir.Builder, ctx: ir.Value) -> None:
         """Give up the owner (a no-op for null)."""
         b.rt_decref(ctx, self.owner(b))

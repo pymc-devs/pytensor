@@ -30,11 +30,10 @@ units) hand on each handle's `destination` (see `destination.py`).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import singledispatch
 from typing import TYPE_CHECKING
-
-import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array
@@ -45,6 +44,7 @@ from pytensor.scalar.basic import ScalarType
 
 if TYPE_CHECKING:
     from pytensor.graph.basic import Apply
+    from pytensor.graph.op import Op
     from pytensor.link.llvm.codegen.destination import (
         OutputDestination,
         ScalarDestination,
@@ -52,11 +52,13 @@ if TYPE_CHECKING:
 
 
 #: What an emitter gets for one node input.
-EmitterInput = Array | ir.Value | None
+type EmitterInput = Array | ir.Value | None
 
 
 @singledispatch
-def llvm_layout(op, node: Apply, input_layouts: list[Layout | None]) -> list:
+def llvm_layout(
+    op: Op, node: Apply, input_layouts: list[Layout | None]
+) -> list[Layout | None]:
     """Return the layout of each output of `node`, given its inputs' layouts.
 
     None leaves an output to the default: C-contiguous new memory, or nothing known for
@@ -70,7 +72,13 @@ def llvm_layout(op, node: Apply, input_layouts: list[Layout | None]) -> list:
 
 
 @singledispatch
-def llvm_emit(op, node: Apply, cg: Codegen, inputs: list, outputs: list) -> None:
+def llvm_emit(
+    op: Op,
+    node: Apply,
+    cg: Codegen,
+    inputs: list[EmitterInput],
+    outputs: list[EmitterOutput | None],
+) -> None:
     """Emit the code of `node` (see the module's docstring).
 
     Raise NotImplementedError for a node it can't handle: something else runs it
@@ -78,7 +86,7 @@ def llvm_emit(op, node: Apply, cg: Codegen, inputs: list, outputs: list) -> None
     raise NotImplementedError(f"No LLVM backend implementation for {op}")
 
 
-def has_emitter(op) -> bool:
+def has_emitter(op: Op) -> bool:
     """Is an emitter registered for the type of `op`?"""
     return llvm_emit.dispatch(type(op)) is not llvm_emit.dispatch(object)
 
@@ -127,7 +135,7 @@ class TensorOutput:
             )
         cg = self.destination.cg
         shape = array.static_shape()
-        size = np.dtype(array.scalar_type.dtype).itemsize
+        size = array.itemsize
         if not array.layout.implies(self.layout, shape, size):
             if _contradicts(array.layout, self.layout, shape, size):
                 raise ValueError(
@@ -158,7 +166,9 @@ class TensorOutput:
         return self.destination.assign(input)
 
 
-def _contradicts(actual: Layout, declared: Layout, shape, size: int) -> bool:
+def _contradicts(
+    actual: Layout, declared: Layout, shape: Sequence[int | None], size: int
+) -> bool:
     """Do the two layouts fix different strides for an axis of length other than 1?"""
     for axis, length in enumerate(shape):
         if length == 1:
@@ -186,10 +196,12 @@ class ScalarOutput:
 
 
 #: What an emitter gets for one node output (None for a value without data).
-EmitterOutput = TensorOutput | ScalarOutput
+type EmitterOutput = TensorOutput | ScalarOutput
 
 
-def destinations(outputs: list) -> list[OutputDestination | None]:
+def destinations(
+    outputs: Sequence[EmitterOutput | None],
+) -> list[OutputDestination | None]:
     """Return the destination of each handle in `outputs`, for an op that hands its
     outputs on to an inner graph (`GraphFunction.emit_call`)."""
     return [None if output is None else output.destination for output in outputs]

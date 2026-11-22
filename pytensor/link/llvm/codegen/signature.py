@@ -9,22 +9,22 @@ passed. This is the only place where those rules live.
 from __future__ import annotations
 
 import enum
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.features import op_view_parents
 from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
 from pytensor.link.llvm.codegen.interface import has_emitter, llvm_layout
 from pytensor.link.llvm.codegen.types import (
     NoneRepr,
+    Representation,
     ScalarRepr,
     TensorRepr,
     ir,
     is_absent,
     repr_of,
 )
-
-
-Representation = TensorRepr | ScalarRepr | NoneRepr
 
 
 class Passing(enum.Enum):
@@ -50,7 +50,9 @@ class Output:
     aliased_inputs: tuple[int, ...] = ()
 
     @classmethod
-    def new_buffer(cls, var, layout: Layout | None, passing: Passing) -> Output:
+    def new_buffer(
+        cls, var: Variable, layout: Layout | None, passing: Passing
+    ) -> Output:
         """Return the output for `var` in new memory of `layout` (a kernel's output)."""
         if is_absent(var.type):
             return cls(NoneRepr())
@@ -82,7 +84,9 @@ class Output:
         Passed in a caller buffer, it is the memory the op asks for (the caller may
         provide other memory, see `with_layout`). Passed in a slot, it is what the
         result has, a view or new memory."""
-        return getattr(self.representation, "layout", None)
+        if isinstance(self.representation, TensorRepr):
+            return self.representation.layout
+        return None
 
     def with_layout(self, layout: Layout) -> Output:
         """Return the same output with another layout (the memory actually provided)."""
@@ -95,7 +99,7 @@ class Output:
         )
 
     @property
-    def ir_type(self):
+    def ir_type(self) -> ir.Type:
         """The type of the output's parameter: the array itself for a caller buffer,
         else a pointer (to the slot, or to the scalar)."""
         if self.passing is Passing.CALLER_BUFFER:
@@ -116,7 +120,7 @@ class Signature:
     #: arguments, in order.
     argument_of_input: tuple[int | None, ...] | None = None
 
-    def param_types(self) -> list:
+    def param_types(self) -> list[ir.Type]:
         input_types = [
             representation.ir_type
             for representation in self.inputs
@@ -149,7 +153,9 @@ class Signature:
 # ------------------------------------------------------------------ resolution
 
 
-def known_layouts(node, input_layouts) -> list[Layout | None]:
+def known_layouts(
+    node: Apply, input_layouts: Sequence[Layout | None] | None
+) -> list[Layout | None]:
     """Return `input_layouts`, with DYNAMIC for tensors whose layout isn't known."""
     if input_layouts is None:
         input_layouts = [None] * len(node.inputs)
@@ -161,7 +167,7 @@ def known_layouts(node, input_layouts) -> list[Layout | None]:
     ]
 
 
-def can_update_in_place(node, output: int, input: int) -> bool:
+def can_update_in_place(node: Apply, output: int, input: int) -> bool:
     """May `node`'s output at position `output` be written into the input at position
     `input`?
 
@@ -178,14 +184,14 @@ def can_update_in_place(node, output: int, input: int) -> bool:
     )
 
 
-def view_inputs(node, output: int) -> tuple[int, ...]:
+def view_inputs(node: Apply, output: int) -> tuple[int, ...]:
     """Return the positions of the inputs output `output` of `node` may be a view of
     (the op's `view_map`)."""
     parents = op_view_parents(node.op, node)[output]
     return tuple(k for k, var in enumerate(node.inputs) if var in parents)
 
 
-def destroyed_inputs(node, output: int) -> tuple[int, ...]:
+def destroyed_inputs(node: Apply, output: int) -> tuple[int, ...]:
     """Return the position of the input output `output` of `node` may be written into
     (the first the op's `destroy_map` lists that `can_update_in_place`), or ().
 
@@ -199,7 +205,9 @@ def destroyed_inputs(node, output: int) -> tuple[int, ...]:
 
 
 def node_outputs(
-    node, input_layouts=None, writable: frozenset[int] = frozenset()
+    node: Apply,
+    input_layouts: Sequence[Layout | None] | None = None,
+    writable: Collection[int] = frozenset(),
 ) -> list[Output]:
     """Return the `Output` of each output of `node`.
 
@@ -215,7 +223,7 @@ def node_outputs(
     `input_layouts`: the layout of each input (None where unknown)."""
     input_layouts = known_layouts(node, input_layouts)
     declared = llvm_layout(node.op, node, input_layouts)
-    outputs = []
+    outputs: list[Output] = []
     for position, (var, layout) in enumerate(zip(node.outputs, declared, strict=True)):
         representation = repr_of(var.type)
         if not isinstance(representation, TensorRepr):
@@ -242,7 +250,9 @@ def node_outputs(
 # ------------------------------------------------------------------ signatures
 
 
-def skipped_inputs(node, folded=frozenset()) -> frozenset[int]:
+def skipped_inputs(
+    node: Apply, folded: Collection[int] = frozenset()
+) -> frozenset[int]:
     """Return the positions of the inputs that aren't arguments: folded constants and
     values without data."""
     return frozenset(folded) | {
@@ -251,12 +261,12 @@ def skipped_inputs(node, folded=frozenset()) -> frozenset[int]:
 
 
 def node_signature(
-    node,
-    folded=frozenset(),
-    input_layouts=None,
-    provided=None,
-    outputs=None,
-    writable: frozenset[int] = frozenset(),
+    node: Apply,
+    folded: Collection[int] = frozenset(),
+    input_layouts: Sequence[Layout | None] | None = None,
+    provided: Sequence[Layout | None] | None = None,
+    outputs: Sequence[Output] | None = None,
+    writable: Collection[int] = frozenset(),
 ) -> Signature:
     """Return the signature of the function of `node`.
 
@@ -281,14 +291,11 @@ def node_signature(
     ]
     if outputs is None:
         outputs = node_outputs(node, input_layouts, writable)
-    resolved = []
+    resolved: list[Output] = []
     for k, output in enumerate(outputs):
-        if (
-            output.passing is Passing.CALLER_BUFFER
-            and provided is not None
-            and provided[k] is not None
-        ):
-            output = output.with_layout(provided[k])
+        layout = None if provided is None else provided[k]
+        if output.passing is Passing.CALLER_BUFFER and layout is not None:
+            output = output.with_layout(layout)
         resolved.append(output)
     return Signature(inputs, tuple(resolved), tuple(argument_of_input))
 

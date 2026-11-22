@@ -187,6 +187,12 @@ warn_return_any = true
 warn_unreachable = true
 files = ["pytensor", "tests"]
 
+[[tool.mypy.overrides]]
+# the LLVM backend's code generation is fully annotated: keep it that way
+module = ["pytensor.link.llvm.codegen.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
 [tool.ty.environment]
 # the type stubs of the LLVM backend's extension (not in its editable install)
 extra-paths = ["rust/pytensor-llvm"]

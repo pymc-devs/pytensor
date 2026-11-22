@@ -19,6 +19,7 @@ from pytensor.link.llvm.codegen.num import Num, cast, constant
 from pytensor.link.llvm.codegen.types import (
     element_type,
     ir,
+    value_bits,
     value_type,
 )
 from pytensor.link.llvm.dispatch import gamma
@@ -140,7 +141,7 @@ def int_pow(b, x, e, scalar_type):
     """x**e by squaring (wrapping like numpy). A negative e gives 1 for x == 1,
     +-1 for x == -1 and 0 otherwise, as an integer truncation of the real power."""
     one, zero = constant(b, scalar_type, 1), constant(b, scalar_type, 0)
-    bits = value_type(scalar_type).bits
+    bits = value_bits(scalar_type)
 
     def step(_i, acc, base, k):
         odd = b.ne(b.and_(k, one), zero)

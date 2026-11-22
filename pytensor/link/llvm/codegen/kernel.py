@@ -4,12 +4,15 @@ runtime and other generated code call."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from pytensor.graph.basic import Apply
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, Slot
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
-from pytensor.link.llvm.codegen.signature import Passing, Signature
+from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
 from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
@@ -22,10 +25,13 @@ from pytensor.link.llvm.codegen.types import (
 
 
 def build_kernel_wrapper(
-    module, node_function: NodeFunction, name: str, check_layouts: bool = False
-):
+    module: ir.Module,
+    node_function: NodeFunction,
+    name: str,
+    check_layouts: bool = False,
+) -> ir.Function:
     """`int32 name(PtCtx*, PtArray* args, int32 n_inputs, int32 n_outputs, const void*
-    config)` around `nf`: the kernel ABI.
+    config)` around `node_function`: the kernel ABI.
 
     The generated code knows its arguments from the signature, and doesn't look at
     their number, or at the `ndim` and `dtype` of the `PtArray`s.
@@ -52,18 +58,18 @@ def build_kernel_wrapper(
     b = fn.builder()
     ctx, args, n_inputs, n_outputs, config = fn.params
 
-    def arg(k):
+    def arg(k: int) -> ir.Value:
         return b.gep_bytes(args, k * PTARRAY_SIZE)
 
-    def field(p, f):
+    def field(p: ir.Value, f: int) -> ir.Value:
         return b.load(ir.ptr, b.field_ptr(ptarray, p, f))
 
-    def read(k, representation: TensorRepr):
+    def read(k: int, representation: TensorRepr) -> ir.Value:
         p = arg(k)
-        data = field(p, 0)
+        data = field(p, PtArray.DATA)
         if representation.ndim == 0:
             return data
-        shape_p, strides_p = field(p, 1), field(p, 2)
+        shape_p, strides_p = field(p, PtArray.SHAPE), field(p, PtArray.STRIDES)
         lengths = [
             b.load(ir.i64, b.gep(ir.i64, shape_p, a))
             for a in representation.dynamic_axes
@@ -126,19 +132,16 @@ def build_kernel_wrapper(
             ),
         ]
         for k, representation in zip(positions, reprs, strict=True):
-            if (
-                isinstance(representation, TensorRepr)
-                and representation.ndim > 0
-                and len(representation.stride_axes) < representation.ndim
-            ):
+            ndim = representation.ndim
+            if ndim > 0 and len(representation.stride_axes) < ndim:
                 _check_layout(cg, arg(k), representation, k)
 
     n_in = len(signature.inputs)
-    call_args = [ctx, config]
+    call_args: list[ir.Value] = [ctx, config]
     call_args += [
         read(k, representation) for k, representation in enumerate(input_tensors)
     ]
-    slots = []
+    slots: list[tuple[int, Output, Slot]] = []
     for k, output in enumerate(present):
         if output.passing is Passing.CALLER_BUFFER:
             call_args.append(read(n_in + k, output.tensor))
@@ -154,7 +157,7 @@ def build_kernel_wrapper(
             slot.data(b),
             b.field_ptr(ptarray, p, PtArray.DATA),
         )
-        shape_p, strides_p = field(p, 1), field(p, 2)
+        shape_p, strides_p = field(p, PtArray.SHAPE), field(p, PtArray.STRIDES)
         lp, sp = slot.field(b, Slot.LENGTHS), slot.field(b, Slot.STRIDES)
         for a in range(output.tensor.ndim):
             b.store(b.load(ir.i64, b.gep(ir.i64, lp, a)), b.gep(ir.i64, shape_p, a))
@@ -169,11 +172,14 @@ def build_kernel_wrapper(
             input_owner = field(arg(alias_arguments[0]), PtArray.OWNER)
             owner = b.select(mine, owner, input_owner)
         b.store(owner, b.field_ptr(ptarray, p, PtArray.OWNER))
+    assert rc is not None  # (it returns an i32)
     b.ret(rc)
     return fn
 
 
-def _check_layout(cg, pointer, representation: TensorRepr, k):
+def _check_layout(
+    cg: Codegen, pointer: ir.Value, representation: TensorRepr, k: int
+) -> None:
     """Fail unless the PtArray at `pointer` has layout `representation.layout`."""
     b = cg.b
     ptarray = ptarray_type()
@@ -195,11 +201,17 @@ class CompiledNode:
     signature: Signature
 
     @property
-    def address(self):
+    def address(self) -> int:
         return self.compiled.address("kernel")
 
 
-def compile_node(node, *, fastmath=True, opt_level=3, provided=None) -> CompiledNode:
+def compile_node(
+    node: Apply,
+    *,
+    fastmath: bool = True,
+    opt_level: int = 3,
+    provided: Sequence[Layout | None] | None = None,
+) -> CompiledNode:
     """Compile one node as a kernel (for tests and one-node units).
     `provided`: layouts of the memory the caller will provide (default: as declared)."""
     module = ir.Module(f"node_{type(node.op).__name__}", fastmath=fastmath)
