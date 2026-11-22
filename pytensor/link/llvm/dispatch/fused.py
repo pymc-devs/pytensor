@@ -20,13 +20,10 @@ from pytensor.link.llvm.codegen.emit import (
     cast,
     checked_index,
     constant,
-    copy,
     for_each,
     index_bounds,
-    is_contiguous,
     load,
     loop_order,
-    loop_view,
     memory_type,
     size,
     store,
@@ -226,7 +223,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         elif isinstance(spec, Write):
             t = inputs[spec.target]
             res = out.allocate(t.shape)
-            copy(cg, t, res)
+            res.copy_from(cg, t)
             out_arrays.append((res, None))
         else:
             out_arrays.append((out.allocate(shape), None))
@@ -243,16 +240,16 @@ def emit_fused(op, node, cg, inputs, outputs):
             continue
         skip = reads[j].axis if reads[j] is not None else None
         # (an indexed axis is stepped through by the index, not by the loop)
-        plain_in[j] = loop_view(b, x, shape, zero_axes=() if skip is None else (skip,))
+        plain_in[j] = x.loop_view(b, shape, zero_axes=() if skip is None else (skip,))
     plain_out = {}
     for i, spec in enumerate(outs):
         res, acc = out_arrays[i]
         if isinstance(spec, Reduce):
             plain_out[i] = reduced_view(b, acc, shape, spec.axes)
         elif isinstance(spec, Write):
-            plain_out[i] = loop_view(b, res, shape, zero_axes=(spec.axis,))
+            plain_out[i] = res.loop_view(b, shape, zero_axes=(spec.axis,))
         else:
-            plain_out[i] = loop_view(b, res, shape)
+            plain_out[i] = res.loop_view(b, shape)
 
     def index_value(k, i):
         """idx[i] for index array input k, wrapped and bounds-checked against `n`."""
@@ -524,7 +521,7 @@ def emit_fused(op, node, cg, inputs, outputs):
     order = loop_order(shape, flat_arrays)
     contig = b.const_bool(True)
     for arr in flat_arrays:
-        contig = b.and_(contig, is_contiguous(b, shape, arr, order))
+        contig = b.and_(contig, arr.is_contiguous(b, shape, order))
 
     def flat():
         red = [i for i in out_keys if isinstance(outs[i], Reduce)]
@@ -589,7 +586,7 @@ def _finish(cg, outs, out_arrays):
         if isinstance(spec, Reduce):
             res, acc = out_arrays[i]
             if acc is not res:
-                copy(cg, acc, res)
+                res.copy_from(cg, acc)
 
 
 _register()

@@ -854,9 +854,6 @@ class ZeroFirst(Op):
         output_storage[0][0] = x
 
 
-from pytensor.link.llvm.codegen.emit import copy
-
-
 @llvm_emit.register(ZeroFirst)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
@@ -865,7 +862,7 @@ def _(op, node, cg, inputs, outputs):
         result = out.overwrite(x)
     else:
         result = out.allocate(x.shape)
-        copy(cg, x, result)
+        result.copy_from(cg, x)
     with b.if_(b.sgt(result.shape[0], 0)):
         result.store(b, 0.0, 0)
 

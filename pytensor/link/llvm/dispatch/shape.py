@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytensor.scalar as ps
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.link.llvm.analysis.layout import dimshuffle_layout, same_layout
-from pytensor.link.llvm.codegen.emit import Array, cast, copy
+from pytensor.link.llvm.codegen.emit import Array, cast
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import element_type
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
@@ -76,7 +76,7 @@ def _(op, node, cg, inputs, outputs):
 @llvm_emit.register(DeepCopyOp)
 def _(op, node, cg, inputs, outputs):
     source = inputs[0]
-    copy(cg, source, outputs[0].allocate(source.shape))
+    outputs[0].allocate(source.shape).copy_from(cg, source)
 
 
 @llvm_emit.register(ScalarFromTensor)

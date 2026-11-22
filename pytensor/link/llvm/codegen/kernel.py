@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pytensor.link.llvm.codegen.emit import Array, Codegen, Slot, check_strides
+from pytensor.link.llvm.codegen.emit import Array, Codegen, Slot
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.signature import Passing, Signature
 from pytensor.link.llvm.codegen.types import (
@@ -185,7 +185,7 @@ def _check_layout(cg, pointer, representation: TensorRepr, k):
     array = Array(
         representation.scalar_type, data, shape, strides, representation.layout
     )
-    check_strides(cg, array, representation.layout, f"argument {k}")
+    array.check_strides(cg, representation.layout, f"argument {k}")
 
 
 @dataclass

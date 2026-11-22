@@ -30,13 +30,8 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
     Slot,
-    c_array,
     constant,
-    copy,
-    pack,
-    packed_array,
     store,
-    unpack,
 )
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
@@ -184,7 +179,7 @@ class GraphFunction:
                 continue  # produced directly in the output
             value = values[vid]
             if k in given:
-                copy(cg, value, given[k])
+                given[k].copy_from(cg, value)
             elif isinstance(value, Array):
                 out.assign(value)
             else:
@@ -251,11 +246,11 @@ def build_graph_function(
     )
     inputs = []
     for pos, representation in enumerate(in_reprs):
-        a = unpack(b, representation, next(params))
+        a = Array.unpack(b, representation, next(params))
         a.base, a.writable = pos, False
         inputs.append(a)
     outs: list[OutputDestination | None] = [
-        ProvidedDestination(cg, unpack(b, output.representation, v))
+        ProvidedDestination(cg, Array.unpack(b, output.representation, v))
         if output.passing is Passing.CALLER_BUFFER
         else SlotDestination.for_output(cg, v, output)
         for output, v in zip(outputs, params, strict=True)
@@ -360,7 +355,7 @@ def bind_constants(cg, constants, values) -> dict:
             else:
                 slot = b.alloca(memory_type(scalar_type))
                 store(b, scalar_type, value, slot)
-                values[vid] = c_array(scalar_type, slot, [], [])
+                values[vid] = Array.c(scalar_type, slot, [], [])
         else:
             if cg.links is None:
                 raise NotImplementedError("array constants need a links")
@@ -496,7 +491,7 @@ def emit_steps(
                     f"{name}: {step.description} was planned for an input with layout "
                     f"{representation.layout}, got {value.layout}"
                 )
-            args.append(pack(b, representation, value))
+            args.append(value.pack(b, representation))
 
         scalar_reads = []  # (vid, pointer, output)
         slot_reads: list[_SlotRead] = []
@@ -516,7 +511,7 @@ def emit_steps(
                     )
                     if memory is not None and vid in memory:
                         lengths = [b.i64(m) for m in tensor.shape]
-                        array = packed_array(
+                        array = Array.packed(
                             b, tensor.scalar_type, memory[vid], lengths, layout
                         )
                     else:
@@ -524,7 +519,7 @@ def emit_steps(
                             tensor.scalar_type, list(tensor.shape), layout
                         )
                 values[vid] = array
-                args.append(pack(b, tensor, array))
+                args.append(array.pack(b, tensor))
             elif output.is_scalar:
                 pointer = b.alloca(output.representation.ir_type)
                 args.append(pointer)

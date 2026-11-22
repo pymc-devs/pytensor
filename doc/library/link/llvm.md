@@ -601,6 +601,13 @@ On top of it, in Python (`codegen/`):
   `x < y`, `x.astype(ps.float64)`, `cond.select(a, b)`, `x.maximum(y)`. They follow
   numpy for the type. Operands must have the same type; `==` stays identity (`x.eq(y)` compares) and a `Num` can't be a
   Python condition. Index arithmetic, which is always i64, uses the builder directly.
+* `emit.Array` is an array in generated code: data pointer, lengths, byte strides and
+  its `Layout`. Besides elements (`a.load(b, i, j)`, `a.store(b, v, i, j)`, `a.at(b, i)`)
+  it has what code does with arrays: `Array.c(...)`, `Array.packed(b, ...)`,
+  `Array.unpack(b, representation, value)` and `a.pack(b, representation)` to build and
+  convert, `a.view(...)` with `a.view_layout(...)` for views, `a.loop_view(b, shape)`
+  and `a.is_contiguous(b, shape)` for loops, `a.check_strides(cg, layout, what)` and
+  `dst.copy_from(cg, src)`.
 * `emit.Slot` is an output slot, the struct a node fills with its result
   (`{data, lengths, strides, owner}`; the owner is null for a view):
   `Slot.alloca(b, ndim)`, `slot.read(b, scalar_type, shape, layout) -> Array`,

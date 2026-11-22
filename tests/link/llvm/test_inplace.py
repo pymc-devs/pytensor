@@ -21,7 +21,7 @@ pytest.importorskip("pytensor_llvm.ir")
 from pytensor_llvm import ir
 
 from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
-from pytensor.link.llvm.codegen.emit import copy, for_each, load, store
+from pytensor.link.llvm.codegen.emit import for_each, load, store
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
 )
@@ -187,7 +187,7 @@ def _(op, node, cg, inputs, outputs):
         result = out.overwrite(x)
     else:
         result = out.allocate(x.shape)
-        copy(cg, x, result)
+        result.copy_from(cg, x)
     _halve(cg, result)
 
 

@@ -233,13 +233,13 @@ def call_kernel(cg, kernel: Kernel, index: int, inputs: list, outputs: list) -> 
 def call_destroying(cg, kernel: Kernel, index: int, inputs: list, outputs: list):
     """`call_kernel`, with copies of the inputs the kernel overwrites
     (`Kernel.destroys`, positions in `inputs`): it may only write its outputs."""
-    from pytensor.link.llvm.codegen.emit import Array, copy
+    from pytensor.link.llvm.codegen.emit import Array
 
     ins = []
     for pos, (a, scalar_type) in enumerate(inputs):
         if pos in kernel.destroys and isinstance(a, Array):
             mine = cg.temporary(a.scalar_type, a.shape)
-            copy(cg, a, mine)
+            mine.copy_from(cg, a)
             a = mine
         ins.append((a, scalar_type))
     call_kernel(cg, kernel, index, ins, outputs)
@@ -256,7 +256,7 @@ def build_call_function(
         ProvidedDestination,
         SlotDestination,
     )
-    from pytensor.link.llvm.codegen.emit import Codegen, Slot, unpack
+    from pytensor.link.llvm.codegen.emit import Array, Codegen, Slot
     from pytensor.link.llvm.codegen.node import NodeFunction
     from pytensor.link.llvm.codegen.signature import Passing
 
@@ -272,7 +272,8 @@ def build_call_function(
     ctx, config = next(params), next(params)
     cg = Codegen(b, ctx, config, links=links, module=module, name=name)
     inputs = [
-        unpack(b, representation, next(params)) for representation in signature.inputs
+        Array.unpack(b, representation, next(params))
+        for representation in signature.inputs
     ]
     for pos, a in enumerate(inputs):
         a.base, a.writable = pos, False
@@ -281,7 +282,7 @@ def build_call_function(
         if output.is_absent:
             outputs.append(None)
         elif output.passing is Passing.CALLER_BUFFER:
-            array = unpack(b, output.representation, next(params))
+            array = Array.unpack(b, output.representation, next(params))
             outputs.append(ProvidedDestination(cg, array))
         else:
             outputs.append(

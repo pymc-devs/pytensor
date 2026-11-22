@@ -6,16 +6,12 @@ import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, same_layout
 from pytensor.link.llvm.codegen.emit import (
     Array,
-    c_array,
     c_strides,
     cast,
-    copy,
     for_each,
-    is_contiguous,
     load,
     size,
     store,
-    view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import element_type, ir
@@ -98,7 +94,7 @@ def _(op, node, cg, inputs, outputs):
             strides.append(v.strides[a])
     source = [None] * off + list(range(v.ndim))
     src = Array(
-        v.scalar_type, v.data, shape, strides, view_layout(v, shape, strides, source)
+        v.scalar_type, v.data, shape, strides, v.view_layout(shape, strides, source)
     )
 
     def body(p):
@@ -193,7 +189,7 @@ def _(op, node, cg, inputs, outputs):
         shape.append(n)
     cg.check(b.eq(size(b, shape), total), "cannot reshape: the total size changes")
     out = outputs[0]
-    contig = is_contiguous(b, x.shape, x)
+    contig = x.is_contiguous(b, x.shape)
 
     def view():
         strides = c_strides(b, x.scalar_type, shape)
@@ -218,7 +214,7 @@ def _copy_reshaped(cg, src: Array, dst: Array):
     `dst`'s memory seen with `src`'s shape."""
     shape = src.shape
     strides = c_strides(cg.b, dst.scalar_type, shape)
-    copy(cg, src, c_array(dst.scalar_type, dst.data, shape, strides))
+    Array.c(dst.scalar_type, dst.data, shape, strides).copy_from(cg, src)
 
 
 @llvm_emit.register(Join)
@@ -253,9 +249,9 @@ def _(op, node, cg, inputs, outputs):
             b.gep_bytes(out.data, b.mul(offset, out.strides[axis], nsw=True)),
             x.shape,
             out.strides,
-            view_layout(out, x.shape, out.strides, range(nd)),
+            out.view_layout(x.shape, out.strides, range(nd)),
         )
-        copy(cg, x, dst)
+        dst.copy_from(cg, x)
         offset = (
             b.add(offset, x.shape[axis])
             if offset.const_int is None or x.shape[axis].const_int is None

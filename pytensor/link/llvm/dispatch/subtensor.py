@@ -8,11 +8,9 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     cast,
     checked_index,
-    copy,
     for_each,
     load,
     store,
-    view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import element_type
@@ -107,7 +105,7 @@ def _(op, node, cg, inputs, outputs):
         result = out.overwrite(x)
     else:
         result = out.allocate(x.shape)
-        copy(cg, x, result)
+        result.copy_from(cg, x)
     view = index(cg, result, _entries(op, node, inputs, 2))
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type
@@ -137,7 +135,7 @@ def _(op, node, cg, inputs, outputs):
         y.data,
         view.shape,
         ystrides,
-        view_layout(y, view.shape, ystrides, source),
+        y.view_layout(view.shape, ystrides, source),
     )
     dt = result.scalar_type
 

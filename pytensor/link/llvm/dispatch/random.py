@@ -25,7 +25,6 @@ from pytensor.link.llvm.codegen.emit import (
     load,
     size,
     store,
-    view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.codegen.types import ir, is_absent
@@ -239,11 +238,8 @@ def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
                 strides,
                 x.layout
                 if same_ndim
-                else view_layout(
-                    x,
-                    shape,
-                    strides,
-                    [a - off if a >= off else None for a in range(nd)],
+                else x.view_layout(
+                    shape, strides, [a - off if a >= off else None for a in range(nd)]
                 ),
             )
         )

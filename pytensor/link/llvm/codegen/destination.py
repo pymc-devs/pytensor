@@ -21,9 +21,7 @@ from pytensor.link.llvm.codegen.emit import (
     Array,
     Codegen,
     Slot,
-    copy,
     load,
-    packed_array,
     size,
 )
 from pytensor.link.llvm.codegen.types import (
@@ -54,7 +52,7 @@ class OutputDestination:
         The array is kept as a view where this destination accepts one, and copied
         otherwise. Return the array the result now lives in."""
         result = self.allocate(array.shape)
-        copy(self.cg, array, result)
+        result.copy_from(self.cg, array)
         return result
 
     def set(self, value: ir.Value) -> None:
@@ -197,7 +195,7 @@ class SlotDestination(OutputDestination):
             )
             data = b.rt_alloc(cg.ctx, nbytes, self.slot.field(b, Slot.OWNER))
             cg.check(b.ne(data, b.null()), None)
-            array = packed_array(
+            array = Array.packed(
                 b, self.scalar_type, data, shape, self.allocation_layout
             )
             self._write(data, shape, array.strides)

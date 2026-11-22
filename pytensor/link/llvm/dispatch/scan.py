@@ -47,7 +47,6 @@ from pytensor.link.llvm.codegen.emit import (
     advance,
     cast,
     constant,
-    copy,
     for_each,
     load,
     store,
@@ -256,12 +255,13 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
         else:
             buffer = out.allocate(list(init.shape))
             if is_mit_mot:
-                copy(cg, init, buffer)
+                buffer.copy_from(cg, init)
             else:
                 # the loop only reads the initial rows before it writes a row; the
                 # rows it doesn't write are zeroed after it
                 n = b.smin(init.shape[0], lookback)
-                copy(cg, _row_range(b, init, 0, n), _row_range(b, buffer, 0, n))
+                source = _row_range(b, init, 0, n)
+                _row_range(b, buffer, 0, n).copy_from(cg, source)
         states.append(
             _StateBuffer(
                 output=out.destination,
@@ -313,7 +313,7 @@ def _copy_untraced_states(cg, op, inputs, outputs) -> list[SlotDestination | Non
         strict=True,
     ):
         if out is not None:
-            copy(cg, init, out.allocate(list(init.shape)))
+            out.allocate(list(init.shape)).copy_from(cg, init)
         untraced.append(out)
     return untraced
 
@@ -370,10 +370,10 @@ class _StateRow(OutputDestination):
             return
         b = self.cg.b
         if self.in_place.const_int == 0:
-            copy(self.cg, self.target, self.row)
+            self.row.copy_from(self.cg, self.target)
             return
         with b.if_(b.not_(self.in_place)):
-            copy(self.cg, self.target, self.row)
+            self.row.copy_from(self.cg, self.target)
 
 
 @dataclass
@@ -450,14 +450,14 @@ def _replace_untraced_state(cg, out: SlotDestination, current: Array, src: Array
     for n, m in zip(src.shape, current.shape, strict=True):
         differs = b.or_(differs, b.ne(n, m))
     if differs.const_int == 0:
-        copy(cg, src, current)
+        current.copy_from(cg, src)
         return
     old_owner = b.alloca(ir.ptr)
     b.store(b.null(), old_owner)
     with b.if_(differs):
         b.store(out.owner(), old_owner)
         out.allocate(list(src.shape))
-    copy(cg, src, out.read())
+    out.read().copy_from(cg, src)
     b.rt_decref(cg.ctx, b.load(ir.ptr, old_owner))
 
 
@@ -476,10 +476,12 @@ def _rotate_and_trim(cg, out, buffer: Array, trace_len, is_while: bool):
         with b.if_(b.sgt(shift, 0)), cg.scratch_scope():
             # in place, through a copy in temporary memory
             aside = cg.temporary(buffer.scalar_type, list(buffer.shape))
-            copy(cg, buffer, aside)
+            aside.copy_from(cg, buffer)
             rest = b.sub(n, shift)
-            copy(cg, _row_range(b, aside, shift, rest), _row_range(b, buffer, 0, rest))
-            copy(cg, _row_range(b, aside, 0, shift), _row_range(b, buffer, rest, shift))
+            tail = _row_range(b, aside, shift, rest)
+            _row_range(b, buffer, 0, rest).copy_from(cg, tail)
+            head = _row_range(b, aside, 0, shift)
+            _row_range(b, buffer, rest, shift).copy_from(cg, head)
     with b.if_(b.and_(b.not_(circular), b.sgt(n, trace_len))):
         if is_while:
             out.set_length(0, trace_len)

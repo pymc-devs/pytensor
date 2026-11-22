@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.emit import Array, Codegen, check_strides
+from pytensor.link.llvm.codegen.emit import Array, Codegen
 from pytensor.link.llvm.codegen.types import ir
 from pytensor.scalar.basic import ScalarType
 
@@ -135,7 +135,7 @@ class TensorOutput:
                 )
             array = array.with_layout(self.layout)
             if cg.check_layouts:
-                check_strides(cg, array, self.layout, "a view")
+                array.check_strides(cg, self.layout, "a view")
         return self.destination.assign(array)
 
     def may_overwrite(self, input: Array) -> bool:

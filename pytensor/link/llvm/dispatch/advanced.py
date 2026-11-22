@@ -17,12 +17,10 @@ from pytensor.link.llvm.codegen.emit import (
     advance,
     cast,
     checked_index,
-    copy,
     for_each,
     index_bounds,
     load,
     store,
-    view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
@@ -100,7 +98,7 @@ def operands(cg, base: Array, pat: Pattern):
     first = pat.first
     bst = list(base.strides[:first]) + [zero] * nb + list(base.strides[first + k :])
     source = [*range(first), *[None] * nb, *range(first + k, base.ndim)]
-    layout = view_layout(base, pat.view_shape, bst, source)
+    layout = base.view_layout(pat.view_shape, bst, source)
     base_op = Array(base.scalar_type, base.data, pat.view_shape, bst, layout)
     idx_ops = []
     for arr, var in pat.indices:
@@ -111,7 +109,7 @@ def operands(cg, base: Array, pat: Pattern):
             if var.type.shape[d] != 1:
                 st[first + off + d] = arr.strides[d]
                 source_shape[first + off + d] = d
-        layout = view_layout(arr, pat.view_shape, st, source_shape)
+        layout = arr.view_layout(pat.view_shape, st, source_shape)
         idx_ops.append(Array(arr.scalar_type, arr.data, pat.view_shape, st, layout))
     return base_op, idx_ops
 
@@ -161,7 +159,7 @@ def _(op, node, cg, inputs, outputs):
         result = out.overwrite(x)
     else:
         result = out.allocate(x.shape)
-        copy(cg, x, result)
+        result.copy_from(cg, x)
     pat = pattern(cg, result, node, inputs[2:], node.inputs[2:], op)
     base_op, idx_ops = operands(cg, result, pat)
     # y broadcasts against the indexed view, aligned on the right; like numpy, a
@@ -190,7 +188,7 @@ def _(op, node, cg, inputs, outputs):
         )
         yst.append(b.select(one, 0, y.strides[a]))
     source = [None] * off + list(range(yt.ndim))
-    ys = Array(y.scalar_type, y.data, vs, yst, view_layout(y, vs, yst, source))
+    ys = Array(y.scalar_type, y.data, vs, yst, y.view_layout(vs, yst, source))
     k = len(idx_ops)
     dt = result.scalar_type
 

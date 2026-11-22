@@ -13,11 +13,10 @@ from pytensor.link.llvm.codegen.destination import (
     SlotDestination,
 )
 from pytensor.link.llvm.codegen.emit import (
+    Array,
     Codegen,
-    c_array,
     constant,
     store,
-    unpack,
 )
 from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
@@ -229,13 +228,13 @@ def _inputs(cg, node, signature, folded, writable, params, scopes) -> list:
             else:
                 memory = b.alloca(memory_type(scalar_type))
                 store(b, scalar_type, value, memory)
-                inputs.append(c_array(scalar_type, memory, [], []))
+                inputs.append(Array.c(scalar_type, memory, [], []))
         else:
             representation, param = next(representations), next(params)
             if isinstance(representation, ScalarRepr):
                 inputs.append(param)
                 continue
-            array = unpack(b, representation, param)
+            array = Array.unpack(b, representation, param)
             array.base, array.writable = position, position in writable
             scopes.mark(array.data, f"i{position}")
             inputs.append(array)
@@ -258,7 +257,7 @@ def _destinations(
                 ScalarDestination(cg, param, representation.scalar_type)
             )
         elif output.passing is Passing.CALLER_BUFFER:
-            array = unpack(cg.b, output.tensor, param)
+            array = Array.unpack(cg.b, output.tensor, param)
             scopes.mark(array.data, f"o{j}")
             destinations.append(ProvidedDestination(cg, array))
         else:

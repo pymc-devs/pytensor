@@ -13,7 +13,6 @@ from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout  # noqa: 
 from pytensor.link.llvm.codegen.emit import (  # noqa: E402
     Array,
     unknown_layout,
-    view_layout,
 )
 from pytensor.link.llvm.codegen.num import Num  # noqa: E402
 
@@ -127,19 +126,19 @@ def test_views_keep_what_still_holds_of_the_layout():
     # a slice along axis 1 (with c's strides): the axes inside it stay packed, the
     # outer one's stride counts all of c's axis 1
     part = [shape[0], n, shape[2]]
-    assert view_layout(c, part, c.strides, range(3)) == Layout.make(
+    assert c.view_layout(part, c.strides, range(3)) == Layout.make(
         (2, None, 4), range(3), (DYNAMIC, PACKED, PACKED)
     )
     # a broadcast over a new outer axis: stride 0 there, the rest as it was
     zero = b.i64(0)
     rows = [n, *shape]
-    assert view_layout(c, rows, [zero, *c.strides], [None, 0, 1, 2]) == Layout.make(
+    assert c.view_layout(rows, [zero, *c.strides], [None, 0, 1, 2]) == Layout.make(
         (None, 2, 3, 4), range(4), (0, PACKED, PACKED, PACKED)
     )
     # the innermost axis replaced (advanced indexing): nothing outside it is packed
     indexed = [shape[0], shape[1], n]
     strides = [c.strides[0], c.strides[1], zero]
-    assert view_layout(c, indexed, strides, [0, 1, None]) == Layout.make(
+    assert c.view_layout(indexed, strides, [0, 1, None]) == Layout.make(
         (2, 3, None), range(3), (DYNAMIC, DYNAMIC, 0)
     )
 

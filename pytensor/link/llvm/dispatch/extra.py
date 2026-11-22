@@ -6,7 +6,7 @@ import operator
 
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import split_layouts
-from pytensor.link.llvm.codegen.emit import Array, Codegen, constant, copy, size
+from pytensor.link.llvm.codegen.emit import Array, Codegen, constant, size
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import Num
 from pytensor.link.llvm.codegen.types import ir
@@ -74,7 +74,7 @@ def _(op, node, cg, inputs, outputs):
     if op.view:
         output.set_view(diagonal)
     else:
-        copy(cg, diagonal, output.allocate(diagonal.shape))
+        output.allocate(diagonal.shape).copy_from(cg, diagonal)
 
 
 @llvm_layout.register(Split)

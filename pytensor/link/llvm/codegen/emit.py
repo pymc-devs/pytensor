@@ -152,28 +152,213 @@ class Array:
             ),
         )
 
+    # ---- construction and conversion
 
-def c_array(scalar_type, data, shape, strides) -> Array:
-    """A C-contiguous array (strides from `c_strides`)."""
-    return Array(scalar_type, data, list(shape), list(strides), Layout.c(len(shape)))
+    @classmethod
+    def c(cls, scalar_type: ScalarType, data, shape, strides) -> Array:
+        """A C-contiguous array (strides from `c_strides`)."""
+        return cls(scalar_type, data, list(shape), list(strides), Layout.c(len(shape)))
 
+    @classmethod
+    def packed(
+        cls, b, scalar_type: ScalarType, data, shape, layout: Layout | None = None
+    ) -> Array:
+        """An array at `data` packed in `layout` (all axes packed; default C-contiguous)."""
+        nd = len(shape)
+        static = [n.const_int for n in shape]
+        if layout is None:
+            layout = Layout.c(nd)
+        layout = Layout.make(static, layout.order, layout.strides)
+        if not layout.fully_packed(static):
+            raise ValueError(f"can't allocate an array of layout {layout}")
+        return cls(
+            scalar_type,
+            data,
+            list(shape),
+            layout.stride_values(b, np.dtype(scalar_type.dtype).itemsize, shape, {}),
+            layout,
+        )
 
-def packed_array(b, scalar_type, data, shape, layout: Layout | None = None) -> Array:
-    """An array at `data` packed in `layout` (all axes packed; default C-contiguous)."""
-    nd = len(shape)
-    static = [n.const_int for n in shape]
-    if layout is None:
-        layout = Layout.c(nd)
-    layout = Layout.make(static, layout.order, layout.strides)
-    if not layout.fully_packed(static):
-        raise ValueError(f"can't allocate an array of layout {layout}")
-    return Array(
-        scalar_type,
-        data,
-        list(shape),
-        layout.stride_values(b, np.dtype(scalar_type.dtype).itemsize, shape, {}),
-        layout,
-    )
+    @classmethod
+    def unpack(cls, b, representation: TensorRepr, value) -> Array:
+        """The Array of a tensor value in its representation."""
+        if representation.ndim == 0:
+            return cls(representation.scalar_type, value, [], [], Layout.c(0))
+        data = b.extract(value, 0)
+        lengths = b.extract(value, 1)
+        shape, k = [], 0
+        for s in representation.shape:
+            if s is None:
+                shape.append(b.extract(lengths, k))
+                k += 1
+            else:
+                shape.append(b.i64(s))
+        passed = {}
+        if representation.stride_axes:
+            st = b.extract(value, 2)
+            passed = {
+                a: b.extract(st, k) for k, a in enumerate(representation.stride_axes)
+            }
+        strides = representation.layout.stride_values(
+            b, np.dtype(representation.scalar_type.dtype).itemsize, shape, passed
+        )
+        return cls(
+            representation.scalar_type, data, shape, strides, representation.layout
+        )
+
+    def pack(self, b, representation: TensorRepr):
+        """A tensor value in its representation."""
+        if representation.ndim == 0:
+            return self.data
+        lengths = b.aggregate(
+            ir.Type.array(ir.i64, len(representation.dynamic_axes)),
+            [self.shape[k] for k in representation.dynamic_axes],
+        )
+        strides = b.aggregate(
+            ir.Type.array(ir.i64, len(representation.stride_axes)),
+            [self.strides[k] for k in representation.stride_axes],
+        )
+        return b.aggregate(representation.ir_type, [self.data, lengths, strides])
+
+    # ---- views and layouts
+
+    def view_layout(self, shape, strides, source) -> Layout:
+        """The layout of a view of this array with `shape` and `strides` (i64 values) whose axis k
+        is axis `source[k]` of this one (None: an axis of its own, e.g. a broadcast one).
+
+        An axis that keeps its stride keeps its kind, but PACKED only while the packed
+        axes inside it (in this array's memory order) keep their strides and lengths: a packed
+        stride is the product of those lengths. A zero stride is 0; any other is DYNAMIC."""
+        kept = {
+            k: s
+            for k, s in enumerate(source)
+            if s is not None and strides[k] is self.strides[s]
+        }
+        view_axis = {s: k for k, s in kept.items()}
+        static = self.static_shape()
+        still_packed = set()
+        for ax in reversed(self.layout.order):
+            if self.layout.strides[ax] is not PACKED:
+                break
+            if ax not in view_axis:
+                if static[ax] == 1:  # (contributes nothing to the products)
+                    continue
+                break
+            still_packed.add(ax)
+            if not _same_length(shape[view_axis[ax]], self.shape[ax]):
+                break
+        kinds: list = []
+        for k, st in enumerate(strides):
+            s = kept.get(k)
+            kind = DYNAMIC if s is None else self.layout.strides[s]
+            if kind is PACKED and s not in still_packed:
+                kind = DYNAMIC
+            if kind is DYNAMIC and st.const_int == 0:
+                kind = 0
+            kinds.append(kind)
+        # own axes first; this array's axes in its memory order (which orders the packed ones)
+        pos = {ax: i for i, ax in enumerate(self.layout.order)}
+        order = sorted(
+            range(len(shape)), key=lambda k: (k in kept, pos.get(kept.get(k), k))
+        )
+        return Layout.make([n.const_int for n in shape], order, kinds)
+
+    def loop_view(self, b, shape, zero_axes=()) -> Array:
+        """This array iterated over the loop `shape`: axes of static length 1 here (broadcast)
+        and `zero_axes` get stride 0; the layout records that."""
+        zero = b.i64(0)
+        static = self.static_shape()
+        bcast = {
+            ax
+            for ax in range(self.ndim)
+            if ax in zero_axes or (static[ax] == 1 and shape[ax].const_int != 1)
+        }
+        strides = [zero if ax in bcast else st for ax, st in enumerate(self.strides)]
+        kinds = [0 if ax in bcast else k for ax, k in enumerate(self.layout.strides)]
+        loop_static = [n.const_int for n in shape]
+        return Array(
+            self.scalar_type,
+            self.data,
+            list(shape),
+            strides,
+            Layout.make(loop_static, self.layout.order, kinds),
+        )
+
+    def is_contiguous(self, b, shape, order=None):
+        """i1: is this array packed over `shape` in axis `order` (outermost first; default C)? A
+        constant when the layout settles it; else checked at run time."""
+        nd = len(shape)
+        order = list(range(nd)) if order is None else list(order)
+        static = [n.const_int for n in shape]
+        layout = self.layout
+        same_order = [ax for ax in layout.order if static[ax] != 1] == [
+            ax for ax in order if static[ax] != 1
+        ]
+        if layout.fully_packed(static) and same_order:
+            return b.const_bool(True)
+        if not layout.dynamic_axes and not (layout.fully_packed(static) and same_order):
+            # the layout is fully known and isn't this one (degenerate lengths at run time
+            # just take the general path)
+            if not all(st.const_int is not None for st in self.strides):
+                return b.const_bool(False)
+        ok = b.const_bool(True)
+        expect = b.i64(np.dtype(self.scalar_type.dtype).itemsize)
+        for ax in reversed(order):
+            if static[ax] == 1:
+                continue
+            st = self.strides[ax]
+            if st.const_int is not None and expect.const_int is not None:
+                same = b.const_bool(st.const_int == expect.const_int)
+            else:
+                eq = b.eq(st, expect)
+                one = b.eq(shape[ax], 1)
+                same = b.or_(eq, one)
+            ok = b.and_(ok, same)
+            expect = b.mul(expect, shape[ax], nsw=True)
+        return ok
+
+    def check_strides(self, cg: Codegen, layout: Layout, what: str) -> None:
+        """Fail at run time unless the strides satisfy `layout`.
+
+        Length-1 axes and empty arrays don't count, as in numpy's contiguity rules. `what`
+        names this array in the error message."""
+        b = cg.b
+        expected = layout.stride_values(
+            b,
+            np.dtype(self.scalar_type.dtype).itemsize,
+            self.shape,
+            dict(enumerate(self.strides)),
+        )
+        matches = b.const_bool(True)
+        empty = b.const_bool(False)
+        for length, actual, wanted in zip(
+            self.shape, self.strides, expected, strict=True
+        ):
+            irrelevant = b.eq(length, 1)
+            matches = b.and_(matches, b.or_(irrelevant, b.eq(actual, wanted)))
+            empty = b.or_(empty, b.eq(length, 0))
+        cg.check(
+            b.or_(matches, empty),
+            f"layout check: {what} doesn't have layout {layout}",
+        )
+
+    # ---- copying
+
+    def copy_from(self, cg: Codegen, src: Array) -> None:
+        """Copy (and convert) `src`, of the same shape, into this array."""
+        b = cg.b
+
+        def body(p):
+            store(
+                b,
+                self.scalar_type,
+                cast(
+                    b, load(b, src.scalar_type, p[0]), src.scalar_type, self.scalar_type
+                ),
+                p[1],
+            )
+
+        for_each(b, self.shape, [src, self], body, cg.parallel_policy(1.0))
 
 
 def unknown_layout(shape) -> Layout:
@@ -181,72 +366,8 @@ def unknown_layout(shape) -> Layout:
     return Layout.unknown([n.const_int for n in shape])
 
 
-def view_layout(a: Array, shape, strides, source) -> Layout:
-    """The layout of a view of `a` with `shape` and `strides` (i64 values) whose axis k
-    is axis `source[k]` of `a` (None: an axis of its own, e.g. a broadcast one).
-
-    An axis that keeps `a`'s stride keeps its kind, but PACKED only while the packed
-    axes inside it (in `a`'s memory order) keep their strides and lengths: a packed
-    stride is the product of those lengths. A zero stride is 0; any other is DYNAMIC."""
-    kept = {
-        k: s
-        for k, s in enumerate(source)
-        if s is not None and strides[k] is a.strides[s]
-    }
-    view_axis = {s: k for k, s in kept.items()}
-    static = a.static_shape()
-    still_packed = set()
-    for ax in reversed(a.layout.order):
-        if a.layout.strides[ax] is not PACKED:
-            break
-        if ax not in view_axis:
-            if static[ax] == 1:  # (contributes nothing to the products)
-                continue
-            break
-        still_packed.add(ax)
-        if not _same_length(shape[view_axis[ax]], a.shape[ax]):
-            break
-    kinds: list = []
-    for k, st in enumerate(strides):
-        s = kept.get(k)
-        kind = DYNAMIC if s is None else a.layout.strides[s]
-        if kind is PACKED and s not in still_packed:
-            kind = DYNAMIC
-        if kind is DYNAMIC and st.const_int == 0:
-            kind = 0
-        kinds.append(kind)
-    # own axes first; `a`'s axes in its memory order (which orders the packed ones)
-    pos = {ax: i for i, ax in enumerate(a.layout.order)}
-    order = sorted(
-        range(len(shape)), key=lambda k: (k in kept, pos.get(kept.get(k), k))
-    )
-    return Layout.make([n.const_int for n in shape], order, kinds)
-
-
 def _same_length(m, n) -> bool:
     return m is n or (m.const_int is not None and m.const_int == n.const_int)
-
-
-def loop_view(b, a: Array, shape, zero_axes=()) -> Array:
-    """`a` iterated over the loop `shape`: axes of static length 1 in `a` (broadcast)
-    and `zero_axes` get stride 0; the layout records that."""
-    zero = b.i64(0)
-    static = a.static_shape()
-    bcast = {
-        ax
-        for ax in range(a.ndim)
-        if ax in zero_axes or (static[ax] == 1 and shape[ax].const_int != 1)
-    }
-    strides = [zero if ax in bcast else st for ax, st in enumerate(a.strides)]
-    kinds = [0 if ax in bcast else k for ax, k in enumerate(a.layout.strides)]
-    loop_static = [n.const_int for n in shape]
-    return Array(
-        a.scalar_type,
-        a.data,
-        list(shape),
-        strides,
-        Layout.make(loop_static, a.layout.order, kinds),
-    )
 
 
 def c_strides(b, scalar_type, shape):
@@ -264,46 +385,6 @@ def size(b, shape):
     for s in shape:
         n = b.mul(n, s, nsw=True)
     return n
-
-
-def unpack(b, representation: TensorRepr, value) -> Array:
-    """The Array of a tensor value in its representation."""
-    if representation.ndim == 0:
-        return Array(representation.scalar_type, value, [], [], Layout.c(0))
-    data = b.extract(value, 0)
-    lengths = b.extract(value, 1)
-    shape, k = [], 0
-    for s in representation.shape:
-        if s is None:
-            shape.append(b.extract(lengths, k))
-            k += 1
-        else:
-            shape.append(b.i64(s))
-    passed = {}
-    if representation.stride_axes:
-        st = b.extract(value, 2)
-        passed = {a: b.extract(st, k) for k, a in enumerate(representation.stride_axes)}
-    strides = representation.layout.stride_values(
-        b, np.dtype(representation.scalar_type.dtype).itemsize, shape, passed
-    )
-    return Array(
-        representation.scalar_type, data, shape, strides, representation.layout
-    )
-
-
-def pack(b, representation: TensorRepr, a: Array):
-    """A tensor value in its representation."""
-    if representation.ndim == 0:
-        return a.data
-    lengths = b.aggregate(
-        ir.Type.array(ir.i64, len(representation.dynamic_axes)),
-        [a.shape[k] for k in representation.dynamic_axes],
-    )
-    strides = b.aggregate(
-        ir.Type.array(ir.i64, len(representation.stride_axes)),
-        [a.strides[k] for k in representation.stride_axes],
-    )
-    return b.aggregate(representation.ir_type, [a.data, lengths, strides])
 
 
 def load(b, scalar_type, ptr):
@@ -735,44 +816,10 @@ class Codegen:
         shape = [b.i64(n) if isinstance(n, int) else n for n in shape]
         nbytes = b.mul(size(b, shape), np.dtype(scalar_type.dtype).itemsize, nsw=True)
         data = self.temp_memory(nbytes, escapes)
-        return packed_array(b, scalar_type, data, shape, layout)
+        return Array.packed(b, scalar_type, data, shape, layout)
 
 
 # ------------------------------------------------------------------ loops
-
-
-def is_contiguous(b, shape, a: Array, order=None):
-    """i1: is `a` packed over `shape` in axis `order` (outermost first; default C)? A
-    constant when the layout settles it; else checked at run time."""
-    nd = len(shape)
-    order = list(range(nd)) if order is None else list(order)
-    static = [n.const_int for n in shape]
-    layout = a.layout
-    same_order = [ax for ax in layout.order if static[ax] != 1] == [
-        ax for ax in order if static[ax] != 1
-    ]
-    if layout.fully_packed(static) and same_order:
-        return b.const_bool(True)
-    if not layout.dynamic_axes and not (layout.fully_packed(static) and same_order):
-        # the layout is fully known and isn't this one (degenerate lengths at run time
-        # just take the general path)
-        if not all(st.const_int is not None for st in a.strides):
-            return b.const_bool(False)
-    ok = b.const_bool(True)
-    expect = b.i64(np.dtype(a.scalar_type.dtype).itemsize)
-    for ax in reversed(order):
-        if static[ax] == 1:
-            continue
-        st = a.strides[ax]
-        if st.const_int is not None and expect.const_int is not None:
-            same = b.const_bool(st.const_int == expect.const_int)
-        else:
-            eq = b.eq(st, expect)
-            one = b.eq(shape[ax], 1)
-            same = b.or_(eq, one)
-        ok = b.and_(ok, same)
-        expect = b.mul(expect, shape[ax], nsw=True)
-    return ok
 
 
 def loop_order(shape, arrays) -> list[int]:
@@ -856,7 +903,7 @@ def for_each(b, shape, arrays, body, policy: ParallelPolicy | None = None):
         policy = None
     contig = b.const_bool(True)
     for a in arrays:
-        contig = b.and_(contig, is_contiguous(b, shape, a, order))
+        contig = b.and_(contig, a.is_contiguous(b, shape, order))
     c = contig.const_int
     if c == 1:
         _flat(b, shape, arrays, body, policy)
@@ -908,64 +955,19 @@ def _strided(b, shape, arrays, body, order, level=0, base=None, policy=None):
         at(i)
 
 
-def copy(cg, src: Array, dst: Array):
-    """Copy (and convert) `src` into `dst` of the same shape."""
-    b = cg.b
-
-    def body(p):
-        store(
-            b,
-            dst.scalar_type,
-            cast(b, load(b, src.scalar_type, p[0]), src.scalar_type, dst.scalar_type),
-            p[1],
-        )
-
-    for_each(b, dst.shape, [src, dst], body, cg.parallel_policy(1.0))
-
-
-def check_strides(cg: Codegen, array: Array, layout: Layout, what: str) -> None:
-    """Fail at run time unless the strides of `array` satisfy `layout`.
-
-    Length-1 axes and empty arrays don't count, as in numpy's contiguity rules. `what`
-    names the array in the error message."""
-    b = cg.b
-    expected = layout.stride_values(
-        b,
-        np.dtype(array.scalar_type.dtype).itemsize,
-        array.shape,
-        dict(enumerate(array.strides)),
-    )
-    matches = b.const_bool(True)
-    empty = b.const_bool(False)
-    for length, actual, wanted in zip(
-        array.shape, array.strides, expected, strict=True
-    ):
-        irrelevant = b.eq(length, 1)
-        matches = b.and_(matches, b.or_(irrelevant, b.eq(actual, wanted)))
-        empty = b.or_(empty, b.eq(length, 0))
-    cg.check(
-        b.or_(matches, empty),
-        f"layout check: {what} doesn't have layout {layout}",
-    )
-
-
 __all__ = [
     "Array",
     "Codegen",
     "ScalarRepr",
+    "Slot",
     "TensorRepr",
     "advance",
-    "c_array",
     "cast",
-    "check_strides",
     "checked_index",
     "constant",
-    "copy",
     "for_each",
     "index_bounds",
     "load",
     "loop_order",
-    "loop_view",
-    "packed_array",
     "store",
 ]

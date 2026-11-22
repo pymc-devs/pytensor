@@ -13,16 +13,12 @@ from pytensor.link.llvm.codegen.emit import (
     advance,
     cast,
     constant,
-    copy,
     for_each,
-    is_contiguous,
     load,
     loop_order,
-    loop_view,
     memory_type,
     size,
     store,
-    view_layout,
 )
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.types import element_type
@@ -95,7 +91,7 @@ def _(op, node, cg, inputs, outputs):
             slot.append(None)
         else:
             slot.append(len(operands))
-            operands.append(loop_view(b, x, shape))
+            operands.append(x.loop_view(b, shape))
             fixed.append(None)
     n_in = len(operands)
     operands += outs
@@ -197,7 +193,7 @@ def _(op, node, cg, inputs, outputs):
     # accumulated in a register (for a transposed x and axis=0 that's the unit-stride one)
     order = loop_order(x.shape, [x])
     inner = order[-1]
-    layout = view_layout(acc_arr, x.shape, acc_strides, source)
+    layout = acc_arr.view_layout(x.shape, acc_strides, source)
     accs = Array(acc, acc_arr.data, x.shape, acc_strides, layout)
 
     def body(p):
@@ -220,7 +216,7 @@ def _(op, node, cg, inputs, outputs):
         policy = None
     _strided(b, x.shape, [x, accs], body, loops, policy=policy)
     if acc != out_type:
-        copy(cg, acc_arr, res)
+        res.copy_from(cg, acc_arr)
 
 
 def reduce_row(b, x: Array, axis, row, init, combine):
@@ -293,7 +289,7 @@ def reduce_all(b, x: Array, init, combine):
     c = (
         b.const_bool(True)
         if x.layout.fully_packed(x.static_shape())
-        else is_contiguous(b, x.shape, x)
+        else x.is_contiguous(b, x.shape)
     )
     if c.const_int == 1:
         return flat()[0]
