@@ -64,7 +64,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.blockwise import blockwise_of, broadcast_like_blockwise
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import (
     Reshape,
@@ -3071,26 +3071,8 @@ def local_blockwise_inc_subtensor(fgraph, node):
     idxs_core_ndim = [len(inp_sig) for inp_sig in node.op.inputs_sig[2:]]
     max_idx_core_ndim = max(idxs_core_ndim, default=0)
 
-    # Broadcast buffer to batch_shape. The output batch shape and broadcast
-    # pattern are derived from the inputs, never from `out.type`, which can be
-    # stale after an upstream rewrite swaps an input.
-    batch_shape = [1] * batch_ndim
-    out_batch_bcast = [True] * batch_ndim
-    for inp in node.inputs:
-        for i, (broadcastable, batch_dim) in enumerate(
-            zip(inp.type.broadcastable[:batch_ndim], tuple(inp.shape)[:batch_ndim])
-        ):
-            if broadcastable:
-                # This dimension is broadcastable, it doesn't provide shape information
-                continue
-            out_batch_bcast[i] = False
-            if batch_shape[i] != 1:
-                # We already found a source of shape for this batch dimension
-                continue
-            batch_shape[i] = batch_dim
-
-    if list(x.type.broadcastable[:batch_ndim]) != out_batch_bcast:
-        x = broadcast_to(x, (*batch_shape, *x.shape[batch_ndim:]))
+    # Broadcast buffer to the batch shape.
+    [x] = broadcast_like_blockwise([x], node, fgraph=fgraph)
 
     # Massage indices so they respect blockwise semantics while using regular indexing
     core_idxs = []

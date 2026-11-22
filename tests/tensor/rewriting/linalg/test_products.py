@@ -293,6 +293,16 @@ def test_expm_of_diag(make_diag):
     assert_equal_computations([rewritten], [expected])
 
 
+@pytest.mark.parametrize("shape", [(1, 1), (3, 1, 1)], ids=["matrix", "batched"])
+def test_expm_of_static_unit_matrix(shape):
+    x = pt.tensor("x", shape=shape)
+    result = RewriteTester(
+        [x], [pt.linalg.expm(x)], include=("ShapeOpt", "canonicalize", "specialize")
+    )
+    result.assert_graph(pt.exp(x))
+    result.assert_eval(np.arange(1, np.prod(shape) + 1, dtype=x.dtype).reshape(shape))
+
+
 def test_kron_of_diagonal_to_diagonal():
     da = pt.tensor("da", shape=(3, 3))
     db = pt.tensor("db", shape=(4, 4))

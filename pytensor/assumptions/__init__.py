@@ -41,6 +41,7 @@ from pytensor.assumptions.core import (
     register_assumption,
     register_constant_inference,
     register_implies,
+    register_type_inference,
     register_universal_assumption,
 )
 from pytensor.assumptions.specify import (

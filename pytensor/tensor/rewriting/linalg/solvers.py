@@ -40,7 +40,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.blockwise import blockwise_of, broadcast_like_blockwise
 from pytensor.tensor.rewriting.linalg.utils import (
     clients_through_expand_dims,
     get_assume_a,
@@ -446,7 +446,7 @@ def diagonal_solve_to_division(fgraph, node):
     match core_op:
         case SolveTriangular(unit_diagonal=True):
             # Unit diagonal means diag is all ones; solve is identity
-            return [b]
+            return broadcast_like_blockwise([b], node, fgraph=fgraph)
         case Solve() | SolveTriangular():
             if b_ndim == 1:
                 new_out = b / a_diag
