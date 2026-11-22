@@ -628,7 +628,7 @@ Then:
    the function's outputs as `OutputDestination`s): values flow between the steps in the
    function, temporaries are on the stack or in its arena (`analysis/liveness.py`),
    graph outputs are produced in the caller's memory or allocated straight into their
-   slots (`OutputDestination.offer_slot`; copied where they can't be), and array constants are
+   slots (`OutputDestination.slot_for_new_memory`; copied where they can't be), and array constants are
    in its link table.
 2. **Compile**: all generated modules, the program's function included, in one
    parallel batch.
@@ -648,9 +648,10 @@ from `node_outputs`, as in the planner.
 `GraphFunction.emit_call(cg, inputs, outputs)` emits code running it: values for the
 inputs, an `OutputDestination` per output. An output a node of
 the graph writes into provided memory is `allocate`d before the graph runs (and
-written there if its layout allows it); one a node allocates goes straight into the
-output's slot where the output offers one (`offer_slot`: an output slot of the
-function, not a unit's temporary); the others are `assign`ed or `set` afterwards.
+written there if its layout allows it, else copied there afterwards); one a node
+allocates goes straight into the output's slot where the output takes it
+(`slot_for_new_memory`: an output slot of the function, not a unit's temporary, whose
+layout the new memory's implies); the others are `assign`ed or `set` afterwards.
 Every output is then `finish`ed, after all were produced: until then the graph's
 inputs may still be read. Nodes we generate are inlined, the others called. Buffers
 called kernels allocate are released when the innermost `scratch_scope` ends.

@@ -686,7 +686,7 @@ emitter gets a `TensorOutput` per tensor output:
 
 | the emitter calls | for | does |
 |---|---|---|
-| `allocate(shape)` | new memory | returns memory in the output's layout |
+| `allocate(shape)` | new memory (once per output) | returns memory in the output's layout: the caller's, or new |
 | `set_view(array)` | an output the `view_map` lists | makes `array` the result, with the output's layout |
 | `may_overwrite(x)` | an output the `destroy_map` lists | says whether the result may go into `x`'s memory |
 | `overwrite(x)` | the same, where `may_overwrite(x)` | makes `x`'s memory the result, and returns it |

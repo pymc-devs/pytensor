@@ -24,7 +24,13 @@ from pytensor.link.llvm.codegen.emit import (
     read_slot,
     size,
 )
-from pytensor.link.llvm.codegen.types import Slot, ir, itemsize, slot_type
+from pytensor.link.llvm.codegen.types import (
+    Slot,
+    TensorRepr,
+    ir,
+    itemsize,
+    slot_type,
+)
 
 
 class OutputDestination:
@@ -57,20 +63,15 @@ class OutputDestination:
     def finish(self) -> None:
         """Called when the producer is done."""
 
-    def offer_slot(self) -> tuple[ir.Value, Layout] | None:
-        """Offer the slot a producer may allocate the result into directly.
+    def slot_for_new_memory(self, representation: TensorRepr) -> ir.Value | None:
+        """Return the slot a producer may allocate the result into directly, or None
+        (the default).
 
-        `GraphFunction.emit_call` asks this. A node that allocates new memory anyway
-        (a kernel, or an output whose shape is only known at run time) can then
-        allocate it straight into this slot instead of allocating its own and copying.
-
-        Return `(slot, layout)`, where the new memory must have a layout implying
-        `layout`, or None if this destination doesn't accept that (the default). When
-        the slot was used, the caller calls `slot_filled()`."""
+        `GraphFunction.emit_call` asks this for a result a node allocates anyway (a
+        kernel's, or one whose shape is only known at run time), described by
+        `representation`. If the slot is returned, the result counts as produced: the
+        producer must allocate it there."""
         return None
-
-    def slot_filled(self) -> None:
-        """Record that the result was allocated into the slot from `offer_slot()`."""
 
 
 @dataclass
@@ -85,6 +86,32 @@ class ProvidedDestination(OutputDestination):
         return self.array.dtype
 
     def allocate(self, shape: list[ir.Value]) -> Array:
+        """Return the provided memory, which must have `shape`.
+
+        A length that differs is an error while generating if both are constants, and
+        else checked at run time with the `check_layouts` option."""
+        codegen = self.codegen
+        if len(shape) != self.array.ndim:
+            raise ValueError(
+                f"allocate: {len(shape)} axes, but the provided memory has "
+                f"{self.array.ndim}"
+            )
+        for axis, (wanted, provided) in enumerate(
+            zip(shape, self.array.shape, strict=True)
+        ):
+            wanted_length, provided_length = wanted.const_int, provided.const_int
+            if wanted_length is not None and provided_length is not None:
+                if wanted_length != provided_length:
+                    raise ValueError(
+                        f"allocate: axis {axis} has length {wanted_length}, but the "
+                        f"provided memory has {provided_length}"
+                    )
+            elif codegen.check_layouts:
+                codegen.check(
+                    codegen.b.eq(wanted, provided),
+                    f"allocate: axis {axis} doesn't have the length of the provided "
+                    "memory",
+                )
         return self.array
 
 
@@ -138,15 +165,16 @@ class SlotDestination(OutputDestination):
             **kwargs,
         )
 
-    def offer_slot(self) -> tuple[ir.Value, Layout] | None:
+    def slot_for_new_memory(self, representation: TensorRepr) -> ir.Value | None:
         # Memory in scratch is freed by the surrounding unit; memory a kernel allocated
-        # into the slot would not be.
+        # into the slot would not be. And the new memory must have the required layout.
         if self.in_scratch_memory or self.required_layout is None:
             return None
-        return self.slot, self.required_layout
-
-    def slot_filled(self) -> None:
+        shape, size = representation.shape, itemsize(representation.dtype)
+        if not representation.layout.implies(self.required_layout, shape, size):
+            return None
         self.done = True
+        return self.slot
 
     def allocate(self, shape: list[ir.Value]) -> Array:
         """Allocate a buffer of `shape` in `allocation_layout`, owned by the slot.

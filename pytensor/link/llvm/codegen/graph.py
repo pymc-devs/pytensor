@@ -111,10 +111,11 @@ class GraphFunction:
         How each output gets its memory:
 
         * If the node computing it writes into memory it is given, the output's
-          `allocate` is called before the graph runs, so the node can write the result
-          there directly.
-        * If the node allocates the memory itself, and the output offers its slot
-          (`offer_slot`), the node allocates directly into that slot.
+          `allocate` is called before the graph runs. The node writes the result there
+          directly if that memory has the layout it needs, else the result is copied
+          there afterwards.
+        * If the node allocates the memory itself, it allocates directly into the
+          output's slot where the output takes that (`slot_for_new_memory`).
         * Otherwise the output's `assign` (or `set`, for a scalar) is called with the
           result after the graph has run.
 
@@ -136,24 +137,30 @@ class GraphFunction:
             if v is not None and vid not in vals:
                 vals[vid] = v
 
-        allocated: dict[int, Array] = {}
-        slots: dict[int, Target] = {}
-        targets: dict = {}
+        # Where results may be produced directly: memory a graph output provides
+        # (vid -> Array), or a graph output's slot (vid -> its destination). A value
+        # that is several outputs is produced directly into the first one's.
+        memory_targets: dict[int, Array] = {}
+        slot_targets: dict[int, OutputDestination] = {}
+        target_of: dict[int, int] = {}  # vid -> the output whose target it is
+        given: dict[int, Array] = {}  # output -> the memory it provides
         for k, (vid, out) in enumerate(zip(planned.out_ids, outputs, strict=True)):
-            o = self.produced_by.get(vid)
-            if out is None or o is None:
+            produced = self.produced_by.get(vid)
+            if out is None or produced is None or vid in target_of:
                 continue
-            if o.passing is Passing.CALLER_BUFFER:
-                a = out.allocate([b.i64(n) for n in o.representation.shape])
-                allocated[k] = a
-                targets.setdefault(vid, Target(array=a, layout=a.layout))
-            elif o.passing is Passing.CALLEE_SLOT and not o.aliased_inputs:
-                offered = out.offer_slot()
-                if offered is not None:
-                    slots[k] = Target(slot=offered[0], layout=offered[1])
-                    targets.setdefault(vid, slots[k])
+            if produced.passing is Passing.CALLER_BUFFER:
+                shape = [b.i64(n) for n in produced.tensor.shape]
+                given[k] = memory_targets[vid] = out.allocate(shape)
+                target_of[vid] = k
+            elif (
+                produced.passing is Passing.CALLEE_SLOT and not produced.aliased_inputs
+            ):
+                slot_targets[vid] = out
+                target_of[vid] = k
 
-        memory, arena = temporaries_of(cg, planned.steps, targets, planned.out_ids)
+        memory, arena = temporaries_of(
+            cg, planned.steps, memory_targets, planned.out_ids
+        )
 
         name = self.name if self._calls == 0 else f"{self.name}{self._calls}"
         self._calls += 1
@@ -163,7 +170,8 @@ class GraphFunction:
             name,
             planned.steps,
             vals,
-            targets,
+            memory_targets,
+            slot_targets,
             memory=memory,
             profile=profile,
         )
@@ -173,16 +181,15 @@ class GraphFunction:
         for k, (vid, out) in enumerate(zip(planned.out_ids, outputs, strict=True)):
             if out is None:
                 continue
-            v = vals[vid]
-            if k in slots and vid in written and targets[vid] is slots[k]:
-                out.slot_filled()
-            elif k in allocated:
-                if not (vid in written and targets[vid].array is allocated[k]):
-                    copy(cg, v, allocated[k])
-            elif isinstance(v, Array):
-                out.assign(v)
+            if vid in written and target_of[vid] == k:
+                continue  # produced directly in the output
+            value = vals[vid]
+            if k in given:
+                copy(cg, value, given[k])
+            elif isinstance(value, Array):
+                out.assign(value)
             else:
-                out.set(v)
+                out.set(value)
         for out in outputs:
             if out is not None:
                 out.finish()
@@ -209,7 +216,7 @@ def build_graph_function(
     * `in_types`, `in_layouts`: the type of each graph input (tensors only), and the
       layout the graph was prepared for;
     * `outputs`: one `Output` per graph output: memory the caller provides
-      (PROVIDED), or new memory the function returns (RETURNED);
+      (`CALLER_BUFFER`), or new memory the function returns (`CALLEE_SLOT`);
     * `links`: the function's link table; the kernels it calls and its array
       constants are added to it;
     * `profile`: if given, an array of counters (`PROFILE_ITEMS + len(planned.steps)`
@@ -275,12 +282,13 @@ def build_graph_function(
 # inlined: either the node's generated code, or a call of the step's kernel. Where the
 # steps' results go:
 #
-# * a result the step writes into memory it is given goes into memory the caller asked
-#   for (`targets`, e.g. a row of a Scan's buffer), else into a temporary
-#   (`temporaries_of`: on the stack, or in an arena shared by values that are never
-#   needed at the same time);
-# * a result the step allocates itself goes straight into an output slot of the caller
-#   if it asked for that (`targets`), else into memory that is released afterwards;
+# * a result the step writes into memory it is given goes into memory a graph output
+#   provides (`memory_targets`, e.g. a row of a Scan's buffer) if that memory has the
+#   layout the step needs, else into a temporary (`temporaries_of`: on the stack, or in
+#   an arena shared by values that are never needed at the same time);
+# * a result the step allocates itself goes straight into a graph output's slot if the
+#   output takes it (`slot_targets`, `OutputDestination.slot_for_new_memory`), else
+#   into memory that is released afterwards;
 # * views and scalars are read back from the step's output slots;
 # * 0-d constants are written into the code.
 
@@ -290,51 +298,49 @@ def build_graph_function(
 PROFILE_ON, PROFILE_CALLS, PROFILE_ITEMS = 0, 1, 2
 
 
-@dataclass
-class Target:
-    """Where a value may be produced directly: memory (`array`, in `layout`), or an
-    output slot (`slot`) for a value allocated in new memory (in `layout`)."""
-
-    array: Array | None = None
-    layout: Layout | None = None
-    slot: object = None
+def _writes_into(memory: Array, output: Output) -> bool:
+    """Can a step write its output `output`, passed in a caller buffer, straight into
+    `memory`? If `memory`'s layout implies the one the step needs."""
+    tensor = output.tensor
+    size = itemsize(tensor.dtype)
+    return memory.layout.implies(tensor.layout, tensor.shape, size)
 
 
-def fits(t: Target | None, o: Output) -> bool:
-    """Can a step produce its output `o` straight in `t`? Provided memory whose layout
-    implies the declared one, or a slot for new memory in a layout implying the
-    slot's."""
-    if t is None or t.layout is None:
-        return False
-    tensor = o.tensor
-    shape, size = tensor.shape, itemsize(tensor.dtype)
-    if o.passing is Passing.CALLER_BUFFER:
-        return t.array is not None and t.layout.implies(tensor.layout, shape, size)
-    return (
-        o.passing is Passing.CALLEE_SLOT
-        and not o.aliased_inputs
-        and t.slot is not None
-        and tensor.layout.implies(t.layout, shape, size)
-    )
-
-
-def temporaries_of(cg, steps, targets, kept) -> tuple[dict, tuple[dict, int]]:
+def temporaries_of(
+    cg, steps, memory_targets: dict, kept
+) -> tuple[dict, tuple[dict, int]]:
     """Memory for the temporary values of the steps `steps` (`Codegen.temporaries`).
 
-    A temporary is a result a step writes into memory it is given, when that memory
-    isn't one the caller asked for (`targets`, vid -> `Target`). `kept`: the values
-    still needed after the last step (the outputs). Returns what `Codegen.temporaries`
-    returns."""
-    sizes = {
-        vid: int(np.prod(o.representation.shape, dtype=np.int64))
-        * itemsize(o.representation.dtype)
-        for r in steps
-        for vid, o in zip(r.outputs, r.signature.outputs, strict=True)
-        if o.passing is Passing.CALLER_BUFFER
-        and o.representation.static
-        and not fits(targets.get(vid), o)
-    }
+    A temporary is a result a step writes into memory it is given, when it can't be
+    memory a graph output provides (`memory_targets`, vid -> Array, see
+    `_writes_into`). `kept`: the values still needed after the last step (the outputs).
+    Returns what `Codegen.temporaries` returns."""
+    sizes = {}
+    for step in steps:
+        for vid, output in zip(step.outputs, step.signature.outputs, strict=True):
+            if output.passing is not Passing.CALLER_BUFFER:
+                continue
+            tensor = output.tensor
+            if not tensor.static:
+                continue
+            target = memory_targets.get(vid)
+            if target is not None and _writes_into(target, output):
+                continue
+            sizes[vid] = int(np.prod(tensor.shape, dtype=np.int64)) * itemsize(
+                tensor.dtype
+            )
     return cg.temporaries(sizes, temporary_lives(steps, sizes, kept))
+
+
+@dataclass
+class _SlotRead:
+    """A result to read back from a step's output slot after the step ran."""
+
+    vid: int
+    slot: ir.Value
+    output: Output
+    #: it is scratch memory of the generated node (freed with the surrounding scope)
+    in_scratch: bool = False
 
 
 def release(cg, owned):
@@ -388,7 +394,8 @@ def emit_steps(
     name,
     steps,
     vals,
-    targets=None,
+    memory_targets: dict | None = None,
+    slot_targets: dict | None = None,
     memory=None,
     profile=None,
 ):
@@ -398,25 +405,28 @@ def emit_steps(
     * `vals`: vid -> Array (tensors) or value (scalars); must hold every value the
       steps read but don't produce, with the layouts they were planned for; filled
       with what they produce;
-    * `targets`: vid -> `Target`: where a value may be produced directly (PROVIDED
-      outputs whose declared layout the target's implies; returned new C-contiguous
-      memory into a slot); other values go into temporary memory or kernel buffers;
-    * `memory`: {vid: pointer}: where the provided outputs that aren't produced in their
-      targets go (`temporaries_of`); others get temporary memory of their own;
+    * `memory_targets`: vid -> Array: memory a value written into given memory may be
+      produced in directly, if its layout implies the one the step needs
+      (`_writes_into`);
+    * `slot_targets`: vid -> `OutputDestination`: whose slot a value a step allocates
+      may be allocated into, if the destination takes it (`slot_for_new_memory`);
+    * `memory`: {vid: pointer}: where the other values written into given memory go
+      (`temporaries_of`); others get temporary memory of their own;
     * `profile`: the link entry of the profile cells (`PROFILE_*`): while profiling is
       on, each step's wall time is added to its cell.
 
-    Returns (written, owned): the vids produced in their targets, and the slots of
-    buffers kernels allocated for other values, for the caller to `release` when they
-    are no longer used (on failure, they are released here)."""
+    Returns (written, owned): the vids produced directly in their targets, and the
+    slots of buffers kernels allocated for other values, for the caller to `release`
+    when they are no longer used (on failure, they are released here)."""
     from pytensor.link.llvm.codegen.call import build_call_function, linked
 
     b = cg.b
     ctx, config = cg.ctx, cg.config
-    targets = targets or {}
-    written = set()
+    memory_targets = memory_targets or {}
+    slot_targets = slot_targets or {}
+    written: set[int] = set()
     owned = []  # (slot, ndim): buffers kernels allocated
-    lays = {}  # vid -> Layout of what the steps produced
+    layouts = {}  # vid -> Layout of what the steps produced
     if profile is not None:
         cells = linked(cg, profile)
         profiling = b.ne(b.load(ir.i64, cells), b.i64(0))
@@ -424,43 +434,49 @@ def emit_steps(
             b.rt_counter_add(b.gep(ir.i64, cells, PROFILE_CALLS), b.i64(1))
         start = b.alloca(ir.i64)
     for n, step in enumerate(steps):
-        node, kernel, nsig = step.node, step.kernel, step.signature
-        present = step.arguments
-        # provided outputs: their target if its layout implies the declared one; else a
-        # temporary in the declared layout (copied by the caller if needed)
-        in_place = {
-            j: targets[vid].array
-            for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True))
-            if o.passing is Passing.CALLER_BUFFER
-            and vid not in written
-            and fits(targets.get(vid), o)
-        }
-        for vid, o in zip(step.outputs, nsig.outputs, strict=True):
-            if o.layout is not None:
-                lays[vid] = o.layout
+        node, kernel, signature = step.node, step.kernel, step.signature
+        results = list(zip(step.outputs, signature.outputs, strict=True))
+        for vid, output in results:
+            if output.layout is not None:
+                layouts[vid] = output.layout
 
-        def into_slot(vid, o):
-            # an allocated value with a slot target: allocated straight into it if the
-            # node allocates it in a layout the slot takes
-            return (
-                o.passing is Passing.CALLEE_SLOT
-                and vid not in written
-                and fits(targets.get(vid), o)
-            )
-
-        temporaries = {
+        # Where each result goes, decided before the node's function is built (it
+        # allocates differently into scratch memory): given memory of a graph output,
+        # a graph output's slot, or neither.
+        into_memory: dict[int, Array] = {}
+        into_slot: dict[int, ir.Value] = {}
+        for j, (vid, output) in enumerate(results):
+            if vid in written:
+                continue
+            if output.passing is Passing.CALLER_BUFFER:
+                target = memory_targets.get(vid)
+                if target is not None and _writes_into(target, output):
+                    into_memory[j] = target
+                    written.add(vid)
+            elif output.passing is Passing.CALLEE_SLOT and not output.aliased_inputs:
+                destination = slot_targets.get(vid)
+                if destination is not None:
+                    slot = destination.slot_for_new_memory(output.tensor)
+                    if slot is not None:
+                        into_slot[j] = slot
+                        written.add(vid)
+        # results the node allocates that go nowhere else: its scratch memory
+        scratch = {
             j
-            for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True))
-            if o.passing is Passing.CALLEE_SLOT and not into_slot(vid, o)
+            for j, (_, output) in enumerate(results)
+            if output.passing is Passing.CALLEE_SLOT and j not in into_slot
         }
+
         if node is None:
-            nf = build_call_function(module, f"{name}_n{n}", nsig, kernel, cg.links)
+            nf = build_call_function(
+                module, f"{name}_n{n}", signature, kernel, cg.links
+            )
         else:
             nf = build_node_function(
                 module,
                 node,
                 f"{name}_n{n}",
-                scratch_outputs=frozenset(temporaries),
+                scratch_outputs=frozenset(scratch),
                 input_layouts=step.in_layouts,
                 parallel=cg.parallel,
                 check_layouts=cg.check_layouts,
@@ -469,64 +485,70 @@ def emit_steps(
                 planner=cg.planner,
             )
         args = [ctx, config]
-        for vid, rep in zip(present, nsig.inputs, strict=True):
+        for vid, representation in zip(step.arguments, signature.inputs, strict=True):
             if vid not in vals:
                 raise ValueError(
                     f"{name}: {step.description} reads a value that isn't computed yet"
                 )
-            v = vals[vid]
-            if isinstance(rep, ScalarRepr):
-                args.append(v)
+            value = vals[vid]
+            if isinstance(representation, ScalarRepr):
+                args.append(value)
                 continue
-            if not v.layout.implies(rep.layout, rep.shape, itemsize(rep.dtype)):
+            if not value.layout.implies(
+                representation.layout,
+                representation.shape,
+                itemsize(representation.dtype),
+            ):
                 raise AssertionError(
                     f"{name}: {step.description} was planned for an input with layout "
-                    f"{rep.layout}, got {v.layout}"
+                    f"{representation.layout}, got {value.layout}"
                 )
-            args.append(pack(b, rep, v))
-        reads = []  # (vid, slot, how)
-        for j, (vid, o) in enumerate(zip(step.outputs, nsig.outputs, strict=True)):
-            if o.is_absent:
+            args.append(pack(b, representation, value))
+
+        scalar_reads = []  # (vid, pointer, output)
+        slot_reads: list[_SlotRead] = []
+        for j, (vid, output) in enumerate(results):
+            if output.is_absent:
                 continue
-            if o.passing is Passing.CALLER_BUFFER:
-                if j in in_place:
-                    a = in_place[j]
-                    written.add(vid)
+            if output.passing is Passing.CALLER_BUFFER:
+                tensor = output.tensor
+                if j in into_memory:
+                    array = into_memory[j]
                 else:
-                    representation = o.representation
-                    lay = (
-                        o.layout
-                        if o.layout.fully_packed(representation.shape)
+                    # a temporary, packed in the declared layout (C implies any)
+                    layout = (
+                        tensor.layout
+                        if tensor.layout.fully_packed(tensor.shape)
                         else None
-                    )  # (C implies any)
-                    shape = list(representation.shape)
+                    )
                     if memory is not None and vid in memory:
-                        dims = [b.i64(m) for m in shape]
-                        a = packed_array(
-                            b, representation.dtype, memory[vid], dims, lay
+                        lengths = [b.i64(m) for m in tensor.shape]
+                        array = packed_array(
+                            b, tensor.dtype, memory[vid], lengths, layout
                         )
                     else:
-                        a = cg.temporary(representation.dtype, shape, lay)
-                vals[vid] = a
-                args.append(pack(b, o.representation, a))
-            elif o.is_scalar:
-                slot = b.alloca(o.representation.ir_type)
-                args.append(slot)
-                reads.append((vid, slot, "scalar", o))
+                        array = cg.temporary(tensor.dtype, list(tensor.shape), layout)
+                vals[vid] = array
+                args.append(pack(b, tensor, array))
+            elif output.is_scalar:
+                pointer = b.alloca(output.representation.ir_type)
+                args.append(pointer)
+                scalar_reads.append((vid, pointer, output))
             else:
-                if into_slot(vid, o):
-                    slot = targets[vid].slot
-                    written.add(vid)
+                ndim = output.tensor.ndim
+                if j in into_slot:
+                    slot = into_slot[j]
                 else:
-                    ndim = o.representation.ndim
                     slot = b.alloca(slot_type(ndim))
                     b.store(b.zero(slot_type(ndim)), slot)
                     if kernel is not None:
                         owned.append((slot, ndim))
                 args.append(slot)
-                # a temporary of a generated node is scratch memory it took (or a view)
-                how = "scratch" if kernel is None and j in temporaries else "array"
-                reads.append((vid, slot, how, o))
+                # (a scratch result of a generated node is scratch memory it took, or
+                # a view)
+                in_scratch = kernel is None and j in scratch
+                slot_reads.append(_SlotRead(vid, slot, output, in_scratch))
+
         if profile is not None:
             with b.if_(profiling):
                 b.store(b.rt_clock_ns(), start)
@@ -542,31 +564,25 @@ def emit_steps(
             b.rt_error_context(ctx, " ".join(step.description.split())[:200])
             release(cg, owned)
             b.ret(rc)
-        for vid, slot, how, o in reads:
-            if how == "scalar":
-                vals[vid] = b.load(o.representation.ir_type, slot)
-            else:
-                representation = o.representation
-                vals[vid] = read_slot(
-                    b,
-                    slot,
-                    representation.dtype,
-                    list(representation.shape),
-                    lays.get(vid),
-                )
-                if o.aliased_inputs:
-                    sources = [vals[present[a]] for a in nsig.alias_arguments(o)]
-                    _maybe_view(b, vals[vid], sources, slot, representation.ndim)
-                if how == "scratch":
-                    # (`SlotDestination.in_scratch_memory`: the owner is the scratch)
-                    cg.free_later(
-                        b.load(
-                            ir.ptr,
-                            b.field_ptr(
-                                slot_type(representation.ndim), slot, Slot.OWNER
-                            ),
-                        )
-                    )
+
+        for vid, pointer, output in scalar_reads:
+            vals[vid] = b.load(output.representation.ir_type, pointer)
+        for read in slot_reads:
+            tensor = read.output.tensor
+            array = read_slot(
+                b, read.slot, tensor.dtype, list(tensor.shape), layouts.get(read.vid)
+            )
+            vals[read.vid] = array
+            if read.output.aliased_inputs:
+                sources = [
+                    vals[step.arguments[a]]
+                    for a in signature.alias_arguments(read.output)
+                ]
+                _maybe_view(b, array, sources, read.slot, tensor.ndim)
+            if read.in_scratch:
+                # (`SlotDestination.in_scratch_memory`: the owner is the scratch)
+                owner = b.field_ptr(slot_type(tensor.ndim), read.slot, Slot.OWNER)
+                cg.free_later(b.load(ir.ptr, owner))
     return written, owned
 
 
@@ -600,7 +616,6 @@ __all__ = [
     "PROFILE_ITEMS",
     "PROFILE_ON",
     "GraphFunction",
-    "Target",
     "build_graph_function",
     "emit_steps",
 ]

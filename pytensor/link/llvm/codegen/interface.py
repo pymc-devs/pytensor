@@ -93,13 +93,21 @@ class TensorOutput:
     view_inputs: tuple[int, ...] = ()
     #: positions of the inputs the op's `destroy_map` says the output may overwrite
     destroyed_inputs: tuple[int, ...] = ()
+    allocated: bool = False
 
     @property
     def dtype(self) -> str:
         return self.destination.dtype
 
     def allocate(self, shape: list[ir.Value]) -> Array:
-        """Return new memory of `shape` for the result, in the output's layout."""
+        """Return memory of `shape` for the result, in the output's layout. Call it
+        once.
+
+        The memory is the caller's or new: the planner decides, and the emitter writes
+        the result into it either way."""
+        if self.allocated:
+            raise ValueError("allocate() called twice for the same output")
+        self.allocated = True
         return self.destination.allocate(shape)
 
     def set_view(self, array: Array) -> Array:
