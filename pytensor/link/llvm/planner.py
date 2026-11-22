@@ -28,7 +28,7 @@ The program's graph (`Planner.program`) and graphs inside generated code
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -52,10 +52,10 @@ from pytensor.link.llvm.codegen.implementation import (
     OwnModule,
     RustKernel,
 )
-from pytensor.link.llvm.codegen.interface import has_emitter
+from pytensor.link.llvm.codegen.interface import can_generate, has_emitter
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.kernel_module import KernelModule
-from pytensor.link.llvm.codegen.node import build_node_function, node_function
+from pytensor.link.llvm.codegen.node import node_function
 from pytensor.link.llvm.codegen.plan import PlannedGraph, Step
 from pytensor.link.llvm.codegen.signature import (
     known_layouts,
@@ -196,16 +196,10 @@ def _inlined_outputs(values: Values, inner, node, inner_scope, scope) -> None:
 
 def fusable(op, node) -> bool:
     """A FusedElemwise we can generate as one loop?"""
-    from pytensor.link.llvm.dispatch.fused import fused_spec
+    from pytensor.link.llvm.dispatch.fused import fused_supported
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 
-    if not isinstance(op, FusedElemwise):
-        return False
-    try:
-        fused_spec(op, node)
-    except NotImplementedError:
-        return False
-    return True
+    return isinstance(op, FusedElemwise) and fused_supported(op, node)
 
 
 # ------------------------------------------------------------------ how nodes run
@@ -356,29 +350,12 @@ class Planner:
         rule, else the rule inside generated code). `layouts` must hold the layouts of
         the values they read from outside; it is filled with those of what they
         produce."""
-        steps: list[Step] = []
-        for flat in flat_nodes:
-            try:
-                steps.append(
-                    self._program_step(flat, layouts)
-                    if top_level
-                    else self._inner_step(flat, layouts)
-                )
-            except NotImplementedError:
-                if not (top_level and _is_unit(flat.node)):
-                    raise
-                # a compiled OpFromGraph we can't generate: its nodes on their own,
-                # and a copy of each result into the value the OpFromGraph's output is
-                inner = flat.node.op.fgraph
-                sub = dict(zip(inner.inputs, flat.inputs, strict=True))
-                inner_flat = flatten(
-                    self.values, inner.toposort(), sub, inside_unit=True
-                )
-                steps += self._decide(inner_flat, layouts, top_level)
-                for io, outer in zip(inner.outputs, flat.outputs, strict=True):
-                    src = self.values.of(io, sub)
-                    steps.append(self._copy_step(src, outer, layouts))
-        return steps
+        return [
+            self._program_step(flat, layouts)
+            if top_level
+            else self._inner_step(flat, layouts)
+            for flat in flat_nodes
+        ]
 
     def _inner_step(self, flat, layouts) -> Step:
         """How a flat node inside generated code runs: generated and inlined if
@@ -416,7 +393,7 @@ class Planner:
                 return GENERATED
             except NotImplementedError:
                 return self._kernel(node, in_layouts, binding)
-        if self._can_generate(node, in_layouts):
+        if can_generate(node):
             return GENERATED
         return self._kernel(node, in_layouts, binding)
 
@@ -453,17 +430,16 @@ class Planner:
             rust = self._rust(node, in_layouts, binding)
             if rust is not None:
                 return self._kernel_step(flat, rust, layouts)
-        try:
+        if can_generate(node):
             return self._generated_step(flat, folded, in_layouts, layouts, writable)
-        except NotImplementedError:
-            # (a kernel doesn't overwrite its inputs: it can stand in for an in-place
-            # node too)
-            if nested or writable:
-                rust = self._rust(node, in_layouts, binding)
-                if rust is not None:
-                    return self._kernel_step(flat, rust, layouts)
-            if not self.opts.numba_fallback:
-                raise
+        # (a kernel doesn't overwrite its inputs: it can stand in for an in-place node
+        # too)
+        if nested or writable:
+            rust = self._rust(node, in_layouts, binding)
+            if rust is not None:
+                return self._kernel_step(flat, rust, layouts)
+        if not self.opts.numba_fallback:
+            raise _no_implementation(node)
         numba = self._numba(node, binding)
         # it overwrites the inputs its op destroys: that is what the graph asks for,
         # where nothing else may see the memory (as in `_writable_inputs`). Else it gets
@@ -537,15 +513,6 @@ class Planner:
             signature,
             desc,
         )
-
-    def _copy_step(self, src, dst, layouts) -> Step:
-        """A step of the program copying value `src` into value `dst`: a `DeepCopyOp`,
-        generated."""
-        node = _copy_node(self.values.types[dst])
-        in_layouts = [self.layout(src, layouts)]
-        self._binding(node, [dst], in_layouts, layouts)
-        flat = FlatNode(node, [src], [dst])
-        return self._generated_step(flat, {}, in_layouts, layouts)
 
     def _compiled(self, unit, node_function, description) -> Kernel:
         """The kernel of `unit` (its function `kernel`, around `node_function`), to
@@ -646,36 +613,26 @@ class Planner:
         if rust is not None:
             return rust
         if not self.opts.numba_fallback:
-            raise NotImplementedError(f"No LLVM backend implementation for {node.op}")
+            raise _no_implementation(node)
         return self._numba(node, binding)
 
-    def _can_generate(self, node, in_layouts) -> bool:
-        """Is there an emitter that handles this node? (Tried in a scratch module: an
-        emitter says no by raising, possibly halfway through.)"""
-        if not has_emitter(node.op):
-            return False
-        try:
-            build_node_function(
-                KernelModule.new("probe", replace(self.opts.codegen, parallel=False)),
-                node,
-                "probe",
-                input_layouts=in_layouts,
-            )
-            return True
-        except NotImplementedError:
-            return False
+
+def _no_implementation(node) -> NotImplementedError:
+    """The error for a node nothing can run (no Rust kernel, the numba fallback off)."""
+    if has_emitter(node.op):
+        why = "its emitter doesn't handle this node (`llvm_supports`)"
+    else:
+        why = "it has no emitter"
+    return NotImplementedError(
+        f"No LLVM backend implementation for {node.op}: {why}, it has no Rust "
+        "kernel, and the numba fallback is off"
+    )
 
 
 def _is_unit(node) -> bool:
     """Is the node a compiled unit, an OpFromGraph with `execution=COMPILED`? Its inner
     graph is generated as one function."""
     return isinstance(node.op, OpFromGraph) and node.op.execution is Execution.COMPILED
-
-
-def _copy_node(t):
-    from pytensor.compile.ops import deep_copy_op
-
-    return deep_copy_op(t()).owner
 
 
 def _layouts_note(reprs):

@@ -2,9 +2,10 @@
 implementations are in `dispatch/`).
 
 This package exports what an op's implementation is written against (see
-doc/extending/creating_an_llvm_op.md): register with `llvm_emit` (and `llvm_layout`),
-emit with `Codegen`, `Array` and `Num`, test with `compile_node`. Ops that run an inner
-graph (`Codegen.graph_function`) also use `OutputDestination` and `Captured`.
+doc/extending/creating_an_llvm_op.md): register with `llvm_emit` (and `llvm_layout`,
+`llvm_supports`), emit with `Codegen`, `Array` and `Num`, test with `compile_node`.
+Ops that run an inner graph (`Codegen.graph_function`) also use `OutputDestination`
+and `Captured`.
 
 The modules:
 
@@ -50,6 +51,8 @@ from pytensor.link.llvm.codegen.interface import (
     TensorOutput,
     llvm_emit,
     llvm_layout,
+    llvm_supports,
+    supported_types,
 )
 from pytensor.link.llvm.codegen.kernel import compile_node
 from pytensor.link.llvm.codegen.num import Num, NumLike, cast, constant, load, store
@@ -87,11 +90,13 @@ __all__ = [
     "is_absent",
     "llvm_emit",
     "llvm_layout",
+    "llvm_supports",
     "load",
     "loop_order",
     "memory_type",
     "size",
     "store",
+    "supported_types",
     "value_bits",
     "value_type",
 ]

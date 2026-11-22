@@ -26,9 +26,9 @@ of that step in this order:
    graph with an op the backend doesn't know still runs. It costs numba's compile time
    and the op can't be compiled together with its neighbors.
 
-An emitter that can't handle a particular node raises `NotImplementedError`, and the
-planner moves on to the next way. Supporting only the easy cases of an op is therefore
-fine.
+An op whose emitter handles only some of its nodes says which with a check,
+`llvm_supports`, and the planner uses the next way for the others. Supporting only the
+easy cases of an op is therefore fine.
 
 ## 2. The builder
 
@@ -428,13 +428,22 @@ cg.check(b.sgt(n, 0), "CumMax of an empty vector")
 
 and calling the function with an empty vector would raise an error with that message. A check on a constant that holds generates nothing.
 
-Conditions known while generating are ordinary Python. To decline a node, raise
-`NotImplementedError`:
+Conditions known while generating are ordinary Python. An emitter doesn't decline a
+node while generating it, though: whether it can is asked before, when the planner
+chooses how the node runs. An emitter that handles only some nodes registers a check,
+which looks at the node alone (not at layouts); the default only asks that every input
+and output has a type the backend supports:
 
 ```py
-if x.scalar_type == ps.bool:
-    raise NotImplementedError("CumMax of booleans")
+from pytensor.link.llvm.codegen import llvm_supports, supported_types
+
+
+@llvm_supports.register(CumMax)
+def _(op, node):
+    return supported_types(node) and node.inputs[0].type.dtype != "bool"
 ```
+
+For the nodes it refuses, the planner uses a Rust kernel, or else a numba kernel.
 
 ## 4. A scalar op, and `Num`
 
@@ -1061,9 +1070,7 @@ import pytensor.tensor.random.basic as rb
 
 generator = pytensor.shared(np.random.default_rng(0))
 draws = rb.gumbel(1.0, 2.0, size=(100_000,), rng=generator)
-with pytest.raises(
-    NotImplementedError, match="no implementation of the random variable gumbel"
-):
+with pytest.raises(NotImplementedError, match="No LLVM backend implementation for gumbel"):
     pytensor.function([], draws, mode=STRICT)
 ```
 

@@ -8,7 +8,12 @@ import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import split_layouts
 from pytensor.link.llvm.codegen.array import Array, size
 from pytensor.link.llvm.codegen.context import Codegen
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    llvm_emit,
+    llvm_layout,
+    llvm_supports,
+    supported_types,
+)
 from pytensor.link.llvm.codegen.num import Num, constant
 from pytensor.link.llvm.codegen.types import ir
 from pytensor.tensor.basic import ExtractDiag, Nonzero, Split
@@ -16,12 +21,15 @@ from pytensor.tensor.extra_ops import CumOp
 from pytensor.tensor.math import Argmax
 
 
+@llvm_supports.register(CumOp)
+def _(op, node) -> bool:
+    return supported_types(node) and node.inputs[0].type.ndim > 0
+
+
 @llvm_emit.register(CumOp)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
     x = inputs[0]
-    if x.ndim == 0:
-        raise NotImplementedError("CumOp on a 0-d input")
     out = outputs[0].allocate(x.shape)
     combine = operator.add if op.mode == "add" else operator.mul
     init = constant(b, out.scalar_type, 0 if op.mode == "add" else 1)

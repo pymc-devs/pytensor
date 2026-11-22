@@ -40,7 +40,13 @@ from pytensor.link.llvm.analysis.layout import Layout, remove_axis
 from pytensor.link.llvm.codegen.array import Array, advance
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import Captured, OutputDestination
-from pytensor.link.llvm.codegen.interface import TensorOutput, llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    TensorOutput,
+    llvm_emit,
+    llvm_layout,
+    llvm_supports,
+    supported_types,
+)
 from pytensor.link.llvm.codegen.num import cast, constant, load, store
 from pytensor.link.llvm.codegen.types import element_type, ir, is_absent
 
@@ -55,6 +61,18 @@ def register():
             None if is_absent(output.type) else Layout.c(output.type.ndim)
             for output in node.outputs
         ]
+
+    @llvm_supports.register(Scan)
+    def _(op, node) -> bool:
+        # sequences and the buffers of traced states have rows
+        inputs = node.inputs
+        with_rows = [
+            *op.outer_seqs(inputs),
+            *op.outer_mitmot(inputs),
+            *op.outer_mitsot(inputs),
+            *op.outer_sitsot(inputs),
+        ]
+        return supported_types(node) and all(var.type.ndim >= 1 for var in with_rows)
 
     @llvm_emit.register(Scan)
     def _(op, node, cg, inputs, outputs):
@@ -230,8 +248,6 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
     for k, (init, out, reads, writes) in enumerate(
         zip(initial, outs, read_taps, write_taps, strict=True)
     ):
-        if init.ndim < 1:
-            raise NotImplementedError("Scan: state buffers need at least one dimension")
         reads = [int(t) for t in reads]
         lookback = -min(min(reads, default=0), 0)
         is_mit_mot = k < info.n_mit_mot
@@ -474,8 +490,6 @@ def emit_scan(op, node, cg, inputs, outputs):
     n_steps = b.smax(_as_i64(b, inputs[0], element_type(node.inputs[0].type)), 0)
     sequences = op.outer_seqs(inputs)
     for k, seq in enumerate(sequences):
-        if seq.ndim < 1:
-            raise NotImplementedError("a 0-d sequence")
         cg.check(
             b.sge(seq.shape[0], n_steps), f"Scan: sequence {k} is shorter than n_steps"
         )

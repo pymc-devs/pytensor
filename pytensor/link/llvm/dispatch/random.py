@@ -18,7 +18,11 @@ import numpy as np
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, c_strides, size
-from pytensor.link.llvm.codegen.interface import llvm_emit
+from pytensor.link.llvm.codegen.interface import (
+    llvm_emit,
+    llvm_supports,
+    supported_types,
+)
 from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.codegen.types import ir, is_absent
 
@@ -27,14 +31,13 @@ def _register():
     import pytensor.tensor.random.basic as rb
     from pytensor.tensor.random.op import RandomVariable
 
+    @llvm_supports.register(RandomVariable)
+    def _(op, node) -> bool:
+        return supported_types(node) and type(op) in SAMPLERS and op.ndim_supp == 0
+
     @llvm_emit.register(RandomVariable)
     def _(op, node, cg, inputs, outputs):
-        spec = SAMPLERS.get(type(op))
-        if spec is None or op.ndim_supp != 0:
-            raise NotImplementedError(
-                f"LLVM backend: no implementation of the random variable {op}"
-            )
-        emit_random(op, node, cg, inputs, outputs, spec)
+        emit_random(op, node, cg, inputs, outputs, SAMPLERS[type(op)])
 
     # per distribution: the base draws ("normal", "uniform": filled in one call; None:
     # the per-element function draws), the per-element function (b, cg, base value,

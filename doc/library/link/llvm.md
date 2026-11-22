@@ -91,7 +91,7 @@ constants in the code.
   (section 1a) doesn't fix; the others are computed in the called function.
 * In memory, bool is a byte (`i8`); by value it is `i1`.
 * Other types (slices, random generators, ...) have no representation yet; nodes using
-  them can't be generated.
+  them can't be generated (`supported_types`, the default of `llvm_supports`).
 
 ## 1a. Layouts
 
@@ -643,8 +643,13 @@ differs:
   which are nodes of their own; nodes touching ScalarType values are grouped into units;
   FusedElemwise stays one node when its pattern is supported. A node prefers a Rust
   kernel (nothing to compile); generated code for it (a node, a unit) is a module of
-  its own, which the program calls (`OwnModule`). If a unit can't be
-  generated, its nodes are planned on their own. This is also where in-place work is granted.
+  its own, which the program calls (`OwnModule`). This is also where in-place work is
+  granted.
+* **Generated or not** is decided from the op: it has an emitter, and that emitter
+  supports the node (`llvm_supports`: a check registered by emitters that handle only
+  some nodes, e.g. dtypes, index patterns). Nothing is generated to find out, and an
+  emitter never refuses while generating; a node inside a unit that no emitter supports
+  calls its kernel there.
 * **Inner graphs** (of a unit, a Scan, a Blockwise) are planned when their emitter asks
   (below): every OpFromGraph is inlined, and generated code (inlined) is preferred to
   a kernel.

@@ -16,11 +16,16 @@ import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, Stride
 from pytensor.link.llvm.codegen.array import Array, advance, size
 from pytensor.link.llvm.codegen.context import index_bounds, loop_order
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    llvm_emit,
+    llvm_layout,
+    llvm_supports,
+    supported_types,
+)
 from pytensor.link.llvm.codegen.num import cast, constant, load, store
 from pytensor.link.llvm.codegen.types import element_type, memory_type
 from pytensor.link.llvm.dispatch.elemwise import identity_value
-from pytensor.link.llvm.dispatch.scalar import emit_scalar
+from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
 from pytensor.scalar.basic import ScalarType, add
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor
@@ -133,9 +138,32 @@ def fused_spec(op, node):
     return E, n_elem, reads, outs
 
 
+def fused_supported(op, node) -> bool:
+    """Can `emit_fused` generate the FusedElemwise `node` as one loop? Its pattern
+    (`fused_spec`), and the scalar ops of its loop and of its reductions."""
+    if not supported_types(node):
+        return False
+    try:
+        E, _, _, outs = fused_spec(op, node)
+        out_types = [element_type(v.type) for v in E.outputs]
+        for v in E.inputs:
+            element_type(v.type)
+    except NotImplementedError:
+        return False
+    if not scalar_supported(E.op.scalar_op, out_types):
+        return False
+    return all(
+        spec.identity is not None and scalar_supported(spec.scalar_op, [spec.acc])
+        for spec in outs
+        if isinstance(spec, Reduce)
+    )
+
+
 def _register():
     from pytensor.compile.builders import OpFromGraph
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    llvm_supports.register(FusedElemwise)(fused_supported)
 
     @llvm_emit.register(FusedElemwise)
     def _(op, node, cg, inputs, outputs):
@@ -144,9 +172,7 @@ def _register():
     @llvm_layout.register(FusedElemwise)
     def _(op, node, input_layouts):
         # generated as one loop (`planner.fusable`), else an OpFromGraph
-        try:
-            fused_spec(op, node)
-        except NotImplementedError:
+        if not fused_supported(op, node):
             return llvm_layout.dispatch(OpFromGraph)(op, node, input_layouts)
         return [None] * len(node.outputs)
 
@@ -578,4 +604,4 @@ def _finish(cg, outs, out_arrays):
 
 _register()
 
-__all__ = ["emit_fused", "fused_spec"]
+__all__ = ["emit_fused", "fused_spec", "fused_supported"]

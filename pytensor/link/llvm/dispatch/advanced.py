@@ -4,7 +4,7 @@ Handled: integer index arrays (broadcast together) on adjacent axes, every other
 taken in full (`x[:, idx]`, `x[i, j]`, `x[idx_a, idx_b, :]`). The indexed axes are
 replaced by the broadcast shape of the indices, in place (as numpy does for adjacent
 advanced indices). Other patterns (boolean masks, slices with bounds, separated index
-arrays) raise NotImplementedError.
+arrays) aren't (`llvm_supports`).
 """
 
 from __future__ import annotations
@@ -14,7 +14,11 @@ from dataclasses import dataclass
 import pytensor.scalar.basic as ps
 from pytensor.link.llvm.codegen.array import Array, advance
 from pytensor.link.llvm.codegen.context import index_bounds
-from pytensor.link.llvm.codegen.interface import llvm_emit
+from pytensor.link.llvm.codegen.interface import (
+    llvm_emit,
+    llvm_supports,
+    supported_types,
+)
 from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.subtensor import (
@@ -33,30 +37,57 @@ class Pattern:
     bounds: list  # index_bounds of each index array
 
 
-def pattern(cg, x: Array, node, index_values, index_vars, op) -> Pattern:
-    b = cg.b
-    entries = unflatten_index_variables(
-        list(zip(index_values, index_vars, strict=True)), op.idx_list
-    )
+def index_arrays(op, index_vars) -> tuple[int, list[int]] | None:
+    """Where the index arrays of an advanced indexing node are: (the axis of x the
+    first one indexes, their positions in `index_vars`), or None for a pattern that
+    isn't handled (bounded slices, non-integer or separated index arrays, none)."""
+    entries = unflatten_index_variables(list(enumerate(index_vars)), op.idx_list)
     first = None
-    indices = []
+    found: list[int] = []
     for a, e in enumerate(entries):
         if isinstance(e, slice):
             if e != slice(None):
-                raise NotImplementedError("advanced indexing with bounded slices")
-            if first is not None and len(indices) and a == first + len(indices):
-                pass  # a slice after the indices
+                return None
             continue
-        arr, var = e
+        k, var = e
         if var.type.dtype == "bool" or not var.type.dtype.startswith(("int", "uint")):
-            raise NotImplementedError("advanced indexing with non-integer index arrays")
+            return None
         if first is None:
             first = a
-        elif a != first + len(indices):
-            raise NotImplementedError("advanced indexing with separated index arrays")
-        indices.append((arr, var))
-    if first is None:
-        raise NotImplementedError("advanced indexing without index arrays")
+        elif a != first + len(found):
+            return None
+        found.append(k)
+    return None if first is None else (first, found)
+
+
+def _view_ndim(x_var, index_vars, found) -> int:
+    """The number of axes of x[indices]."""
+    index_ndim = max(int(index_vars[k].type.ndim) for k in found)
+    return int(x_var.type.ndim) - len(found) + index_ndim
+
+
+@llvm_supports.register(AdvancedSubtensor)
+def _(op, node) -> bool:
+    return supported_types(node) and index_arrays(op, node.inputs[1:]) is not None
+
+
+@llvm_supports.register(AdvancedIncSubtensor)
+def _(op, node) -> bool:
+    found = index_arrays(op, node.inputs[2:])
+    if not supported_types(node) or found is None:
+        return False
+    # y broadcasts against the indexed view: it can't have more axes
+    view_ndim = _view_ndim(node.inputs[0], node.inputs[2:], found[1])
+    return int(node.inputs[1].type.ndim) <= view_ndim
+
+
+def pattern(cg, x: Array, node, index_values, index_vars, op) -> Pattern:
+    b = cg.b
+    found = index_arrays(op, index_vars)
+    if found is None:
+        raise ValueError(f"{op}: an indexing pattern `llvm_supports` refuses")
+    first = found[0]
+    indices = [(index_values[k], index_vars[k]) for k in found[1]]
     # broadcast the index shapes (right-aligned, as numpy)
     nb = max(v.type.ndim for _, v in indices)
     bshape = [None] * nb
@@ -156,10 +187,6 @@ def _(op, node, cg, inputs, outputs):
     vs = pat.view_shape
     yt = node.inputs[1].type
     off = len(vs) - yt.ndim
-    if off < 0:
-        raise NotImplementedError(
-            "advanced inc/set: the value has more axes than the indexed view"
-        )
     zero = b.i64(0)
     yst = [zero] * off
     for a in range(yt.ndim):

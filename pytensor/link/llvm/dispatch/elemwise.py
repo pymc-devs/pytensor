@@ -9,10 +9,15 @@ from pytensor.link.llvm.analysis.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.analysis.work import scalar_cost
 from pytensor.link.llvm.codegen.array import Array, advance, size
 from pytensor.link.llvm.codegen.context import loop_order
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    llvm_emit,
+    llvm_layout,
+    llvm_supports,
+    supported_types,
+)
 from pytensor.link.llvm.codegen.num import cast, constant, load, store
 from pytensor.link.llvm.codegen.types import element_type, memory_type
-from pytensor.link.llvm.dispatch.scalar import emit_scalar
+from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
 from pytensor.tensor.elemwise import CAReduce, Elemwise
 
 
@@ -98,6 +103,15 @@ def _(op, node, cg, inputs, outputs):
     cg.for_each(shape, operands, body, parallel_cost=scalar_cost(op.scalar_op))
 
 
+@llvm_supports.register(Elemwise)
+@llvm_supports.register(ps.ScalarOp)
+def _(op, node) -> bool:
+    scalar_op = op.scalar_op if isinstance(op, Elemwise) else op
+    return supported_types(node) and scalar_supported(
+        scalar_op, [element_type(var.type) for var in node.outputs]
+    )
+
+
 @llvm_emit.register(ps.ScalarOp)
 def _(op, node, cg, inputs, outputs):
     """A scalar op applied to ScalarType values."""
@@ -131,6 +145,18 @@ def identity_value(scalar_op, ident, acc_type):
         info = np.iinfo(dt)
         ident = info.min if ident < 0 else info.max
     return ident
+
+
+@llvm_supports.register(CAReduce)
+def _(op, node) -> bool:
+    if not supported_types(node) or op.scalar_op.identity is None:
+        return False
+    out_type = element_type(node.outputs[0].type)
+    try:
+        acc = element_type(getattr(op, "acc_dtype", None) or out_type)
+    except NotImplementedError:
+        return False
+    return scalar_supported(op.scalar_op, [acc])
 
 
 @llvm_emit.register(CAReduce)

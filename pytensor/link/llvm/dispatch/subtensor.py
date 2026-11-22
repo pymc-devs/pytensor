@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import subtensor_layout
 from pytensor.link.llvm.codegen.array import Array
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import (
+    llvm_emit,
+    llvm_layout,
+    llvm_supports,
+    supported_types,
+)
 from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.codegen.types import element_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
@@ -89,6 +94,15 @@ def _(op, node, cg, inputs, outputs):
     outputs[0].set_view(index(cg, inputs[0], _entries(op, node, inputs, 1)))
 
 
+@llvm_supports.register(IncSubtensor)
+def _(op, node) -> bool:
+    # y broadcasts against the indexed view: it can't have more axes (an integer
+    # index takes an axis away)
+    scalars = sum(1 for entry in op.idx_list if not isinstance(entry, slice))
+    view_ndim = node.inputs[0].type.ndim - scalars
+    return supported_types(node) and node.inputs[1].type.ndim <= view_ndim
+
+
 @llvm_emit.register(IncSubtensor)
 def _(op, node, cg, inputs, outputs):
     b = cg.b
@@ -103,8 +117,6 @@ def _(op, node, cg, inputs, outputs):
     # y broadcasts against the view, aligned on the right, by its static type
     ytype = node.inputs[1].type
     off = view.ndim - ytype.ndim
-    if off < 0:
-        raise NotImplementedError("IncSubtensor: y has more axes than the indexed view")
     ystrides = [b.i64(0)] * off
     for a, s in enumerate(ytype.shape):
         va = off + a

@@ -93,6 +93,40 @@ def has_emitter(op: Op) -> bool:
     return llvm_emit.dispatch(type(op)) is not llvm_emit.dispatch(object)
 
 
+@singledispatch
+def llvm_supports(op: Op, node: Apply) -> bool:
+    """Can `llvm_emit` generate `node`? Asked before the node's code is generated
+    (when the planner chooses how it runs), so an emitter never refuses: one that
+    handles only some nodes of its op registers a check here. A check depends on the
+    node alone, not on layouts.
+
+    Default: every input and output has a representation (`supported_types`)."""
+    return supported_types(node)
+
+
+def supported_types(node: Apply) -> bool:
+    """Do the node's inputs and outputs all have a representation, with element types
+    the backend supports?"""
+    from pytensor.link.llvm.codegen.types import element_type, is_absent, repr_of
+
+    for var in (*node.inputs, *node.outputs):
+        t = var.type
+        if is_absent(t):
+            continue
+        try:
+            repr_of(t)
+            if hasattr(t, "dtype"):
+                element_type(t.dtype)
+        except NotImplementedError:
+            return False
+    return True
+
+
+def can_generate(node: Apply) -> bool:
+    """Has `node` an emitter that supports it?"""
+    return has_emitter(node.op) and llvm_supports(node.op, node)
+
+
 # ------------------------------------------------------------------ handles
 
 
@@ -241,7 +275,10 @@ __all__ = [
     "EmitterOutput",
     "ScalarOutput",
     "TensorOutput",
+    "can_generate",
     "has_emitter",
     "llvm_emit",
     "llvm_layout",
+    "llvm_supports",
+    "supported_types",
 ]

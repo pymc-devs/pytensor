@@ -31,6 +31,33 @@ def llvm_scalar(op, b, args: list, out_types: list) -> list:
     raise NotImplementedError(f"LLVM backend: scalar op {op} is not supported")
 
 
+@singledispatch
+def scalar_supported(op, out_types: list) -> bool:
+    """Can `llvm_scalar` emit `op` with outputs of `out_types` (ScalarTypes)? Default:
+    it has an emitter. `register(..., supports=)` adds a rule on the output type."""
+    return llvm_scalar.dispatch(type(op)) is not llvm_scalar.dispatch(object)
+
+
+def graph_supported(fgraph) -> bool:
+    """Can every scalar op of the scalar graph `fgraph` be emitted (a Composite's, a
+    ScalarLoop's)?"""
+    for node in fgraph.toposort():
+        try:
+            out_types = [element_type(var.type) for var in node.outputs]
+            for var in node.inputs:
+                element_type(var.type)
+        except NotImplementedError:
+            return False
+        if not scalar_supported(node.op, out_types):
+            return False
+    return True
+
+
+def floats_only(scalar_type) -> bool:
+    """A rule for `register`: the op is emitted for float outputs only."""
+    return scalar_type in ps.float_types
+
+
 def emit_scalar(op, b, args, out_types):
     """Emit scalar op `op` on `args` ((value, ScalarType) pairs) for outputs of
     `out_types`; return the output values."""
@@ -55,11 +82,18 @@ def _single(fn):
     return wrapper
 
 
-def register(*classes):
+def register(*classes, supports=None):
+    """Register `fn(b, args, out_type)` as the emitter of the scalar ops `classes`.
+    `supports(out_type) -> bool`: the output types it handles (default: all)."""
+
     def deco(fn):
         w = _single(fn)
         for c in classes:
             llvm_scalar.register(c)(w)
+            if supports is not None:
+                scalar_supported.register(c)(
+                    lambda op, out_types: supports(out_types[0])
+                )
         return fn
 
     return deco
@@ -73,13 +107,6 @@ def conv(b, args, k, scalar_type):
 def nums(b, args, scalar_type) -> list[Num]:
     """The arguments converted to `scalar_type`."""
     return [Num(b, v, d).astype(scalar_type) for v, d in args]
-
-
-def require_float(scalar_type, what):
-    if scalar_type not in ps.float_types:
-        raise NotImplementedError(
-            f"LLVM backend: {what} with output dtype {scalar_type}"
-        )
 
 
 def _upcast(*types):
@@ -107,9 +134,8 @@ def _(b, args, out):
     return x - y
 
 
-@register(ps.TrueDiv)
+@register(ps.TrueDiv, supports=floats_only)
 def _(b, args, out):
-    require_float(out, "true_div")
     x, y = nums(b, args, out)
     return x / y
 
@@ -128,12 +154,10 @@ def _(b, args, out):
     return x % y
 
 
-@register(ps.Pow)
+@register(ps.Pow, supports=lambda out: out != ps.bool)
 def _(b, args, out):
     if out in ps.float_types:
         return b.libm(ir.Libm.Pow, [conv(b, args, 0, out), conv(b, args, 1, out)])
-    if out == ps.bool:
-        raise NotImplementedError("LLVM backend: pow with output dtype bool")
     return int_pow(b, conv(b, args, 0, out), conv(b, args, 1, out), out)
 
 
@@ -213,9 +237,8 @@ def _(b, args, out):
     return x * x
 
 
-@register(ps.Reciprocal)
+@register(ps.Reciprocal, supports=floats_only)
 def _(b, args, out):
-    require_float(out, "reciprocal")
     (x,) = nums(b, args, out)
     return 1.0 / x
 
@@ -225,7 +248,6 @@ def _(b, args, out):
 
 def _intrinsic_op(name):
     def fn(b, args, out):
-        require_float(out, name)
         return ir_intrinsic(b, name, conv(b, args, 0, out))
 
     return fn
@@ -239,12 +261,11 @@ for _cls, _name in [
     (ps.RoundHalfToEven, "RoundEven"),
     (ps.RoundHalfAwayFromZero, "Round"),
 ]:
-    register(_cls)(_intrinsic_op(_name))
+    register(_cls, supports=floats_only)(_intrinsic_op(_name))
 
 
 def _libm_op(name, arity=1):
     def fn(b, args, out):
-        require_float(out, name)
         return b.libm(
             getattr(ir.Libm, name), [conv(b, args, k, out) for k in range(arity)]
         )
@@ -277,54 +298,48 @@ for _cls, _name in [
     (psm.Erf, "Erf"),
     (psm.Erfc, "Erfc"),
 ]:
-    register(_cls)(_libm_op(_name))
-register(ps.ArcTan2)(_libm_op("Atan2", 2))
+    register(_cls, supports=floats_only)(_libm_op(_name))
+register(ps.ArcTan2, supports=floats_only)(_libm_op("Atan2", 2))
 
 
 def _rust_op(name):
     def fn(b, args, out):
-        require_float(out, name)
         return b.rust_math(getattr(ir.RustMath, name), conv(b, args, 0, out))
 
     return fn
 
 
-register(psm.Gamma)(_rust_op("Gamma"))
-register(psm.Erfcx)(_rust_op("Erfcx"))
+register(psm.Gamma, supports=floats_only)(_rust_op("Gamma"))
+register(psm.Erfcx, supports=floats_only)(_rust_op("Erfcx"))
 
 
-@register(psm.GammaLn)
+@register(psm.GammaLn, supports=floats_only)
 def _(b, args, out):
-    require_float(out, "gammaln")
     return gamma.gammaln(b, conv(b, args, 0, out), out)
 
 
-@register(psm.Psi)
+@register(psm.Psi, supports=floats_only)
 def _(b, args, out):
-    require_float(out, "psi")
     return gamma.psi(b, conv(b, args, 0, out), out)
 
 
-@register(psm.Sigmoid)
+@register(psm.Sigmoid, supports=floats_only)
 def _(b, args, out):
-    require_float(out, "sigmoid")
     one = constant(b, out, 1.0)
     e = b.libm(ir.Libm.Exp, [b.fneg(conv(b, args, 0, out))])
     return b.fdiv(one, b.fadd(one, e))
 
 
-@register(psm.Softplus)
+@register(psm.Softplus, supports=floats_only)
 def _(b, args, out):
     """max(x, 0) + log1p(exp(-|x|)), branch-free like the C and Numba backends."""
-    require_float(out, "softplus")
     (x,) = nums(b, args, out)
     e = b.libm(ir.Libm.Exp, [(-abs(x)).value])
     return x.maximum(0.0) + Num(b, b.libm(ir.Libm.Log1p, [e]), out)
 
 
-@register(psm.Log1mexp)
+@register(psm.Log1mexp, supports=floats_only)
 def _(b, args, out):
-    require_float(out, "log1mexp")
     x = conv(b, args, 0, out)
     # a branch, not a select: where the loop isn't vectorized, only one pair of libm
     # calls runs (the vectorizer if-converts it)
@@ -380,17 +395,19 @@ def _(b, args, out):
 
 def _bitwise(op):
     def fn(b, args, out):
-        if out in ps.float_types:
-            raise NotImplementedError(f"LLVM backend: bitwise op on {out}")
         return op(*nums(b, args, out))
 
     return fn
 
 
-register(ps.AND)(_bitwise(operator.and_))
-register(ps.OR)(_bitwise(operator.or_))
-register(ps.XOR)(_bitwise(operator.xor))
-register(ps.Invert)(_bitwise(operator.invert))
+def _not_float(out) -> bool:
+    return out not in ps.float_types
+
+
+register(ps.AND, supports=_not_float)(_bitwise(operator.and_))
+register(ps.OR, supports=_not_float)(_bitwise(operator.or_))
+register(ps.XOR, supports=_not_float)(_bitwise(operator.xor))
+register(ps.Invert, supports=_not_float)(_bitwise(operator.invert))
 
 
 @register(ps.Identity, ps.Cast)
@@ -433,6 +450,12 @@ def emit_inner(b, fg, args):
         for var, v in zip(node.outputs, outs, strict=True):
             values[var] = (v, element_type(var.type))
     return [get(var) for var in fg.outputs]
+
+
+@scalar_supported.register(ps.Composite)
+@scalar_supported.register(ScalarLoop)
+def _(op, out_types) -> bool:
+    return graph_supported(op.fgraph)
 
 
 @llvm_scalar.register(ps.Composite)
