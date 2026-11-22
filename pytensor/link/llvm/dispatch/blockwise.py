@@ -15,19 +15,21 @@ Otherwise the iterations are independent and may run in parallel.
 
 from __future__ import annotations
 
-import dataclasses
 import weakref
 from dataclasses import dataclass
 
 from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.link.llvm.analysis.layout import itemsize_of, remove_axis, shape_of
+from pytensor.link.llvm.analysis.layout import (
+    Layout,
+    itemsize_of,
+    remove_axis,
+    shape_of,
+)
 from pytensor.link.llvm.analysis.work import llvm_work
 from pytensor.link.llvm.codegen.array import Array, size
 from pytensor.link.llvm.codegen.context import Codegen
-from pytensor.link.llvm.codegen.destination import OutputDestination, SlotDestination
-from pytensor.link.llvm.codegen.interface import llvm_emit
-from pytensor.link.llvm.codegen.signature import known_layouts
-from pytensor.link.llvm.codegen.types import TensorRepr, repr_of
+from pytensor.link.llvm.codegen.destination import OutputDestination
+from pytensor.link.llvm.codegen.interface import TensorOutput, llvm_emit
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import constant
 from pytensor.tensor.blockwise import Blockwise
@@ -74,12 +76,9 @@ def blockwise_core_layouts(node, in_layouts) -> list:
     layouts without the batch axes."""
     batch_ndim = node.op.batch_ndim(node)
     layouts = []
-    for var, layout in zip(node.inputs, known_layouts(node, in_layouts), strict=True):
-        representation = repr_of(var.type, layout)
-        if not isinstance(representation, TensorRepr):
-            raise NotImplementedError(f"Blockwise with a {var.type} input")
-        layout = representation.layout
+    for var, given in zip(node.inputs, in_layouts, strict=True):
         shape, isz = list(shape_of(var)), itemsize_of(var)
+        layout = Layout.unknown(shape) if given is None else given.for_shape(shape)
         for _ in range(batch_ndim):
             layout = remove_axis(layout, 0, shape, isz)
             shape = shape[1:]
@@ -187,12 +186,10 @@ class _BatchRow(OutputDestination):
 
     cg: Codegen
     k: int
-    out: OutputDestination
+    out: TensorOutput
     whole: Array | None
     batch: list
     index: list
-    #: the iteration
-    i: object
     row: Array | None = None
 
     @property
@@ -203,11 +200,7 @@ class _BatchRow(OutputDestination):
         b = self.cg.b
         whole = self.whole
         if whole is None:
-            # (only an output slot has no shape before the core ran)
-            assert isinstance(self.out, SlotDestination)
-            with b.if_(b.eq(self.i, 0)):
-                self.out.allocate([*self.batch, *shape])
-            whole = self.out.read()
+            whole = self.out.allocate_once([*self.batch, *shape])
         self.row = _at(b, whole, self.index)
         for m, length in zip(shape, self.row.shape, strict=True):
             self.cg.check(
@@ -247,36 +240,28 @@ def _(op, node, cg, inputs, outputs):
             f"Blockwise: the core shape of output {later[0]} isn't known for an empty batch",
         )
 
-    policy = None
+    # (parallel only if every output is allocated before the loop)
+    per_element = per_iteration = None
     if not later:
         per_element, per_iteration = _iteration_work(cg, core, inputs, batch_ndim)
-        policy = cg.parallel_policy(per_element)
-        if policy is not None and not policy.worth_it(b.mul(n, per_iteration)):
-            policy = None
-    # (no nested parallel regions: inside a parallel loop the core runs serially)
-    inner = dataclasses.replace(cg, parallel=False) if policy is not None else cg
     broadcast = [var.type.broadcastable[:batch_ndim] for var in node.inputs]
 
     def step(i):
         index = _unravel(b, i, batch)
         # the core's scratch memory and buffers are given up after every iteration
         # (outputs allocated in iteration 0 are the caller's)
-        with inner.scratch_scope():
+        with cg.scratch_scope():
             args = [
                 _at(b, x, [0 if bc else j for bc, j in zip(bcast, index, strict=True)])
                 for x, bcast in zip(inputs, broadcast, strict=True)
             ]
             rows = [
-                _BatchRow(inner, k, out.destination, known.get(k), batch, index, i)
+                _BatchRow(cg, k, out, known.get(k), batch, index)
                 for k, out in enumerate(outputs)
             ]
-            core.emit_call(inner, args, rows)
+            core.emit_call(cg, args, rows)
 
-    if policy is not None:
-        policy.range(b, n, per_iteration, step)
-    else:
-        with b.loop(n) as i:
-            step(i)
+    cg.for_range(n, step, parallel_cost=per_element, per_iteration=per_iteration)
 
 
 __all__ = ["blockwise_core", "blockwise_core_layouts"]

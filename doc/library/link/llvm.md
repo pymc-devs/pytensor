@@ -313,9 +313,16 @@ input, read-only unless the planner lets the node overwrite it (`writable`), and
 output a `TensorOutput`: `allocate(shape)`, `set_view(array)` (for an output the
 `view_map` lists), and for one the `destroy_map` lists `may_overwrite(x)` (decided by
 the planner, known while generating) and `overwrite(x)`. A ScalarType output gets a
-`ScalarOutput` (`set(value)`). Ops that run an inner graph (Scan, Blockwise, compiled units) hand each
-handle's `destination` on to it (`codegen/destination.py`: caller memory, an output
-slot, a scalar pointer, or their own, like a row of a Scan's buffer).
+`ScalarOutput` (`set(value)`). Ops that run an inner graph (Scan, Blockwise, compiled
+units) hand their handles on to it, and build outputs up over a loop with a few more
+`TensorOutput` methods: `allocate_once(shape)` (the first iteration that gets there
+allocates, the others get the same memory), `current()` (the memory as it is at that
+point), `reallocate(shape)` (new memory if the shape changed; the old memory stays
+readable until the scope ends) and `truncate(length)` (shorten the first axis). A
+result that goes somewhere of the op's own (a row of a Scan's buffer) gets a subclass
+of `OutputDestination` (`codegen/destination.py`), and one the op keeps for itself (a
+while-loop's condition) a `Captured`. Index loops are `cg.for_range(n, body,
+parallel_cost=...)`, which also keeps the code inside serial when the loop is parallel.
 
 Mistakes that are cheap to see are errors when the code is generated (storing into an
 input that isn't writable, a view whose layout contradicts the declared one, a view of
@@ -665,7 +672,7 @@ inlined, as generated code runs them); values inside inlined OpFromGraphs get th
 from `node_outputs`, as in the planner.
 
 `GraphFunction.emit_call(cg, inputs, outputs)` emits code running it: values for the
-inputs, an `OutputDestination` per output. An output a node of
+inputs, and per output an output handle or an `OutputDestination`. An output a node of
 the graph writes into provided memory is `allocate`d before the graph runs (and
 written there if its layout allows it, else copied there afterwards); one a node
 allocates goes straight into the output's slot where the output takes it
@@ -684,9 +691,9 @@ buffers are rotated, while-loops truncated, unused rows zeroed. Each body output
 when the row can't be one the same iteration reads (a static buffer length decides),
 else aside and copied there when the iteration is done, so nothing the iteration
 reads is overwritten before; nit-sot buffers whose rows have no static shape are
-allocated by the first iteration; untraced states are read from their output slot in
-every iteration, and the next value replaces them when the iteration is done
-(reallocated when its shape changes). Buffers of
+allocated by the first iteration (`allocate_once`); untraced states are read in every
+iteration (`current`), and the next value replaces them when the iteration is done
+(`reallocate`: in new memory when its shape changes). Buffers of
 called kernels and the body's scratch are freed after every iteration.
 
 Blockwise is generated the same way (`dispatch/blockwise.py`): a loop over the batch

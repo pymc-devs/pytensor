@@ -6,7 +6,7 @@ Other OpFromGraphs never get to code generation: the planner inlines them.
 from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.link.llvm.analysis.layout import infer_layouts, new_memory_layout
 from pytensor.link.llvm.codegen.array import Array
-from pytensor.link.llvm.codegen.interface import destinations, llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 
 
 @llvm_layout.register(OpFromGraph)
@@ -30,4 +30,4 @@ def _(op, node, cg, inputs, outputs):
     inner graph. (Other OpFromGraphs never get here: they are inlined.)"""
     layouts = [a.layout if isinstance(a, Array) else None for a in inputs]
     graph = cg.graph_function(op.fgraph.inputs, op.fgraph.outputs, layouts, "unit")
-    graph.emit_call(cg, inputs, destinations(outputs))
+    graph.emit_call(cg, inputs, outputs)

@@ -214,7 +214,7 @@ def repr_of(t: Type, layout: Layout | None = None) -> Representation:
         if layout is None:
             layout = Layout.unknown(shape)
         else:
-            layout = Layout.make(shape, layout.order, layout.strides)
+            layout = layout.for_shape(shape)
         return TensorRepr(element_type(t), shape, layout)
     raise NotImplementedError(f"LLVM backend: no representation for {t}")
 

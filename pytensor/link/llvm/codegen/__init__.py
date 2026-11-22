@@ -3,7 +3,8 @@ implementations are in `dispatch/`).
 
 This package exports what an op's implementation is written against (see
 doc/extending/creating_an_llvm_op.md): register with `llvm_emit` (and `llvm_layout`),
-emit with `Codegen`, `Array` and `Num`, test with `compile_node`.
+emit with `Codegen`, `Array` and `Num`, test with `compile_node`. Ops that run an inner
+graph (`Codegen.graph_function`) also use `OutputDestination` and `Captured`.
 
 The modules:
 
@@ -41,6 +42,7 @@ from pytensor.link.llvm.codegen.context import (
     index_bounds,
     loop_order,
 )
+from pytensor.link.llvm.codegen.destination import Captured, OutputDestination
 from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
     EmitterOutput,
@@ -63,6 +65,7 @@ from pytensor.link.llvm.codegen.types import (
 
 __all__ = [
     "Array",
+    "Captured",
     "Codegen",
     "ElementBody",
     "EmitterInput",
@@ -70,6 +73,7 @@ __all__ = [
     "IndexBounds",
     "Num",
     "NumLike",
+    "OutputDestination",
     "ScalarOutput",
     "TensorOutput",
     "advance",

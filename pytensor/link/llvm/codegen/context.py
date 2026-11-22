@@ -12,7 +12,7 @@ import numpy as np
 
 from pytensor.graph.basic import Constant, Variable
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.array import Array, Slot, advance, size
+from pytensor.link.llvm.codegen.array import Array, advance, size
 from pytensor.link.llvm.codegen.types import ir, memory_type
 from pytensor.scalar.basic import ScalarType
 
@@ -37,10 +37,10 @@ type ElementBody = Callable[[list[ir.Value]], None]
 type IndexBounds = tuple[int | None, int | None]
 
 
-class _ScratchScope(list[tuple[ir.Value, ir.Value | Slot]]):
-    """The memory to give back when a `scratch_scope` ends: (ctx, pointer) pairs of
-    scratch memory to free, and (ctx, slot) pairs of `Slot`s whose owner (allocated by
-    a kernel) to release."""
+class _ScratchScope(list[tuple[ir.Value, ir.Value, bool]]):
+    """The memory to give back when a `scratch_scope` ends: (ctx, pointer, False) for
+    scratch memory to free, (ctx, pointer, True) for a buffer reference (allocated by a
+    kernel, or by `rt_alloc`) to release, stored at `pointer`."""
 
     def __init__(self, function: bool):
         super().__init__()
@@ -77,15 +77,6 @@ class Codegen:
     #: free at the end of each (`scratch_scope`)
     scratch_scopes: list[_ScratchScope] = field(default_factory=list)
     _checks: int = field(default=0)
-
-    def parallel_policy(self, per_element: float) -> ParallelPolicy | None:
-        """How loops over elements costing `per_element` each (`analysis/work.py`) may
-        run in parallel, or None."""
-        return (
-            ParallelPolicy(self, per_element)
-            if self.parallel and per_element > 0
-            else None
-        )
 
     def fail(self, message: str | None) -> None:
         """Report `message` (unless a called kernel already did) and return 1."""
@@ -211,14 +202,15 @@ class Codegen:
         scopes = [sc for sc in self.scratch_scopes if sc.function or not function]
         if not scopes:
             raise ValueError("scratch memory outside of a scratch_scope")
-        scopes[-1].append((self.ctx, p))
+        scopes[-1].append((self.ctx, p, False))
 
-    def release_later(self, slot: Slot) -> None:
-        """Release the owner a kernel put into `slot`, when the innermost
-        `scratch_scope` ends."""
+    def release_later(self, owner: ir.Value) -> None:
+        """Release the buffer reference stored at `owner` (a slot's owner field, ...)
+        when the innermost `scratch_scope` ends. What is stored there then counts: a
+        null reference is fine."""
         if not self.scratch_scopes:
             raise ValueError("a buffer to release outside of a scratch_scope")
-        self.scratch_scopes[-1].append((self.ctx, slot))
+        self.scratch_scopes[-1].append((self.ctx, owner, True))
 
     @contextmanager
     def scratch_scope(self, function: bool = False) -> Iterator[None]:
@@ -234,9 +226,9 @@ class Codegen:
             self.scratch_scopes.pop()
         if not self.b.terminated:
             b = self.b
-            for ctx, p in reversed(taken):
-                if isinstance(p, Slot):
-                    p.release(b, ctx)
+            for ctx, p, is_owner in reversed(taken):
+                if is_owner:
+                    b.rt_decref(ctx, b.load(ir.ptr, p))
                     continue
                 # (folds away for checked scratch, and where a view left null)
                 with b.if_(b.ne(p, b.null())):
@@ -274,12 +266,12 @@ class Codegen:
         when they can; only arrays whose layout leaves it open are checked at run time,
         and then both the flat loop and the nest are generated.
 
-        With `parallel_cost`, the cost of one element (`parallel_policy`), the loop (the
+        With `parallel_cost`, the cost of one element (analysis/work.py), the loop (the
         flat one, or the nest's outermost) runs in chunks that may run in parallel when
         there's enough work. Iterations must not depend on each other."""
         b = self.b
         order = loop_order(shape, arrays)
-        policy = self._policy(shape, parallel_cost)
+        policy = self._policy(lambda: size(self.b, shape), parallel_cost)
         contig = b.const_bool(True)
         for a in arrays:
             contig = b.and_(contig, a.is_contiguous(b, shape, order))
@@ -307,8 +299,36 @@ class Codegen:
         calling `body(ptrs)` with the element pointers of `arrays` in the innermost
         one. Unlike `for_each`, this never uses a flat loop. With `parallel_cost`, the
         outermost loop runs in chunks that may run in parallel."""
-        policy = self._policy(shape, parallel_cost)
+        policy = self._policy(lambda: size(self.b, shape), parallel_cost)
         self._loop_nest(shape, arrays, body, order, policy=policy)
+
+    def for_range(
+        self,
+        n: ir.Value,
+        body: Callable[[ir.Value], None],
+        parallel_cost: float | None = None,
+        per_iteration: ir.Value | None = None,
+    ) -> None:
+        """`body(i)` for every i in 0..n: a loop over an index (`for_each` loops over
+        elements).
+
+        With `parallel_cost`, the cost of one element (analysis/work.py), and
+        `per_iteration`, the elements an iteration works on (default 1), the iterations
+        run in chunks that may run in parallel when there's enough work. They must not
+        depend on each other. Code emitted in `body` doesn't start parallel loops of
+        its own then (no nested parallel regions)."""
+        b = self.b
+        per = b.i64(1) if per_iteration is None else per_iteration
+        policy = self._policy(lambda: b.mul(n, per), parallel_cost)
+        if policy is None:
+            with b.loop(n) as i:
+                body(i)
+            return
+        parallel, self.parallel = self.parallel, False
+        try:
+            policy.range(b, n, per, body)
+        finally:
+            self.parallel = parallel
 
     def checked_index(
         self,
@@ -332,21 +352,22 @@ class Codegen:
         return i
 
     def _policy(
-        self, shape: Sequence[ir.Value], parallel_cost: float | None
-    ) -> ParallelPolicy | None:
-        if parallel_cost is None:
+        self, n_elements: Callable[[], ir.Value], parallel_cost: float | None
+    ) -> _ParallelPolicy | None:
+        """How a loop over `n_elements()` elements costing `parallel_cost` each
+        (analysis/work.py units) runs in parallel; None: serially (not asked for, not
+        allowed, or too little work)."""
+        if parallel_cost is None or parallel_cost <= 0 or not self.parallel:
             return None
-        policy = self.parallel_policy(parallel_cost)
-        if policy is not None and not policy.worth_it(size(self.b, shape)):
-            return None
-        return policy
+        policy = _ParallelPolicy(self, parallel_cost)
+        return policy if policy.worth_it(n_elements()) else None
 
     def _flat_loop(
         self,
         shape: Sequence[ir.Value],
         arrays: Sequence[Array],
         body: ElementBody,
-        policy: ParallelPolicy | None = None,
+        policy: _ParallelPolicy | None = None,
     ) -> None:
         b = self.b
         n = size(b, shape)
@@ -368,7 +389,7 @@ class Codegen:
         order: Sequence[int],
         level: int = 0,
         base: list[ir.Value] | None = None,
-        policy: ParallelPolicy | None = None,
+        policy: _ParallelPolicy | None = None,
     ) -> None:
         b = self.b
         if base is None:
@@ -428,7 +449,7 @@ MIN_PARALLEL_COST = 2 * CHUNK_COST
 
 
 @dataclass
-class ParallelPolicy:
+class _ParallelPolicy:
     """A loop whose iterations may run in parallel: the context, the cost of one item."""
 
     cg: Codegen
@@ -488,7 +509,6 @@ __all__ = [
     "Codegen",
     "ElementBody",
     "IndexBounds",
-    "ParallelPolicy",
     "index_bounds",
     "loop_order",
 ]

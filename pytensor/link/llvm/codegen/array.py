@@ -167,7 +167,7 @@ class Array:
         static = [n.const_int for n in shape]
         if layout is None:
             layout = Layout.c(nd)
-        layout = Layout.make(static, layout.order, layout.strides)
+        layout = layout.for_shape(static)
         if not layout.fully_packed(static):
             raise ValueError(f"can't allocate an array of layout {layout}")
         return cls(
@@ -517,7 +517,7 @@ class Slot:
         if layout is None:
             layout = Layout.unknown(static_shape)
         else:
-            layout = Layout.make(static_shape, layout.order, layout.strides)
+            layout = layout.for_shape(static_shape)
         passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
         strides = layout.stride_values(
             b, np.dtype(scalar_type.dtype).itemsize, shape, passed

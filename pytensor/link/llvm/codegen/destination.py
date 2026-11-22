@@ -1,13 +1,15 @@
 """Where a computed value goes: output destinations.
 
-An `OutputDestination` is the place a result ends up in: memory the caller provides, an
-output slot the caller reads back, or a pointer to a scalar. Destinations are the
-low-level side of outputs. Op emitters don't use them directly: they get the handles
-of `interface.py`, which wrap a destination and only offer what the op declared.
+An `OutputDestination` is the place a result ends up in: memory the caller provides
+(`ProvidedDestination`), an output slot the caller reads back (`SlotDestination`), or a
+pointer to a scalar (`ScalarDestination`). Destinations are the low-level side of
+outputs. Op emitters don't use them directly: they get the handles of `interface.py`,
+which wrap a destination and only offer what the op declared.
 
-Code that runs a whole graph (`GraphFunction.emit_call`) works with destinations, and
-ops that produce their outputs by running an inner graph (Scan, Blockwise, compiled
-units) pass theirs on, or define their own (a row of a Scan's buffer).
+Code that runs a whole graph (`GraphFunction.emit_call`) works with destinations. An op
+that produces its outputs by running an inner graph (Scan, Blockwise, compiled units)
+hands its output handles on, or subclasses `OutputDestination` for results that go
+somewhere of its own (a row of a Scan's buffer), or keeps a result itself (`Captured`).
 """
 
 from __future__ import annotations
@@ -34,11 +36,15 @@ if TYPE_CHECKING:
 
 
 class OutputDestination:
-    """Where one result goes.
+    """Where one result goes: the protocol a producer (`GraphFunction.emit_call`) uses.
 
     A producer either asks for memory to write the result into (`allocate`), hands
     over an array that already holds the result (`assign`), or, for a ScalarType
     value, sets it (`set`). `finish` is called once the producer is done.
+
+    Subclass it for a result that goes somewhere of your own: implement `scalar_type`
+    and `allocate` (and `finish`, to act once the result is there). The rest of the
+    methods are what `TensorOutput` offers ops for the destinations it wraps.
     """
 
     cg: Codegen
@@ -72,6 +78,29 @@ class OutputDestination:
         `representation`. If the slot is returned, the result counts as produced: the
         producer must allocate it there."""
         return None
+
+    # ---- behind `TensorOutput`'s methods for ops that run an inner graph
+
+    def allocate_once(self, shape: list[ir.Value]) -> Array:
+        """`TensorOutput.allocate_once`."""
+        raise NotImplementedError(f"{type(self).__name__}: allocate_once")
+
+    def reallocate(self, shape: list[ir.Value]) -> Array:
+        """`TensorOutput.reallocate`."""
+        raise NotImplementedError(f"{type(self).__name__}: reallocate")
+
+    def truncate(self, length: ir.Value) -> None:
+        """`TensorOutput.truncate`."""
+        raise NotImplementedError(f"{type(self).__name__}: truncate")
+
+    def current(self) -> Array:
+        """`TensorOutput.current`."""
+        raise NotImplementedError(f"{type(self).__name__}: current")
+
+    @property
+    def allocated_layout(self) -> Layout:
+        """`TensorOutput.allocated_layout`."""
+        raise NotImplementedError(f"{type(self).__name__}: allocated_layout")
 
 
 @dataclass
@@ -113,6 +142,32 @@ class ProvidedDestination(OutputDestination):
                     "memory",
                 )
         return self.array
+
+    def allocate_once(self, shape: list[ir.Value]) -> Array:
+        return self.allocate(shape)
+
+    def reallocate(self, shape: list[ir.Value]) -> Array:
+        """The caller's memory can't be replaced: the shape must stay the same."""
+        b = self.cg.b
+        for axis, (wanted, provided) in enumerate(
+            zip(shape, self.array.shape, strict=True)
+        ):
+            self.cg.check(
+                b.eq(wanted, provided),
+                f"axis {axis} of the result changed its length, but the result is in "
+                "memory the caller provides",
+            )
+        return self.array
+
+    def truncate(self, length: ir.Value) -> None:
+        raise NotImplementedError("the memory a caller provides can't be shortened")
+
+    def current(self) -> Array:
+        return self.array
+
+    @property
+    def allocated_layout(self) -> Layout:
+        return self.array.layout
 
 
 @dataclass
@@ -248,25 +303,40 @@ class SlotDestination(OutputDestination):
         if not self.done:
             raise ValueError("an output was never set")
 
-    # ---- for code that works on the slot itself (Scan, Blockwise)
-
-    def data(self) -> ir.Value:
-        """Return the data pointer in the slot (null until set)."""
-        return self.slot.data(self.cg.b)
-
-    def owner(self) -> ir.Value:
-        """Return the buffer reference in the slot (null for a view)."""
-        return self.slot.owner(self.cg.b)
-
-    def read(self) -> Array:
-        """Return the array in the slot (after `allocate`), in `allocation_layout`."""
-        layout = self.allocation_layout or Layout.c(self.ndim)
-        return self.slot.read(self.cg.b, self.scalar_type, [None] * self.ndim, layout)
-
-    def set_length(self, axis: int, length: ir.Value) -> None:
-        """Shorten `axis` of the array in the slot to `length`, keeping its strides."""
+    def allocate_once(self, shape: list[ir.Value]) -> Array:
         b = self.cg.b
-        b.store(length, b.gep(ir.i64, self.slot.field(b, Slot.LENGTHS), axis))
+        with b.if_(b.eq(self.slot.data(b), b.null())):
+            self.allocate(shape)
+        return self.current()
+
+    def reallocate(self, shape: list[ir.Value]) -> Array:
+        cg, b = self.cg, self.cg.b
+        current = self.current()
+        differs = b.const_bool(False)
+        for wanted, length in zip(shape, current.shape, strict=True):
+            differs = b.or_(differs, b.ne(wanted, length))
+        if differs.const_int == 0:
+            return current
+        old_owner = b.alloca(ir.ptr)
+        b.store(b.null(), old_owner)
+        with b.if_(differs):
+            b.store(self.slot.owner(b), old_owner)
+            self.allocate(shape)
+        cg.release_later(old_owner)
+        return self.current()
+
+    def truncate(self, length: ir.Value) -> None:
+        b = self.cg.b
+        b.store(length, b.gep(ir.i64, self.slot.field(b, Slot.LENGTHS), 0))
+
+    def current(self) -> Array:
+        return self.slot.read(
+            self.cg.b, self.scalar_type, [None] * self.ndim, self.allocated_layout
+        )
+
+    @property
+    def allocated_layout(self) -> Layout:
+        return self.allocation_layout or Layout.c(self.ndim)
 
     @property
     def ndim(self) -> int:
@@ -310,8 +380,41 @@ class ScalarDestination(OutputDestination):
             raise ValueError("an output was never set")
 
 
-__all__ = [
-    "OutputDestination",
-    "ScalarDestination",
-    "SlotDestination",
-]
+@dataclass
+class Captured(OutputDestination):
+    """A result the code running a graph keeps for itself (a Scan's while-condition):
+    after `GraphFunction.emit_call`, `value` is the result, an `Array` for a tensor or
+    an IR value for a ScalarType."""
+
+    cg: Codegen
+    scalar_type: ScalarType
+    value: Array | ir.Value | None = None
+
+    def allocate(self, shape: list[ir.Value]) -> Array:
+        array = self.cg.temporary(self.scalar_type, shape)
+        self.value = array
+        return array
+
+    def assign(self, array: Array) -> Array:
+        self.value = array
+        return array
+
+    def set(self, value: ir.Value) -> None:
+        self.value = value
+
+    def finish(self) -> None:
+        if self.value is None:
+            raise ValueError("an output was never set")
+
+    def scalar(self) -> ir.Value:
+        """The result as a value: a ScalarType's, or the element of a 0-d tensor."""
+        if isinstance(self.value, Array):
+            if self.value.ndim != 0:
+                raise ValueError("the result isn't a scalar")
+            return load(self.cg.b, self.scalar_type, self.value.data)
+        if self.value is None:
+            raise ValueError("no result yet")
+        return self.value
+
+
+__all__ = ["Captured", "OutputDestination"]

@@ -274,6 +274,25 @@ def test_untraced_state_of_dynamic_shape():
     assert node.op.info.n_untraced_sit_sot == 1
 
 
+def test_untraced_state_that_changes_shape():
+    # the state grows by one element per step: every step reallocates it (the
+    # reference Scan can't run this, so the result is compared with numpy)
+    x0 = pt.vector("x0")
+    seq = pt.vector("seq")
+    xs = scan(
+        lambda s, x: pt.concatenate([x, x[-1:] + s]),
+        sequences=[seq],
+        outputs_info=[x0],
+    )
+    f = pytensor.function([x0, seq], xs[-1], mode=GEN)
+    for n in [0, 1, 5, 40]:
+        steps = np.arange(float(n))
+        want = np.arange(3.0)
+        for s in steps:
+            want = np.concatenate([want, want[-1:] + s])
+        np.testing.assert_array_equal(f(np.arange(3.0), steps), want)
+
+
 def test_nit_sot_buffer_shorter_than_n_steps():
     # only the last outputs are needed: the save-memory rewrites shrink the nit-sot
     # buffer, written circularly

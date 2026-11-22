@@ -25,7 +25,9 @@ or None for a value without data. Constants the planner folds into the code arri
 same way.
 
 Ops that produce their outputs by running an inner graph (Scan, Blockwise, compiled
-units) hand on each handle's `destination` (see `destination.py`).
+units) hand their handles on to `GraphFunction.emit_call`, and use a few more methods
+of `TensorOutput` for outputs they build up over a loop: `allocate_once`, `current`,
+`reallocate`, `truncate` (see destination.py for results that go somewhere else).
 """
 
 from __future__ import annotations
@@ -165,6 +167,41 @@ class TensorOutput:
             )
         return self.destination.assign(input)
 
+    # ---- for outputs built up over a loop (ops that run an inner graph)
+
+    def allocate_once(self, shape: list[ir.Value]) -> Array:
+        """Return the result's memory, allocated now with `shape` unless it already
+        was when this code runs (by an earlier iteration of a loop, or `allocate`).
+
+        For a shape only an iteration knows: the first one allocates, the others get
+        the same memory."""
+        return self.destination.allocate_once(shape)
+
+    def current(self) -> Array:
+        """Return the result's memory as it is when this code runs (after `allocate`,
+        `allocate_once` or `reallocate`), in `allocated_layout`."""
+        return self.destination.current()
+
+    @property
+    def allocated_layout(self) -> Layout:
+        """The layout of the memory `allocate` returns (and `current`)."""
+        return self.destination.allocated_layout
+
+    def reallocate(self, shape: list[ir.Value]) -> Array:
+        """Return memory of `shape` for the result: new memory if the result had
+        another shape when this code runs, else the memory it has. What it held is
+        lost; the old memory stays readable until the innermost `scratch_scope` ends.
+
+        For a result whose shape may change from one iteration to the next (a Scan's
+        untraced state). Fails at run time for memory the caller provides."""
+        return self.destination.reallocate(shape)
+
+    def truncate(self, length: ir.Value) -> None:
+        """Shorten the result's first axis to `length` (when this code runs; its
+        strides stay). For a result allocated longer than it turned out (a while-loop's
+        trace)."""
+        self.destination.truncate(length)
+
 
 def _contradicts(
     actual: Layout, declared: Layout, shape: Sequence[int | None], size: int
@@ -199,20 +236,11 @@ class ScalarOutput:
 type EmitterOutput = TensorOutput | ScalarOutput
 
 
-def destinations(
-    outputs: Sequence[EmitterOutput | None],
-) -> list[OutputDestination | None]:
-    """Return the destination of each handle in `outputs`, for an op that hands its
-    outputs on to an inner graph (`GraphFunction.emit_call`)."""
-    return [None if output is None else output.destination for output in outputs]
-
-
 __all__ = [
     "EmitterInput",
     "EmitterOutput",
     "ScalarOutput",
     "TensorOutput",
-    "destinations",
     "has_emitter",
     "llvm_emit",
     "llvm_layout",

@@ -120,6 +120,10 @@ class Layout:
             order.insert(pos, a)
         return Layout(tuple(order), tuple(strides))
 
+    def for_shape(self, shape) -> Layout:
+        """This layout, canonical for the static lengths `shape` (`make`)."""
+        return Layout.make(shape, self.order, self.strides)
+
     # ------------------------------------------------------------------ queries
 
     @property
@@ -344,7 +348,7 @@ def remove_axis(layout: Layout, axis, shape, itemsize) -> Layout:
 def same_layout(node, x: Layout) -> Layout:
     """A view that is its input (ViewOp, SpecifyShape, ...): the input's layout, for the
     output's (possibly more static) shape."""
-    return Layout.make(shape_of(node.outputs[0]), x.order, x.strides)
+    return x.for_shape(shape_of(node.outputs[0]))
 
 
 def dimshuffle_layout(op, node, x: Layout) -> Layout:
@@ -413,7 +417,7 @@ def split_layouts(op, node, x: Layout) -> list[Layout]:
     for var in node.outputs:
         os = shape_of(var)
         if os[a] is not None and os[a] == shape[a]:
-            outs.append(Layout.make(os, x.order, x.strides))
+            outs.append(x.for_shape(os))
         else:
             outs.append(
                 Layout.make(

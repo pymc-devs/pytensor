@@ -30,6 +30,11 @@ from pytensor.link.llvm.codegen.destination import (
     ProvidedDestination,
     SlotDestination,
 )
+from pytensor.link.llvm.codegen.interface import (
+    EmitterOutput,
+    ScalarOutput,
+    TensorOutput,
+)
 from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
 from pytensor.link.llvm.codegen.num import constant, store
 from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
@@ -95,7 +100,7 @@ class GraphFunction:
         self,
         cg: Codegen,
         inputs: Sequence[Array | ir.Value | None],
-        outputs: Sequence[OutputDestination | None],
+        outputs: Sequence[EmitterOutput | OutputDestination | None],
         profile: int | None = None,
     ) -> tuple[frozenset[int], tuple[dict[int, int], int]]:
         """Emit the code that runs the graph, into the function `cg` is building.
@@ -106,8 +111,9 @@ class GraphFunction:
         * `inputs`: one value per graph input: an `Array` for a tensor (its layout must
           imply the layout the graph was prepared for), an IR value for a ScalarType,
           or None for a value without data. Inputs that are constants may be None.
-        * `outputs`: one `OutputDestination` per graph output, or None for a value
-          without data.
+        * `outputs`: per graph output, where it goes: an output handle of the op
+          running the graph (its `TensorOutput` or `ScalarOutput`), an
+          `OutputDestination` of the op's own, or None for a value without data.
 
         How each output gets its memory:
 
@@ -133,6 +139,10 @@ class GraphFunction:
         the arena that holds those not on the stack ({vid: offset}, size in bytes)."""
         planned = self.planned
         b = cg.b
+        destinations = [
+            out.destination if isinstance(out, TensorOutput | ScalarOutput) else out
+            for out in outputs
+        ]
         values: dict[int, Array | ir.Value] = dict(self.constants)
         for vid, v in zip(planned.in_ids, inputs, strict=True):
             if v is not None and vid not in values:
@@ -145,7 +155,7 @@ class GraphFunction:
         slot_targets: dict[int, OutputDestination] = {}
         target_of: dict[int, int] = {}  # vid -> the output whose target it is
         given: dict[int, Array] = {}  # output -> the memory it provides
-        for k, (vid, out) in enumerate(zip(planned.out_ids, outputs, strict=True)):
+        for k, (vid, out) in enumerate(zip(planned.out_ids, destinations, strict=True)):
             produced = self.produced_by.get(vid)
             if out is None or produced is None or vid in target_of:
                 continue
@@ -176,9 +186,9 @@ class GraphFunction:
             profile=profile,
         )
         for slot in owned:
-            cg.release_later(slot)
+            cg.release_later(slot.field(b, Slot.OWNER))
 
-        for k, (vid, out) in enumerate(zip(planned.out_ids, outputs, strict=True)):
+        for k, (vid, out) in enumerate(zip(planned.out_ids, destinations, strict=True)):
             if out is None:
                 continue
             if vid in written and target_of[vid] == k:
@@ -190,7 +200,7 @@ class GraphFunction:
                 given[k].copy_from(cg, value)
             else:
                 out.assign(value)
-        for out in outputs:
+        for out in destinations:
             if out is not None:
                 out.finish()
         return frozenset(memory), arena

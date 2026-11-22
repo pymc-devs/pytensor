@@ -17,7 +17,8 @@ is specialized for the layouts of what the loop passes it: rows of the sequences
 of the buffers, and the non-sequences.
 
 Each output of the body has an `OutputDestination` that says where it goes: `_StateRow` (a row
-of a state's buffer), `_NitSotRow` (a row of a nit-sot buffer) or `_UntracedState`.
+of a state's buffer), `_NitSotRow` (a row of a nit-sot buffer) or `_UntracedState`; a while-loop's
+condition is `Captured`.
 An output is written directly into its row, unless the iteration also reads that row.
 That only happens in short circular buffers, and is decided once, before the loop. Then
 the output is written to memory aside and copied into the row when the iteration is
@@ -38,18 +39,10 @@ import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, remove_axis
 from pytensor.link.llvm.codegen.array import Array, advance
 from pytensor.link.llvm.codegen.context import Codegen
-from pytensor.link.llvm.codegen.destination import (
-    OutputDestination,
-    ScalarDestination,
-    SlotDestination,
-)
-from pytensor.link.llvm.codegen.interface import (
-    destinations,
-    llvm_emit,
-    llvm_layout,
-)
+from pytensor.link.llvm.codegen.destination import Captured, OutputDestination
+from pytensor.link.llvm.codegen.interface import TensorOutput, llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import cast, constant, load, store
-from pytensor.link.llvm.codegen.types import element_type, ir, is_absent, value_type
+from pytensor.link.llvm.codegen.types import element_type, ir, is_absent
 
 
 def register():
@@ -75,7 +68,7 @@ def register():
 class _StateBuffer:
     """The buffer of a traced state (mit-mot, mit-sot, sit-sot): the outer output."""
 
-    output: OutputDestination
+    output: TensorOutput
     buffer: Array
     #: rows before the one iteration 0 reads as tap 0 (the initial values)
     lookback: int
@@ -132,7 +125,7 @@ class _NitSotBuffer:
     written circularly), one more if `n_rows` is 0 (trimmed after the loop), so that
     every iteration has a row to write."""
 
-    output: SlotDestination
+    output: TensorOutput
     #: the length the output has (i64, >= 0)
     n_rows: ir.Value
     #: the rows the buffer has: `max(n_rows, 1)`; iteration `i` writes row
@@ -257,7 +250,7 @@ def _allocate_state_buffers(cg, op, inputs, outputs) -> list[_StateBuffer]:
                 _row_range(b, buffer, 0, n).copy_from(cg, source)
         states.append(
             _StateBuffer(
-                output=out.destination,
+                output=out,
                 buffer=buffer,
                 lookback=lookback,
                 read_taps=reads,
@@ -295,10 +288,10 @@ def _allocate_nit_sot_buffers(cg, op, node, inputs, outputs) -> list[_NitSotBuff
     return nit_sots
 
 
-def _copy_untraced_states(cg, op, inputs, outputs) -> list[SlotDestination | None]:
+def _copy_untraced_states(cg, op, inputs, outputs) -> list[TensorOutput | None]:
     """The untraced states, copied into their outputs (None: no data, a random
     generator). Each iteration's output replaces them; an output of another shape is
-    reallocated, so they are read from the slot in every iteration."""
+    reallocated, so they are read (`current`) in every iteration."""
     untraced = []
     for init, out in zip(
         op.outer_untraced_sit_sot(inputs),
@@ -379,8 +372,7 @@ class _NitSotRow(OutputDestination):
 
     cg: Codegen
     nit: _NitSotBuffer
-    #: the iteration, and the row it writes to
-    i: ir.Value
+    #: the row it writes to
     row_index: ir.Value
     row: Array | None = None
 
@@ -392,9 +384,7 @@ class _NitSotRow(OutputDestination):
         b, nit = self.cg.b, self.nit
         buffer = nit.buffer
         if buffer is None:
-            with b.if_(b.eq(self.i, 0)):
-                nit.output.allocate([nit.stored_rows, *shape])
-            buffer = nit.output.read()
+            buffer = nit.output.allocate_once([nit.stored_rows, *shape])
         _check_shape(
             self.cg,
             shape,
@@ -417,8 +407,7 @@ class _UntracedState(OutputDestination):
     done (`finish`): until then the iteration may still read the current value."""
 
     cg: Codegen
-    out: SlotDestination
-    current: Array
+    out: TensorOutput
     value: Array | None = None
 
     @property
@@ -432,26 +421,8 @@ class _UntracedState(OutputDestination):
     def finish(self) -> None:
         if self.value is None:
             raise ValueError("an output was never set")
-        _replace_untraced_state(self.cg, self.out, self.current, self.value)
-
-
-def _replace_untraced_state(cg, out: SlotDestination, current: Array, src: Array):
-    """Make `src` the untraced state: copied into its memory, or into new memory if
-    its shape differs."""
-    b = cg.b
-    differs = b.const_bool(False)
-    for n, m in zip(src.shape, current.shape, strict=True):
-        differs = b.or_(differs, b.ne(n, m))
-    if differs.const_int == 0:
-        current.copy_from(cg, src)
-        return
-    old_owner = b.alloca(ir.ptr)
-    b.store(b.null(), old_owner)
-    with b.if_(differs):
-        b.store(out.owner(), old_owner)
-        out.allocate(list(src.shape))
-    out.read().copy_from(cg, src)
-    b.rt_decref(cg.ctx, b.load(ir.ptr, old_owner))
+        # (in new memory if its shape changed)
+        self.out.reallocate(list(self.value.shape)).copy_from(self.cg, self.value)
 
 
 # ------------------------------------------------------------------ after the loop
@@ -477,7 +448,7 @@ def _rotate_and_trim(cg, out, buffer: Array, trace_len, is_while: bool):
             _row_range(b, buffer, rest, shift).copy_from(cg, head)
     with b.if_(b.and_(b.not_(circular), b.sgt(n, trace_len))):
         if is_while:
-            out.set_length(0, trace_len)
+            out.truncate(trace_len)
         else:
             _fill_zero(cg, _row_range(b, buffer, trace_len, b.sub(n, trace_len)))
 
@@ -510,9 +481,8 @@ def emit_scan(op, node, cg, inputs, outputs):
         )
     non_sequences = op.outer_non_seqs(inputs)
     states = _allocate_state_buffers(cg, op, inputs, outputs)
-    # (nit-sot outputs and untraced states are worked on in their slots)
-    nit_sots = _allocate_nit_sot_buffers(cg, op, node, inputs, destinations(outputs))
-    untraced = _copy_untraced_states(cg, op, inputs, destinations(outputs))
+    nit_sots = _allocate_nit_sot_buffers(cg, op, node, inputs, outputs)
+    untraced = _copy_untraced_states(cg, op, inputs, outputs)
 
     # the inner inputs and outputs, per kind (in the order of `states`' taps)
     state_reads_at = [
@@ -539,7 +509,7 @@ def emit_scan(op, node, cg, inputs, outputs):
         body_layouts[k] = _row_layout(s.buffer)
     for k, out in zip(untraced_in_at, untraced, strict=True):
         if out is not None:
-            body_layouts[k] = out.allocation_layout or Layout.c(out.ndim)
+            body_layouts[k] = out.allocated_layout
     for k, a in zip(op.inner_non_seqs(ins), non_sequences, strict=True):
         if isinstance(a, Array):
             body_layouts[k] = a.layout
@@ -586,22 +556,21 @@ def emit_scan(op, node, cg, inputs, outputs):
                 row = s.buffer.at(b, counters.row(rows, s.row_key(s.write_taps[j])))
                 results[k] = _StateRow(cg, row, in_place, aside)
             for k, nit in zip(nit_sot_at, nit_sots, strict=True):
-                results[k] = _NitSotRow(cg, nit, i, counters.row(rows, nit.row_key()))
+                results[k] = _NitSotRow(cg, nit, counters.row(rows, nit.row_key()))
             for k_in, k_out, out in zip(
                 untraced_in_at, untraced_out_at, untraced, strict=True
             ):
                 if out is not None:
-                    current = out.read()
-                    args[k_in] = current
-                    results[k_out] = _UntracedState(cg, out, current)
+                    args[k_in] = out.current()
+                    results[k_out] = _UntracedState(cg, out)
             if info.as_while:
-                cond = ScalarDestination(cg, b.alloca(value_type(cond_type)), cond_type)
+                cond = Captured(cg, cond_type)
                 results[-1] = cond
 
             body.emit_call(cg, args, results)
 
             if info.as_while:
-                value = b.load(value_type(cond_type), cond.pointer)
+                value = cond.scalar()
                 stop = b.ne(cast(b, value, cond_type, ps.int8), 0)
         next_rows = counters.advance(b, rows)
         if info.as_while:
@@ -623,12 +592,10 @@ def emit_scan(op, node, cg, inputs, outputs):
         buffer = nit.buffer
         if buffer is None:
             # allocated by the first iteration; if none ran: an empty array
-            with b.if_(b.eq(nit.output.data(), b.null())):
-                nit.output.allocate([nit.n_rows, *(b.i64(0),) * nit.row_ndim])
-            buffer = nit.output.read()
+            buffer = nit.output.allocate_once([nit.n_rows, *(b.i64(0),) * nit.row_ndim])
         _rotate_and_trim(cg, nit.output, buffer, steps_run, info.as_while)
         with b.if_(b.eq(nit.n_rows, 0)):
-            nit.output.set_length(0, nit.n_rows)
+            nit.output.truncate(nit.n_rows)
 
 
 __all__ = ["emit_scan", "register"]
