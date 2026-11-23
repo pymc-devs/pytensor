@@ -71,7 +71,7 @@ typedef struct {
 typedef struct {
     int32_t dtype;
     int32_t ndim;
-    /* static length per dim, -1 if only known at runtime; valid while the
+    /* static length per axis, -1 if only known at runtime; valid while the
      * PtFunction is alive */
     const int64_t *static_shape;
 } PtTypeInfo;

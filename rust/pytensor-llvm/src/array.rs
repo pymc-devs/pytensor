@@ -215,6 +215,20 @@ impl<'a> PtArrayRef<'a> {
         extent(self.data, self.shape, self.strides, self.itemsize())
     }
 
+    /// The array as the kernel ABI passes it, borrowed (no owner). Its shape and
+    /// strides must not be written through it.
+    #[inline]
+    pub fn to_abi(&self) -> PtArray {
+        PtArray {
+            data: self.data as *mut u8,
+            shape: self.shape.as_ptr() as *mut i64,
+            strides: self.strides.as_ptr() as *mut i64,
+            owner: std::ptr::null_mut(),
+            ndim: self.shape.len() as i32,
+            dtype: self.dtype.code(),
+        }
+    }
+
     /// Index `i` along the first axis: an array with one axis less. None if there is
     /// no axis or `i` is out of range.
     pub fn row(&self, i: i64) -> Option<PtArrayRef<'a>> {
@@ -247,9 +261,27 @@ impl<'a> PtArrayRef<'a> {
     }
 }
 
+/// The byte range of an array that keeps its type's invariant: as `validate_array`
+/// would say, without its checks (every element is memory, so nothing overflows).
+#[inline]
 fn extent(data: *const u8, shape: &[i64], strides: &[i64], itemsize: usize) -> (usize, usize) {
-    // (can't fail for arrays that keep their type's invariant)
-    validate_array(data, shape, strides, itemsize).unwrap_or((data as usize, data as usize))
+    if shape.contains(&0) {
+        return (data as usize, data as usize);
+    }
+    let (mut lo, mut hi) = (0i64, 0i64);
+    for (&n, &s) in shape.iter().zip(strides) {
+        let span = (n - 1).wrapping_mul(s);
+        if span < 0 {
+            lo = lo.wrapping_add(span);
+        } else {
+            hi = hi.wrapping_add(span);
+        }
+    }
+    let base = data as i64;
+    (
+        base.wrapping_add(lo) as usize,
+        base.wrapping_add(hi).wrapping_add(itemsize as i64) as usize,
+    )
 }
 
 // ------------------------------------------------------------------ arrays to write
@@ -284,6 +316,20 @@ impl<'a> PtArrayMut<'a> {
             dtype,
             _memory: PhantomData,
         }
+    }
+
+    /// The array a `PtArray` of the ABI describes. Only its header is checked (the
+    /// number of axes, the dtype code).
+    ///
+    /// # Safety
+    /// `a.shape` and `a.strides` point to `a.ndim` i64s each that nothing writes during
+    /// `'a`, and with them the invariant of the type holds.
+    #[inline]
+    pub unsafe fn from_raw(a: &PtArray) -> Result<PtArrayMut<'a>, String> {
+        // SAFETY: the function's contract.
+        let (shape, strides, dtype) = unsafe { header(a)? };
+        // SAFETY: the function's contract.
+        Ok(unsafe { PtArrayMut::new(a.data, shape, strides, dtype) })
     }
 
     /// As `PtArrayRef::from_raw_checked`, for memory to write.
@@ -333,6 +379,20 @@ impl<'a> PtArrayMut<'a> {
     /// The byte range `[lo, hi)` the elements lie in (empty for an empty array).
     pub fn extent(&self) -> (usize, usize) {
         extent(self.data, self.shape, self.strides, self.itemsize())
+    }
+
+    /// The array as the kernel ABI passes it (no owner), for the memory to be written
+    /// through it during `'a`. Its shape and strides must not be written.
+    #[inline]
+    pub fn into_abi(self) -> PtArray {
+        PtArray {
+            data: self.data,
+            shape: self.shape.as_ptr() as *mut i64,
+            strides: self.strides.as_ptr() as *mut i64,
+            owner: std::ptr::null_mut(),
+            ndim: self.shape.len() as i32,
+            dtype: self.dtype.code(),
+        }
     }
 
     /// The same array, to read.

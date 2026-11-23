@@ -29,7 +29,7 @@ fn to_numpy<'py>(
     strides: &[i64],
     owner: *mut PtBuffer,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let mut dims: Vec<npy_intp> = shape.iter().map(|&s| s as npy_intp).collect();
+    let mut lengths: Vec<npy_intp> = shape.iter().map(|&s| s as npy_intp).collect();
     let mut st: Vec<npy_intp> = strides.iter().map(|&s| s as npy_intp).collect();
     // SAFETY: `data` with shape/strides is a valid array (a kernel output); the descr
     // reference is stolen by numpy; the capsule holds the buffer reference until the
@@ -40,8 +40,8 @@ fn to_numpy<'py>(
             py,
             ty,
             dtype.clone().into_ptr() as *mut _,
-            dims.len() as i32,
-            dims.as_mut_ptr(),
+            lengths.len() as i32,
+            lengths.as_mut_ptr(),
             st.as_mut_ptr(),
             data as *mut _,
             NPY_ARRAY_WRITEABLE,

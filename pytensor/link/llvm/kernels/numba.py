@@ -119,7 +119,7 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype, order=None):
 
         def codegen(context, b, sig, llargs):
             ctx_p, base, shape_v = llargs
-            dims = [
+            lengths = [
                 context.cast(
                     b,
                     b.extract_value(shape_v, d),
@@ -129,8 +129,8 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype, order=None):
                 for d in range(ndim)
             ]
             n = ir.Constant(_i64, itemsize)
-            for d in dims:
-                n = b.mul(n, d)
+            for length in lengths:
+                n = b.mul(n, length)
             # rt = ctx->rt; data = rt->alloc(ctx, n, 64, &owner)
             rt = b.load(b.bitcast(ctx_p, _i8p.as_pointer()))
             fnty = ir.FunctionType(_i8p, [_i8p, _i64, _i64, _i8p.as_pointer()])
@@ -158,11 +158,11 @@ def allocated_output(index: int, ndim: int, dtype: np.dtype, order=None):
             acc = ir.Constant(_i64, itemsize)
             for d in reversed(order):
                 strides[d] = acc
-                acc = b.mul(acc, dims[d])
+                acc = b.mul(acc, lengths[d])
             for d in range(ndim):
-                b.store(dims[d], b.gep(shp, [ir.Constant(_i64, d)]))
+                b.store(lengths[d], b.gep(shp, [ir.Constant(_i64, d)]))
                 b.store(strides[d], b.gep(strd, [ir.Constant(_i64, d)]))
-            return _make_array(context, b, arrty, data, dims, strides)
+            return _make_array(context, b, arrty, data, lengths, strides)
 
         return arrty(ctx, args, shape), codegen
 

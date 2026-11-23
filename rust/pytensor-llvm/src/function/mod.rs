@@ -10,11 +10,12 @@
 //! This is where calls from outside (Python, the C API) meet it: their arrays are
 //! checked against the types here, and outputs land where the caller wants them: in
 //! memory it provides (written directly when the kernel can, else copied there) or in
-//! new buffers.
+//! new buffers. Calls run in a `Session`, which keeps what they need between them, so
+//! that calling a function with static shapes allocates nothing.
 
 pub mod capi;
 
-use crate::abi::{KernelFn, OwnedBuf, PtArray, c_strides, checked_nbytes};
+use crate::abi::{KernelFn, OwnedBuf, PtArray, c_strides, checked_nbytes, overlaps};
 use crate::array::{OwnedArray, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
 use crate::runtime::PtCtx;
@@ -49,7 +50,7 @@ impl ArgType {
     fn check(&self, shape: &[i64]) -> R<()> {
         if shape.len() != self.ndim() {
             return Err(format!(
-                "expected {} dimensions, got {}",
+                "expected {} axes, got {}",
                 self.ndim(),
                 shape.len()
             ));
@@ -86,6 +87,13 @@ pub struct Function {
     pub outputs: Vec<ArgType>,
     /// per output: the kernel writes it into provided memory (else returns a buffer)
     provided: Vec<bool>,
+    /// per provided output: its static shape, then its C-contiguous strides (the
+    /// header the kernel gets; empty for returned outputs)
+    provided_headers: Vec<Vec<i64>>,
+    /// per provided output: its size in bytes
+    provided_bytes: Vec<usize>,
+    /// how many i64s the shapes and strides of the returned outputs take
+    returned_header_size: usize,
 }
 
 // SAFETY: the kernel and its config are usable from any thread (`Function::new`'s
@@ -115,10 +123,26 @@ impl Function {
         if contiguous_inputs.len() != inputs.len() || provided.len() != outputs.len() {
             return Err("one flag per argument".into());
         }
-        if let Some(o) =
-            (0..outputs.len()).find(|&o| provided[o] && outputs[o].static_shape().is_none())
-        {
-            return Err(format!("output {o}: provided, but its shape isn't static"));
+        let mut provided_headers = vec![];
+        let mut provided_bytes = vec![];
+        let mut returned_header_size = 0;
+        for (o, t) in outputs.iter().enumerate() {
+            if !provided[o] {
+                provided_headers.push(vec![]);
+                provided_bytes.push(0);
+                returned_header_size += 2 * t.ndim();
+                continue;
+            }
+            let Some(shape) = t.static_shape() else {
+                return Err(format!("output {o}: provided, but its shape isn't static"));
+            };
+            let itemsize = t.dtype.itemsize();
+            provided_bytes.push(
+                checked_nbytes(&shape, itemsize)
+                    .ok_or_else(|| crate::abi::bad_size("output", &shape))?,
+            );
+            let strides = c_strides(&shape, itemsize as i64);
+            provided_headers.push([shape, strides].concat());
         }
         Ok(Function {
             kernel,
@@ -127,6 +151,9 @@ impl Function {
             contiguous_inputs,
             outputs,
             provided,
+            provided_headers,
+            provided_bytes,
+            returned_header_size,
         })
     }
 
@@ -158,175 +185,276 @@ impl Function {
         Ok(())
     }
 
-    /// Run the function. Per output: `Some` new array for `Destination::New`, `None`
-    /// when it was written into the memory given.
-    pub fn call(
+    /// Run the function in `session`, with `inputs` and the destinations of the
+    /// outputs (`outputs`, one per output). Inputs are checked against their types
+    /// (`check_input`), memory for outputs against the output types and against
+    /// overlapping the inputs and each other.
+    ///
+    /// Returns the outputs whose destination is `Destination::New`: (output, array),
+    /// in output order. Those the caller doesn't take are released. On an error,
+    /// nothing is returned (and nothing is kept).
+    pub fn call<'s, 'c>(
         &self,
-        ctx: &mut PtCtx,
-        inputs: &[PtArrayRef],
-        outputs: Vec<Destination>,
-    ) -> R<Vec<Option<OwnedArray>>> {
-        if inputs.len() != self.n_inputs() || outputs.len() != self.n_outputs() {
+        session: &'s mut Session,
+        inputs: impl IntoIterator<Item = R<PtArrayRef<'c>>>,
+        outputs: impl IntoIterator<Item = R<Destination<'c>>>,
+    ) -> R<std::vec::Drain<'s, (usize, OwnedArray)>> {
+        let s = session;
+        s.args.clear();
+        s.targets.clear();
+        s.in_ranges.clear();
+        s.out_ranges.clear();
+        s.results.clear();
+        for a in inputs {
+            let k = s.args.len();
+            if k == self.n_inputs() {
+                return Err(format!("expected {} inputs", self.n_inputs()));
+            }
+            let a = a?;
+            self.check_input(k, &a)?;
+            s.in_ranges.push(a.extent());
+            s.args.push(a.to_abi());
+        }
+        for d in outputs {
+            let o = s.targets.len();
+            if s.args.len() != self.n_inputs() || o == self.n_outputs() {
+                return Err(format!(
+                    "expected {} inputs and {} outputs",
+                    self.n_inputs(),
+                    self.n_outputs()
+                ));
+            }
+            let target = self.target(s, o, d?)?;
+            s.targets.push(target);
+        }
+        if s.args.len() != self.n_inputs() || s.targets.len() != self.n_outputs() {
             return Err(format!(
                 "expected {} inputs and {} outputs, got {} and {}",
                 self.n_inputs(),
                 self.n_outputs(),
-                inputs.len(),
-                outputs.len()
+                s.args.len(),
+                s.targets.len()
             ));
         }
-        for (k, a) in inputs.iter().enumerate() {
-            self.check_input(k, a)?;
-        }
-        // shape ++ strides of every argument
-        let mut storage: Vec<Vec<i64>> = Vec::with_capacity(inputs.len() + outputs.len());
-        let mut args: Vec<PtArray> = Vec::with_capacity(inputs.len() + outputs.len());
-        for a in inputs {
-            storage.push([a.shape(), a.strides()].concat());
-        }
-        // per output: the buffer of provided memory we allocated, and where it goes
-        let mut buffers: Vec<Option<OwnedBuf>> = Vec::with_capacity(outputs.len());
-        let mut destinations = Vec::with_capacity(outputs.len());
-        for (o, dest) in outputs.into_iter().enumerate() {
-            let t = &self.outputs[o];
-            if let Destination::Into(m) = &dest {
-                if m.dtype() != t.dtype {
-                    return Err(format!(
-                        "provided output {o}: an array of {} is expected, got one of {}",
-                        t.dtype.numpy_name(),
-                        m.dtype().numpy_name()
-                    ));
-                }
-                t.check(m.shape())
-                    .map_err(|e| format!("provided output {o}: {e}"))?;
-            }
-            if !self.provided[o] {
-                storage.push(vec![-1; 2 * t.ndim()]);
-                buffers.push(None);
-                destinations.push(dest);
-                continue;
-            }
-            let shape = t.static_shape().unwrap_or_default();
-            let itemsize = t.dtype.itemsize();
-            storage.push([shape.clone(), c_strides(&shape, itemsize as i64)].concat());
-            match dest {
-                // written directly
-                Destination::Into(m) if m.is_c_contiguous() => {
-                    buffers.push(None);
-                    destinations.push(Destination::Into(m));
-                }
-                dest => {
-                    let n = checked_nbytes(&shape, itemsize)
-                        .ok_or_else(|| crate::abi::bad_size("output", &shape))?;
-                    let buf = ctx
-                        .alloc(n)
-                        .ok_or_else(|| format!("could not allocate {n} bytes"))?;
-                    buffers.push(Some(buf));
-                    destinations.push(dest);
-                }
-            }
-        }
-        for (k, a) in inputs.iter().enumerate() {
-            let nd = a.ndim();
-            let st = storage[k].as_mut_ptr();
-            args.push(PtArray {
-                // (never written through: the kernel doesn't write its inputs)
-                data: a.as_ptr() as *mut u8,
-                shape: st,
-                // SAFETY: the storage has 2 * ndim entries.
-                strides: unsafe { st.add(nd) },
-                owner: std::ptr::null_mut(),
-                ndim: nd as i32,
-                dtype: a.dtype().code(),
+        // SAFETY: the arguments of this call, checked above; the arrays they describe
+        // are borrowed for `'c`, which lasts until we return.
+        unsafe { self.run(s) }?;
+        Ok(s.results.drain(..))
+    }
+
+    /// Where output `o` goes, for `destination`.
+    fn target(&self, s: &mut Session, o: usize, destination: Destination) -> R<Target> {
+        let t = &self.outputs[o];
+        let Destination::Into(m) = destination else {
+            return Ok(Target {
+                array: PtArray {
+                    data: std::ptr::null_mut(),
+                    shape: std::ptr::null_mut(),
+                    strides: std::ptr::null_mut(),
+                    owner: std::ptr::null_mut(),
+                    ndim: t.ndim() as i32,
+                    dtype: t.dtype.code(),
+                },
+                direct: false,
             });
+        };
+        if m.dtype() != t.dtype {
+            return Err(format!(
+                "provided output {o}: an array of {} is expected, got one of {}",
+                t.dtype.numpy_name(),
+                m.dtype().numpy_name()
+            ));
         }
+        t.check(m.shape())
+            .map_err(|e| format!("provided output {o}: {e}"))?;
+        let r = m.extent();
+        if let Some(i) = s.in_ranges.iter().position(|&x| overlaps(x, r)) {
+            return Err(format!(
+                "provided output {o} overlaps the memory of input {i}"
+            ));
+        }
+        if s.out_ranges.iter().any(|&x| overlaps(x, r)) {
+            return Err(format!(
+                "provided output {o} overlaps another provided output"
+            ));
+        }
+        s.out_ranges.push(r);
+        Ok(Target {
+            direct: self.provided[o] && m.is_c_contiguous(),
+            array: m.into_abi(),
+        })
+    }
+
+    /// Run the kernel with the inputs in `s.args` and the outputs `s.targets`, and put
+    /// the new arrays into `s.results`.
+    ///
+    /// # Safety
+    /// `s.args` holds the inputs and `s.targets` the outputs of a call (`call`), all of
+    /// them checked, and the arrays they describe are borrowed until we return.
+    unsafe fn run(&self, s: &mut Session) -> R<()> {
+        let (n_in, n_out) = (self.n_inputs(), self.n_outputs());
+        s.headers.clear();
+        s.headers.resize(self.returned_header_size, 0);
+        let headers = s.headers.as_mut_ptr();
+        let mut at = 0;
+        s.staged.clear();
         for (o, t) in self.outputs.iter().enumerate() {
             let nd = t.ndim();
-            let st = storage[inputs.len() + o].as_mut_ptr();
-            let data = match (&buffers[o], &mut destinations[o]) {
-                (Some(buf), _) => buf.data(),
-                (None, Destination::Into(m)) if self.provided[o] => m.as_mut_ptr(),
-                _ => std::ptr::null_mut(),
-            };
-            args.push(PtArray {
-                data,
-                shape: st,
-                // SAFETY: the storage has 2 * ndim entries.
-                strides: unsafe { st.add(nd) },
+            let mut arg = PtArray {
+                data: std::ptr::null_mut(),
+                shape: std::ptr::null_mut(),
+                strides: std::ptr::null_mut(),
                 owner: std::ptr::null_mut(),
                 ndim: nd as i32,
                 dtype: t.dtype.code(),
-            });
+            };
+            let mut staged = None;
+            if self.provided[o] {
+                // (kernels don't write the headers of provided outputs)
+                let header = self.provided_headers[o].as_ptr() as *mut i64;
+                arg.shape = header;
+                // SAFETY: the header has 2 * nd entries.
+                arg.strides = unsafe { header.add(nd) };
+                let target = &s.targets[o];
+                arg.data = if target.direct {
+                    target.array.data
+                } else {
+                    let n = self.provided_bytes[o];
+                    let buf = s
+                        .ctx
+                        .alloc(n)
+                        .ok_or_else(|| format!("could not allocate {n} bytes"))?;
+                    let data = buf.data();
+                    staged = Some(buf);
+                    data
+                };
+            } else {
+                // SAFETY: `headers` has `returned_header_size` entries, 2 * nd of them
+                // this output's.
+                unsafe {
+                    arg.shape = headers.add(at);
+                    arg.strides = headers.add(at + nd);
+                }
+                at += 2 * nd;
+            }
+            s.staged.push(staged);
+            s.args.push(arg);
         }
+        let ctx = &mut s.ctx;
         let mark = ctx.scratch_mark();
         // SAFETY: the kernel contract (`new`): `ctx` is ours for the call; the inputs
-        // are valid arrays of their types (checked above), borrowed until we return;
-        // provided outputs are C-contiguous memory of their static shapes (allocated
-        // here, or the caller's, checked above) that overlaps no input (the callers
-        // make sure); returned outputs have no data and storage for their shapes.
+        // are valid arrays of their types, borrowed until we return; provided outputs
+        // are C-contiguous memory of their static shapes (allocated here, or the
+        // caller's) that overlaps no input; returned outputs have no data and storage
+        // for their shapes (this function's contract).
         let rc = unsafe {
             (self.kernel)(
                 ctx,
-                args.as_mut_ptr(),
-                inputs.len() as i32,
-                self.n_outputs() as i32,
+                s.args.as_mut_ptr(),
+                n_in as i32,
+                n_out as i32,
                 self.config,
             )
         };
         ctx.scratch_release(mark);
-        let n_in = inputs.len();
-        // the buffers the kernel handed over (also on failure)
-        let mut returned: Vec<Option<OwnedBuf>> = (0..self.n_outputs())
-            .map(|o| {
-                let owner = args[n_in + o].owner;
-                // SAFETY: a returned output's owner is one reference handed to us.
-                (!self.provided[o] && !owner.is_null())
-                    .then(|| unsafe { OwnedBuf::from_raw(owner) })
-            })
-            .collect();
-        if rc != 0 {
-            let msg = ctx
+        let mut result = match rc {
+            0 => Ok(()),
+            _ => Err(ctx
                 .error
                 .take()
                 .map(|(_, m)| m)
-                .unwrap_or_else(|| format!("error {rc}"));
-            return Err(msg);
-        }
-        let mut results = Vec::with_capacity(self.n_outputs());
-        for (o, dest) in destinations.into_iter().enumerate() {
-            let t = &self.outputs[o];
-            let raw = &args[n_in + o];
-            let nd = t.ndim();
-            let shape = storage[n_in + o][..nd].to_vec();
-            let strides = storage[n_in + o][nd..].to_vec();
-            let array = match (buffers[o].take(), returned[o].take()) {
-                (Some(buf), _) => OwnedArray::in_buffer(buf, raw.data, shape, strides, t.dtype),
-                (None, Some(buf)) => {
-                    t.check(&shape).map_err(|m| format!("output {o}: {m}"))?;
-                    OwnedArray::in_buffer(buf, raw.data, shape, strides, t.dtype)
-                }
-                (None, None) if self.provided[o] => {
-                    results.push(None); // written into the caller's memory
-                    continue;
-                }
-                (None, None) => Err("the function returned no buffer".into()),
+                .unwrap_or_else(|| format!("error {rc}"))),
+        };
+        // every output: what it is in (also on failure, to release it)
+        for (o, t) in self.outputs.iter().enumerate() {
+            let raw = s.args[n_in + o];
+            let target = s.targets[o];
+            let buf = if self.provided[o] {
+                s.staged[o].take()
+            } else {
+                // SAFETY: a returned output's owner is one reference handed to us.
+                (!raw.owner.is_null()).then(|| unsafe { OwnedBuf::from_raw(raw.owner) })
+            };
+            if result.is_err() || target.direct {
+                continue;
             }
-            .map_err(|e| format!("output {o}: {e}"))?;
-            match dest {
-                Destination::New => results.push(Some(array)),
-                Destination::Into(mut m) => {
-                    if array.shape() != m.shape() {
-                        return Err(format!(
-                            "provided output {o}: shape mismatch: the result has shape {:?}, got {:?}",
-                            array.shape(),
-                            m.shape()
-                        ));
-                    }
-                    m.copy_from(&array.as_ref())?;
-                    results.push(None);
+            result = (|| {
+                let buf = buf.ok_or("the function returned no buffer")?;
+                let nd = t.ndim();
+                // SAFETY: the header's storage: nd lengths and nd strides, which the
+                // kernel wrote (returned) or we did (provided).
+                let (shape, strides) = unsafe {
+                    (
+                        std::slice::from_raw_parts(raw.shape, nd).to_vec(),
+                        std::slice::from_raw_parts(raw.strides, nd).to_vec(),
+                    )
+                };
+                let array = OwnedArray::in_buffer(buf, raw.data, shape, strides, t.dtype)?;
+                if !self.provided[o] {
+                    t.check(array.shape())?;
                 }
-            }
+                if target.array.data.is_null() {
+                    s.results.push((o, array));
+                    return Ok(());
+                }
+                // SAFETY: the caller's memory, checked as an array to write and
+                // borrowed until we return (this function's contract).
+                let mut into = unsafe { PtArrayMut::from_raw(&target.array) }?;
+                if array.shape() != into.shape() {
+                    return Err(format!(
+                        "provided output {o}: shape mismatch: the result has shape {:?}, got {:?}",
+                        array.shape(),
+                        into.shape()
+                    ));
+                }
+                into.copy_from(&array.as_ref())
+            })()
+            .map_err(|e| format!("output {o}: {e}"));
         }
-        Ok(results)
+        if result.is_err() {
+            s.results.clear();
+        }
+        result
     }
+}
+
+/// Where calls of functions run: their context (scratch memory, errors, the random
+/// state), and what calls keep between them, so that calling a function with static
+/// shapes allocates nothing. One call at a time; any function can use it.
+#[derive(Default)]
+pub struct Session {
+    pub ctx: PtCtx,
+    /// inputs ++ outputs, as the kernel gets them
+    args: Vec<PtArray>,
+    /// per output: where the caller wants it
+    targets: Vec<Target>,
+    /// per output: a buffer we allocated for a provided output whose destination the
+    /// kernel can't write directly
+    staged: Vec<Option<OwnedBuf>>,
+    /// the shapes and strides of the returned outputs (the kernel writes them)
+    headers: Vec<i64>,
+    /// byte ranges of the inputs and of the memory for outputs of the call
+    in_ranges: Vec<(usize, usize)>,
+    out_ranges: Vec<(usize, usize)>,
+    /// the new arrays of the call (`call` hands them out)
+    results: Vec<(usize, OwnedArray)>,
+}
+
+// SAFETY: the context is Send; between calls the pointers kept are never used again
+// (`call` clears them first), and the rest are buffer references, which are Send.
+unsafe impl Send for Session {}
+
+impl Session {
+    pub fn new() -> Session {
+        Session::default()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Target {
+    /// the caller's memory (an array to write, borrowed for the call); null data: a new
+    /// array
+    array: PtArray,
+    /// the kernel writes the caller's memory itself
+    direct: bool,
 }

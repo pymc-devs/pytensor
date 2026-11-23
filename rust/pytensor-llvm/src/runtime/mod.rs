@@ -507,6 +507,15 @@ impl PtCtx {
 
     /// Release back to the mark `token`. Unknown tokens are ignored.
     pub fn scratch_release(&mut self, token: i64) {
+        // the innermost mark, and nothing taken since: nothing to give back
+        if token >= 0
+            && token as usize + 1 == self.marks.len()
+            && self.marks[token as usize].n_live == self.scratch.live.len()
+        {
+            self.marks.pop();
+            self.scratch.pop_freed(self.scratch_floor());
+            return;
+        }
         if token >= 0 && (token as usize) < self.marks.len() {
             let m = self.marks[token as usize];
             self.marks.truncate(token as usize);

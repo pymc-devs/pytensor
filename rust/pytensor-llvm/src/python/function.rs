@@ -3,8 +3,7 @@
 use super::{descr, dtype_of, err};
 use crate::array::{OwnedArray, PtArrayRef};
 use crate::dtype::DType;
-use crate::function::{ArgType, Destination, Function as RFunction};
-use crate::runtime::PtCtx;
+use crate::function::{ArgType, Destination, Function as RFunction, Session};
 use numpy::npyffi::{NPY_ARRAY_WRITEABLE, NpyTypes, PY_ARRAY_API, npy_intp};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
@@ -18,7 +17,7 @@ fn wrap_output<'py>(py: Python<'py>, array: OwnedArray) -> PyResult<Bound<'py, P
     let (buf, data, shape, strides) = array.into_parts();
     // the capsule holds the buffer reference until numpy frees the array (its base)
     let capsule = PyCapsule::new_with_value(py, buf, c"pytensor_llvm.buffer")?;
-    let mut dims: Vec<npy_intp> = shape.iter().map(|&s| s as npy_intp).collect();
+    let mut lengths: Vec<npy_intp> = shape.iter().map(|&s| s as npy_intp).collect();
     let mut strides: Vec<npy_intp> = strides.iter().map(|&s| s as npy_intp).collect();
     // SAFETY: a valid array of `dt` in the buffer the capsule keeps alive (the
     // invariant of `OwnedArray`); the descr and capsule references are stolen by the
@@ -31,8 +30,8 @@ fn wrap_output<'py>(py: Python<'py>, array: OwnedArray) -> PyResult<Bound<'py, P
             py,
             ty,
             descr(py, dt).into_ptr() as *mut _,
-            dims.len() as i32,
-            dims.as_mut_ptr(),
+            lengths.len() as i32,
+            lengths.as_mut_ptr(),
             strides.as_mut_ptr(),
             data as *mut _,
             NPY_ARRAY_WRITEABLE,
@@ -60,9 +59,9 @@ fn runtime_error(msg: String) -> PyErr {
 pub struct Function {
     f: Arc<RFunction>,
     keepalive: Vec<Py<PyAny>>,
-    /// the context of Python calls: one per function (one random state); concurrent
+    /// the session of Python calls: one per function (one random state); concurrent
     /// calls from several threads take turns
-    session: std::sync::Mutex<Option<PtCtx>>,
+    session: std::sync::Mutex<Option<Session>>,
 }
 
 #[pymethods]
@@ -122,13 +121,13 @@ impl Function {
             ));
         }
         let mut guard = self.lock_session(py);
-        let ctx = guard.get_or_insert_with(PtCtx::new);
+        let session = guard.get_or_insert_with(Session::new);
         // the arrays to call with, kept alive until the call is over, and their
         let mut keep: Vec<Bound<'_, PyAny>> = Vec::with_capacity(args.len());
         // data, shapes and strides (per array: its data, and where its lengths start in
-        // `dims`; its strides follow them)
+        // `headers`; its strides follow them)
         let mut parts: Vec<(usize, usize, usize)> = Vec::with_capacity(args.len());
-        let mut dims: Vec<i64> = Vec::with_capacity(8 * args.len());
+        let mut headers: Vec<i64> = Vec::with_capacity(8 * args.len());
         let mut work = 0usize;
         let res = (|| -> PyResult<Vec<OwnedArray>> {
             for (k, a) in args.iter().enumerate() {
@@ -168,40 +167,32 @@ impl Function {
                 let arr = a.cast::<PyUntypedArray>()?;
                 // SAFETY: reading the data pointer of a live array.
                 let data = unsafe { (*arr.as_array_ptr()).fields.data as usize };
-                parts.push((data, dims.len(), arr.ndim()));
-                dims.extend(arr.shape().iter().map(|&n| n as i64));
-                dims.extend(arr.strides().iter().map(|&s| s as i64));
+                parts.push((data, headers.len(), arr.ndim()));
+                headers.extend(arr.shape().iter().map(|&n| n as i64));
+                headers.extend(arr.strides().iter().map(|&s| s as i64));
                 work += arr.len();
                 keep.push(a);
             }
-            let run = move |ctx: &mut PtCtx| -> Result<Vec<OwnedArray>, String> {
-                let mut ins = Vec::with_capacity(parts.len());
-                for (k, &(data, start, ndim)) in parts.iter().enumerate() {
-                    let (shape, strides) = dims[start..start + 2 * ndim].split_at(ndim);
+            let run = move |session: &mut Session| -> Result<Vec<OwnedArray>, String> {
+                let ins = parts.iter().enumerate().map(|(k, &(data, start, ndim))| {
+                    let (shape, strides) = headers[start..start + 2 * ndim].split_at(ndim);
                     // SAFETY: the memory of a numpy array of the input's dtype
                     // (converted above), which `keep` keeps alive until the call is
                     // over. Nothing here writes it; as everywhere with numpy, that no
                     // other thread does meanwhile is up to the user.
-                    ins.push(
-                        unsafe {
-                            PtArrayRef::checked(
-                                data as *const u8,
-                                shape,
-                                strides,
-                                f.inputs[k].dtype,
-                            )
-                        }
-                        .map_err(|e| format!("input {k}: {e}"))?,
-                    );
-                }
-                let dests = (0..f.n_outputs()).map(|_| Destination::New).collect();
-                Ok(f.call(ctx, &ins, dests)?.into_iter().flatten().collect())
+                    unsafe {
+                        PtArrayRef::checked(data as *const u8, shape, strides, f.inputs[k].dtype)
+                    }
+                    .map_err(|e| format!("input {k}: {e}"))
+                });
+                let outs = (0..f.n_outputs()).map(|_| Ok(Destination::New));
+                Ok(f.call(session, ins, outs)?.map(|(_, a)| a).collect())
             };
             // releasing the GIL costs ~100ns: only worth it with real work
             let r = if work > 20_000 {
-                py.detach(move || run(ctx))
+                py.detach(move || run(session))
             } else {
-                run(ctx)
+                run(session)
             };
             r.map_err(runtime_error)
         })();
@@ -218,7 +209,8 @@ impl Function {
     /// reproducible). The C API seeds each of its sessions (`seed` in the table).
     fn seed(&self, py: Python<'_>, seed: u64) {
         self.lock_session(py)
-            .get_or_insert_with(PtCtx::new)
+            .get_or_insert_with(Session::new)
+            .ctx
             .seed(seed);
     }
 
@@ -226,7 +218,8 @@ impl Function {
     /// way). The C API sets this per session (`set_parallel` in the table).
     fn set_parallel(&self, py: Python<'_>, on: bool) {
         self.lock_session(py)
-            .get_or_insert_with(PtCtx::new)
+            .get_or_insert_with(Session::new)
+            .ctx
             .parallel = on;
     }
 
@@ -247,7 +240,7 @@ impl Function {
 
 impl Function {
     /// The session, waiting without the GIL if another thread has it.
-    fn lock_session(&self, py: Python<'_>) -> std::sync::MutexGuard<'_, Option<PtCtx>> {
+    fn lock_session(&self, py: Python<'_>) -> std::sync::MutexGuard<'_, Option<Session>> {
         loop {
             match self.session.try_lock() {
                 Ok(g) => return g,

@@ -59,7 +59,7 @@ pub struct PtArray {
 
 const _: () = assert!(size_of::<PtArray>() == 40);
 
-/// Byte size of an array of `shape`, with numpy's limits: no negative dims, and the
+/// Byte size of an array of `shape`, with numpy's limits: no negative lengths, and the
 /// size must fit in `isize`. Every allocation sized from a shape goes through this, so
 /// a shape whose element count overflows can't get a too-small buffer.
 pub fn checked_nbytes(shape: &[i64], itemsize: usize) -> Option<usize> {
@@ -78,7 +78,7 @@ pub fn checked_nbytes(shape: &[i64], itemsize: usize) -> Option<usize> {
 ///
 /// Kernels index with shapes and strides without bounds checks, so this is what makes
 /// "the array is valid" an explicit precondition we've verified rather than assumed:
-/// no negative dims, a non-null pointer for non-empty arrays, data and strides aligned
+/// no negative lengths, a non-null pointer for non-empty arrays, data and strides aligned
 /// to the itemsize, and an address range that doesn't overflow.
 pub fn validate_array(
     data: *const u8,
@@ -87,7 +87,7 @@ pub fn validate_array(
     itemsize: usize,
 ) -> Result<(usize, usize), String> {
     if let Some(d) = shape.iter().position(|&s| s < 0) {
-        return Err(format!("negative length {} in dim {d}", shape[d]));
+        return Err(format!("negative length {} on axis {d}", shape[d]));
     }
     checked_nbytes(shape, itemsize).ok_or_else(|| format!("shape {shape:?} is too big"))?;
     if shape.contains(&0) {
@@ -96,17 +96,20 @@ pub fn validate_array(
     if data.is_null() {
         return Err("null data pointer for a non-empty array".into());
     }
+    // (itemsizes are powers of two: masks, not divisions)
+    debug_assert!(itemsize.is_power_of_two());
     let isz = itemsize as i64;
-    if !(data as usize).is_multiple_of(itemsize) {
+    let misaligned = isz - 1;
+    if data as usize & (itemsize - 1) != 0 {
         return Err(format!(
             "data pointer {data:p} is not aligned to {itemsize} bytes"
         ));
     }
     let (mut lo, mut hi) = (0i64, 0i64);
     for (d, (&n, &s)) in shape.iter().zip(strides).enumerate() {
-        if n > 1 && s % isz != 0 {
+        if n > 1 && s & misaligned != 0 {
             return Err(format!(
-                "stride {s} of dim {d} is not a multiple of the itemsize {itemsize}"
+                "stride {s} of axis {d} is not a multiple of the itemsize {itemsize}"
             ));
         }
         let span = (n - 1).checked_mul(s).ok_or("array extent overflows")?;

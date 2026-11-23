@@ -295,7 +295,7 @@ def test_c_boundary_checks(harness):
         (lambda p: setattr(p, "data", raw.ctypes.data + 1), b"not aligned"),
         (lambda p: p.shape.__setitem__(0, -1), b"negative length"),
         (lambda p: setattr(p, "data", None), b"null data"),
-        (lambda p: setattr(p, "ndim", 2), b"expected 1 dims"),
+        (lambda p: setattr(p, "ndim", 2), b"expected 1 axes"),
     ]
     for corrupt, expected in bad:
         ins, _k = as_ptarrays([xv.copy()])

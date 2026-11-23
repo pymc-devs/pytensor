@@ -8,11 +8,10 @@
 //! outlives the Python object it came from. A `PtSession*` owns a clone of that Arc and
 //! a context. Every entry point catches panics so they never unwind into C.
 
-use super::{Destination, Function as Compiled};
-use crate::abi::{ABI_VERSION, OwnedBuf, PtArray, PtBuffer, overlaps};
+use super::{Destination, Function as Compiled, Session};
+use crate::abi::{ABI_VERSION, OwnedBuf, PtArray, PtBuffer};
 use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
-use crate::runtime::PtCtx;
 use pyo3::prelude::*;
 use std::ffi::{CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -63,11 +62,7 @@ impl Function {
 
 pub struct PtSession {
     f: Arc<Function>,
-    /// the session's context: scratch, errors, the random state
-    ctx: PtCtx,
-    /// byte ranges of the inputs and of the provided outputs of the current call
-    in_ranges: Vec<(usize, usize)>,
-    out_ranges: Vec<(usize, usize)>,
+    session: Session,
     err: CString,
 }
 
@@ -163,9 +158,7 @@ unsafe extern "C" fn session_new(f: *const Function) -> *mut PtSession {
     };
     let s = PtSession {
         f,
-        ctx: PtCtx::new(),
-        in_ranges: vec![],
-        out_ranges: vec![],
+        session: Session::new(),
         err: CString::default(),
     };
     Box::into_raw(Box::new(s))
@@ -196,7 +189,7 @@ unsafe extern "C" fn call(s: *mut PtSession, inputs: *const PtArray, outputs: *m
 /// was expected. (The views check the rest.)
 fn check_header(what: &str, k: usize, a: &PtArray, nd: usize, dtype: DType) -> Result<(), String> {
     if a.ndim < 0 || a.ndim as usize != nd {
-        return Err(format!("{what} {k}: expected {nd} dims, got {}", a.ndim));
+        return Err(format!("{what} {k}: expected {nd} axes, got {}", a.ndim));
     }
     if nd > 0 && (a.shape.is_null() || a.strides.is_null()) {
         return Err(format!("{what} {k}: shape and strides must not be NULL"));
@@ -213,8 +206,7 @@ fn check_header(what: &str, k: usize, a: &PtArray, nd: usize, dtype: DType) -> R
 }
 
 fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Result<(), String> {
-    let f = s.f.clone();
-    let prog = &*f.prog;
+    let prog = &*s.f.prog;
     let (n_in, n_out) = (prog.n_inputs(), prog.n_outputs());
     if (inputs.is_null() && n_in > 0) || (outputs.is_null() && n_out > 0) {
         return Err("inputs and outputs must not be NULL".into());
@@ -231,60 +223,38 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
         // of `call`).
         _ => unsafe { std::slice::from_raw_parts_mut(outputs, n_out) },
     };
-    s.in_ranges.clear();
-    let mut ins = Vec::with_capacity(n_in);
-    for (k, a) in inputs.iter().enumerate() {
+    let ins = inputs.iter().enumerate().map(|(k, a)| {
         let t = &prog.inputs[k];
         check_header("input", k, a, t.ndim(), t.dtype)?;
         // SAFETY: the header was just checked against the function's type; what the
         // constructor can't check is the caller's side of the contract of `call`: the
         // shape and strides arrays have `ndim` entries, and the memory they describe
         // exists and isn't written during the call.
-        let a =
-            unsafe { PtArrayRef::from_raw_checked(a) }.map_err(|e| format!("input {k}: {e}"))?;
-        s.in_ranges.push(a.extent());
-        ins.push(a);
-    }
-    s.out_ranges.clear();
-    let mut dests = Vec::with_capacity(n_out);
-    for (o, a) in outputs.iter().enumerate() {
+        unsafe { PtArrayRef::from_raw_checked(a) }.map_err(|e| format!("input {k}: {e}"))
+    });
+    let outs = outputs.iter().enumerate().map(|(o, a)| {
         let t = &prog.outputs[o];
         check_header("output", o, a, t.ndim(), t.dtype)?;
         if a.data.is_null() {
-            dests.push(Destination::New);
-            continue;
+            return Ok(Destination::New);
         }
         // SAFETY: as for the inputs, for memory to write: the caller's side of the
         // contract is that it exists and that nobody else uses it during the call.
-        // That it overlaps none of the arrays of this call is checked below, before
-        // anything is written.
-        let a = unsafe { PtArrayMut::from_raw_checked(a) }
-            .map_err(|e| format!("provided output {o}: {e}"))?;
-        let r = a.extent();
-        if let Some(i) = s.in_ranges.iter().position(|&x| overlaps(x, r)) {
-            return Err(format!(
-                "provided output {o} overlaps the memory of input {i}"
-            ));
-        }
-        if s.out_ranges.iter().any(|&x| overlaps(x, r)) {
-            return Err(format!(
-                "provided output {o} overlaps another provided output"
-            ));
-        }
-        s.out_ranges.push(r);
-        dests.push(Destination::Into(a));
-    }
-    let results = prog.call(&mut s.ctx, &ins, dests)?;
-    drop(ins);
+        // That it overlaps none of the arrays of this call is checked (by `call`)
+        // before anything is written.
+        unsafe { PtArrayMut::from_raw_checked(a) }
+            .map(Destination::Into)
+            .map_err(|e| format!("provided output {o}: {e}"))
+    });
+    let results = prog.call(&mut s.session, ins, outs)?;
     // outputs we hand over, taken back if a later one fails
     let mut taken: Vec<usize> = vec![];
     let mut r = Ok(());
-    for (o, (a, res)) in outputs.iter_mut().zip(results).enumerate() {
-        let Some(out) = res else { continue };
+    for (o, out) in results {
         // SAFETY: shape and strides point to caller arrays of length ndim, ours during
         // the call (the contract of `call`; the header was checked above), and no
         // memory is provided.
-        r = unsafe { OutSlot::from_raw(a) }
+        r = unsafe { OutSlot::from_raw(&mut outputs[o]) }
             .and_then(|slot| slot.set(out))
             .map_err(|e| format!("output {o}: {e}"));
         if r.is_err() {
@@ -310,12 +280,12 @@ unsafe extern "C" fn last_error(s: *const PtSession) -> *const c_char {
 
 unsafe extern "C" fn seed(s: *mut PtSession, seed: u64) {
     // SAFETY: `s` is live and used by this thread only (contract).
-    unsafe { (*s).ctx.seed(seed) }
+    unsafe { (*s).session.ctx.seed(seed) }
 }
 
 unsafe extern "C" fn set_parallel(s: *mut PtSession, on: i32) {
     // SAFETY: `s` is live and used by this thread only (contract).
-    unsafe { (*s).ctx.parallel = on != 0 }
+    unsafe { (*s).session.ctx.parallel = on != 0 }
 }
 
 unsafe extern "C" fn buffer_decref(b: *mut PtBuffer) {
