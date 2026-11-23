@@ -12,6 +12,7 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 
 import builtins
 import math
+from functools import reduce
 from itertools import chain
 from textwrap import dedent
 from typing import Any
@@ -57,37 +58,22 @@ class IntegerDivisionError(Exception):
 
 
 def upcast(dtype, *dtypes) -> str:
-    # This tries to keep data in floatX or lower precision, unless we
-    # explicitly request a higher precision datatype.
-    keep_float32 = [
-        (config.cast_policy == "numpy+floatX" and config.floatX == "float32")
-    ]
-    keep_float16 = [
-        (config.cast_policy == "numpy+floatX" and config.floatX == "float16")
-    ]
+    """Promote numeric dtypes pairwise from left to right.
 
-    def make_array(dt):
-        if dt == "float64":
-            # There is an explicit float64 dtype: we cannot keep float32.
-            keep_float32[0] = False
-            keep_float16[0] = False
-        if dt == "float32":
-            keep_float16[0] = False
-        return np.zeros((), dtype=dt)
+    Under ``numpy+floatX``, cap the precision of real floating results at
+    ``config.floatX`` unless an input explicitly requests higher precision.
+    """
+    result = str(reduce(np.promote_types, dtypes, np.dtype(dtype)))
+    if result not in ("float32", "float64") or dtype == result or result in dtypes:
+        return result
 
-    z = make_array(dtype)
-    for dt in dtypes:
-        z = z + make_array(dt=dt)
-    rval = str(z.dtype)
-    if rval == "float64":
-        if keep_float16[0]:
-            return "float16"
-        if keep_float32[0]:
+    if config.cast_policy == "numpy+floatX":
+        floatX = config.floatX
+        if floatX == "float32" and result == "float64":
             return "float32"
-    elif rval == "float32":
-        if keep_float16[0]:
+        if floatX == "float16" and dtype != "float32" and "float32" not in dtypes:
             return "float16"
-    return rval
+    return result
 
 
 class NumpyAutocaster:
