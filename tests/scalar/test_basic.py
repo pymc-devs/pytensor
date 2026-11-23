@@ -57,6 +57,7 @@ from pytensor.scalar.basic import (
     tan,
     tanh,
     true_div,
+    upcast,
 )
 from pytensor.tensor import tensor_from_scalar
 from pytensor.tensor.type import fscalar, imatrix, matrix
@@ -287,6 +288,22 @@ class TestLogical:
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [~x])))
         for a, b in ((0, 1), (0, 0), (1, 0), (1, 1)):
             assert fn(a, b) == ~a, (a,)
+
+
+@pytest.mark.parametrize(
+    ("cast_policy", "floatX", "dtypes", "expected"),
+    [
+        ("custom", "float16", ("int8", "uint8", "float16"), "float32"),
+        ("custom", "float16", ("uint8", "float16", "int8"), "float16"),
+        ("numpy+floatX", "float16", ("float16", "int16"), "float16"),
+        ("numpy+floatX", "float16", ("int64", np.dtype("float32")), "float64"),
+        ("numpy+floatX", "float32", ("int64", "uint64"), "float32"),
+        ("numpy+floatX", "float32", ("int64", np.dtype("float64")), "float64"),
+    ],
+)
+def test_upcast(cast_policy, floatX, dtypes, expected):
+    with pytensor.config.change_flags(cast_policy=cast_policy, floatX=floatX):
+        assert upcast(*dtypes) == expected
 
 
 class TestUpgradeToFloat:
