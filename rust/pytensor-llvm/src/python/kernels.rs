@@ -28,6 +28,8 @@ pub struct RustKernel {
     modes: Vec<OutputMode>,
     /// the layout of each output (`Kernel::output_layouts`)
     layouts: Vec<Layout>,
+    /// `Kernel::uses_pool`
+    uses_pool: bool,
 }
 
 impl RustKernel {
@@ -35,6 +37,7 @@ impl RustKernel {
     /// `modes`: what the kernel was made with.
     fn of<K: Kernel>(kernel: K, modes: Vec<OutputMode>, desc: String) -> PyResult<Self> {
         let layouts = kernel.output_layouts().to_vec();
+        let uses_pool = kernel.uses_pool();
         let n = kernel.arity().1;
         if modes.len() != n || layouts.len() != n {
             return err(format!(
@@ -55,6 +58,7 @@ impl RustKernel {
             desc,
             modes,
             layouts,
+            uses_pool,
         })
     }
 }
@@ -87,6 +91,12 @@ impl RustKernel {
 
     fn __repr__(&self) -> String {
         self.desc.clone()
+    }
+
+    /// May the kernel run work on the runtime's thread pool?
+    #[getter]
+    fn uses_pool(&self) -> bool {
+        self.uses_pool
     }
 
     /// How the kernel produces each output: `[(mode, layout)]`, mode "provided"

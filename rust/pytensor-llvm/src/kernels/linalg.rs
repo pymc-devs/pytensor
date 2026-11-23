@@ -8,6 +8,7 @@
 use crate::abi::OutputMode;
 use crate::kernels::{Args, Array, ArrayMut, Element, Kernel, scratch};
 use crate::layout::Layout;
+use crate::runtime::parallel::CallerWaits;
 use crate::runtime::{PtCtx, runtime};
 use faer::Par;
 use faer::dyn_stack::MemStack;
@@ -85,14 +86,27 @@ float!(f64, f32);
 
 // ------------------------------------------------------------------ parallelism
 
-/// Kernels with fewer input elements than this run sequentially: the hop to the
-/// thread pool would cost more than it saves.
+/// Kernels with fewer input elements than this run sequentially: the other threads of
+/// the pool would cost more than they save. (The decompositions do O(n^3) work.)
 const PARALLEL_MIN: i64 = 64 * 64;
+
+/// The same for Dot, in multiply-adds.
+const PARALLEL_MIN_DOT: i64 = 64 * 64 * 64;
 
 /// A kernel computing with faer, with the parallelism `par`.
 trait FaerKernel: Send + Sync + 'static {
     fn arity(&self) -> (usize, usize);
     fn run(&self, ctx: &mut PtCtx, args: Args, par: Par) -> Result<(), String>;
+
+    /// Is the call with `args` worth running in parallel? By default: if an input has
+    /// at least `PARALLEL_MIN` elements.
+    fn worth_parallel(&self, args: &Args) -> bool {
+        (0..args.inputs.len()).any(|i| {
+            args.inputs
+                .get(i)
+                .is_ok_and(|a| a.shape().iter().product::<i64>() >= PARALLEL_MIN)
+        })
+    }
 }
 
 /// The `Kernel` of faer kernels. With `parallel` (the linker's `linalg_parallel`) they
@@ -111,6 +125,10 @@ macro_rules! faer_kernels {
 
             fn run(&self, ctx: &mut PtCtx, args: Args) -> Result<(), String> {
                 run_faer(self, self.parallel, ctx, args)
+            }
+
+            fn uses_pool(&self) -> bool {
+                self.parallel
             }
         }
     )*};
@@ -150,13 +168,8 @@ fn run_faer<K: FaerKernel>(
     ctx: &mut PtCtx,
     args: Args,
 ) -> Result<(), String> {
-    let large = (0..args.inputs.len()).any(|i| {
-        args.inputs
-            .get(i)
-            .is_ok_and(|a| a.shape().iter().product::<i64>() >= PARALLEL_MIN)
-    });
     let rt = runtime();
-    if !(parallel && large && ctx.parallel && rt.threads() > 1) {
+    if !(parallel && ctx.parallel && rt.threads() > 1 && kernel.worth_parallel(&args)) {
         return kernel.run(ctx, args, Par::Seq);
     }
     let par = Par::rayon(rt.threads());
@@ -165,19 +178,6 @@ fn run_faer<K: FaerKernel>(
         let (ctx, args) = call.into_inner();
         kernel.run(ctx, args, par)
     })
-}
-
-/// The context and arguments of a call, run on the pool while the caller waits.
-struct CallerWaits<T>(T);
-
-// SAFETY: the calling thread blocks in `install` until the pool is done with them,
-// and nothing else uses them meanwhile (the kernel contract).
-unsafe impl<T> Send for CallerWaits<T> {}
-
-impl<T> CallerWaits<T> {
-    fn into_inner(self) -> T {
-        self.0
-    }
 }
 
 // ------------------------------------------------------------------ Dot
@@ -220,6 +220,16 @@ impl<T: Float> FaerKernel for Dot<T> {
         // vector . matrix is a row
         matmul(ctx, &a, &b, &mut out, sa.len() == 1, par);
         Ok(())
+    }
+
+    fn worth_parallel(&self, args: &Args) -> bool {
+        let (Ok(a), Ok(b)) = (args.inputs.get(0), args.inputs.get(1)) else {
+            return false;
+        };
+        // m k n multiply-adds (a: m x k or k, b: k x n or k)
+        let n = if b.ndim() == 2 { b.shape()[1] } else { 1 };
+        let work = a.shape().iter().fold(n, |w, &l| w.saturating_mul(l));
+        work >= PARALLEL_MIN_DOT
     }
 }
 

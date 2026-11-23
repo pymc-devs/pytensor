@@ -43,7 +43,7 @@ class LLVMLinker(JITLinker):
         input_layout="any",
         check_layouts=False,
         parallel=True,
-        linalg_parallel=None,
+        linalg_parallel=False,
         debug_info=False,
         **kwargs,
     ):
@@ -54,8 +54,6 @@ class LLVMLinker(JITLinker):
         self.input_layout = input_layout
         self.check_layouts = check_layouts
         self.parallel = parallel
-        if linalg_parallel is None:
-            linalg_parallel = parallel
         self.linalg_parallel = linalg_parallel
         self.debug_info = debug_info
         self.program = None

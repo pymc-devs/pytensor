@@ -77,6 +77,12 @@ pub trait Kernel: Send + Sync + 'static {
     fn output_layouts(&self) -> &[Layout];
 
     fn run(&self, ctx: &mut PtCtx, args: Args) -> Result<(), String>;
+
+    /// May it run work on the runtime's thread pool? (A compiled function that calls
+    /// such a kernel runs on the pool: `function::Function`.)
+    fn uses_pool(&self) -> bool {
+        false
+    }
 }
 
 /// The kernel `K` with the kernel ABI (`abi::KernelFn`).

@@ -14,6 +14,20 @@ use rand_core::Rng;
 use rayon::prelude::*;
 use std::cell::RefCell;
 
+/// What a caller hands to the pool (`ThreadPool::install`) and waits for: a context,
+/// arguments, pointers.
+pub struct CallerWaits<T>(pub T);
+
+// SAFETY: the calling thread blocks in `install` until the pool is done with it, and
+// nothing else uses it meanwhile (what callers of `CallerWaits` promise).
+unsafe impl<T> Send for CallerWaits<T> {}
+
+impl<T> CallerWaits<T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 /// `i32 body(ctx, captures, start, end)`: 0 on success, else the error is set on `ctx`.
 pub type BodyFn = unsafe extern "C" fn(*mut PtCtx, *const u8, i64, i64) -> i32;
 

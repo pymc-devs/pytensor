@@ -18,7 +18,8 @@ pub mod capi;
 use crate::abi::{KernelFn, OwnedBuf, PtArray, c_strides, checked_nbytes, overlaps};
 use crate::array::{OwnedArray, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
-use crate::runtime::PtCtx;
+use crate::runtime::parallel::CallerWaits;
+use crate::runtime::{PtCtx, runtime};
 
 pub type R<T> = Result<T, String>;
 
@@ -94,6 +95,8 @@ pub struct Function {
     provided_bytes: Vec<usize>,
     /// how many i64s the shapes and strides of the returned outputs take
     returned_header_size: usize,
+    /// may the kernel run work on the runtime's thread pool (`runs_on_pool`)?
+    uses_pool: bool,
 }
 
 // SAFETY: the kernel and its config are usable from any thread (`Function::new`'s
@@ -108,7 +111,8 @@ impl Function {
     /// both valid as long as the function is used, from any thread. It computes
     /// outputs of the types `outputs` from inputs of the types `inputs`, writing the
     /// `provided` ones into the C-contiguous memory it gets and returning a buffer
-    /// reference for the others (the kernel contract).
+    /// reference for the others (the kernel contract). `uses_pool`: may it run work
+    /// on the runtime's thread pool?
     pub unsafe fn new(
         address: usize,
         config: usize,
@@ -116,6 +120,7 @@ impl Function {
         contiguous_inputs: Vec<bool>,
         outputs: Vec<ArgType>,
         provided: Vec<bool>,
+        uses_pool: bool,
     ) -> R<Function> {
         // SAFETY: a null or a function pointer of this type (the function's contract).
         let kernel = unsafe { std::mem::transmute::<usize, Option<KernelFn>>(address) }
@@ -154,7 +159,18 @@ impl Function {
             provided_headers,
             provided_bytes,
             returned_header_size,
+            uses_pool,
         })
+    }
+
+    /// Does a call in a session with the context `ctx` run on the runtime's thread
+    /// pool? It does when the function may use the pool, and the session allows
+    /// parallelism. The whole call then runs on one of the pool's threads, so that its
+    /// parallel parts start there and only what other threads steal leaves it, instead
+    /// of each of them hopping over to the pool and back (rayon runs work on the
+    /// calling thread only when that is one of its own).
+    pub fn runs_on_pool(&self, ctx: &PtCtx) -> bool {
+        self.uses_pool && ctx.parallel && runtime().threads() > 1
     }
 
     pub fn n_inputs(&self) -> usize {
@@ -342,19 +358,23 @@ impl Function {
         }
         let ctx = &mut s.ctx;
         let mark = ctx.scratch_mark();
+        let (kernel, config, args) = (self.kernel, self.config, s.args.as_mut_ptr());
         // SAFETY: the kernel contract (`new`): `ctx` is ours for the call; the inputs
         // are valid arrays of their types, borrowed until we return; provided outputs
         // are C-contiguous memory of their static shapes (allocated here, or the
         // caller's) that overlaps no input; returned outputs have no data and storage
         // for their shapes (this function's contract).
-        let rc = unsafe {
-            (self.kernel)(
-                ctx,
-                s.args.as_mut_ptr(),
-                n_in as i32,
-                n_out as i32,
-                self.config,
-            )
+        let run = |ctx: &mut PtCtx| unsafe { kernel(ctx, args, n_in as i32, n_out as i32, config) };
+        let rc = if self.runs_on_pool(ctx) {
+            // (we wait for the pool, and nobody else uses the context and arguments
+            // meanwhile)
+            let call = CallerWaits((&mut *ctx, run));
+            runtime().pool().install(move || {
+                let (ctx, run) = call.into_inner();
+                run(ctx)
+            })
+        } else {
+            run(ctx)
         };
         ctx.scratch_release(mark);
         let mut result = match rc {

@@ -65,7 +65,8 @@ def rust_implementation(node, in_layouts, linalg_parallel=False) -> RustKernel |
     if k is None:
         return None
     return RustKernel(
-        Kernel(k.address, k.config, repr(k), k), rust_kernel_declarations(k, node)
+        Kernel(k.address, k.config, repr(k), k, uses_pool=k.uses_pool),
+        rust_kernel_declarations(k, node),
     )
 
 

@@ -490,6 +490,7 @@ class _ParallelPolicy:
     ) -> None:
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
+        self.cg.unit.uses_pool = True
         with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as chunk:
             # (a parallel body is a function of its own)
             with (

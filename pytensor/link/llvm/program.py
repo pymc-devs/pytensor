@@ -262,11 +262,14 @@ class Program:
         contiguous,
         out_ids,
         modes,
+        uses_pool,
     ):
         self.descriptions = [step.description for step in steps]
         self.arena_bytes = node_function.arena[1]
         self.profile_cells = profile
         self.address = unit.address
+        #: may it run work on the runtime's thread pool? (Calls then run on the pool.)
+        self.uses_pool = uses_pool
         self.config = unit.config
 
         def shape(k):
@@ -284,6 +287,7 @@ class Program:
                 for k, m in zip(out_ids, modes, strict=True)
             ],
             [unit.compiled, unit.links.keepalive],
+            uses_pool,
         )
         self._dump = _dump(
             types, node_function, steps, in_ids, contiguous, out_ids, modes
@@ -539,6 +543,7 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         contiguous,
         out_ids,
         modes,
+        any(m.uses_pool for m in (*planner.modules, unit)),
     )
 
 

@@ -70,7 +70,8 @@ impl Function {
     /// known at run time; contiguous: the generated code assumes C-contiguous memory);
     /// `outputs`: `(dtype, shape, provided)` per graph output (provided: written into
     /// memory the caller provides, else returned in a buffer). `keepalive` is kept as
-    /// long as the function: what `address` and `config` belong to.
+    /// long as the function: what `address` and `config` belong to. `uses_pool`: may
+    /// the function run work on the runtime's thread pool?
     #[new]
     fn new(
         address: usize,
@@ -78,6 +79,7 @@ impl Function {
         inputs: Vec<(Bound<'_, PyArrayDescr>, Vec<Option<u64>>, bool)>,
         outputs: Vec<(Bound<'_, PyArrayDescr>, Vec<Option<u64>>, bool)>,
         keepalive: Vec<Py<PyAny>>,
+        uses_pool: bool,
     ) -> PyResult<Self> {
         let mut in_types = vec![];
         let mut contiguous = vec![];
@@ -101,7 +103,11 @@ impl Function {
         // driver for these types (`driver.py`), and `keepalive` holds what they belong
         // to.
         let f =
-            unsafe { RFunction::new(address, config, in_types, contiguous, out_types, provided) }
+            unsafe {
+                RFunction::new(
+                    address, config, in_types, contiguous, out_types, provided, uses_pool,
+                )
+            }
                 .map_err(PyValueError::new_err)?;
         Ok(Function {
             f: Arc::new(f),
@@ -128,7 +134,6 @@ impl Function {
         // `headers`; its strides follow them)
         let mut parts: Vec<(usize, usize, usize)> = Vec::with_capacity(args.len());
         let mut headers: Vec<i64> = Vec::with_capacity(8 * args.len());
-        let mut work = 0usize;
         let res = (|| -> PyResult<Vec<OwnedArray>> {
             for (k, a) in args.iter().enumerate() {
                 let want = f.inputs[k].dtype;
@@ -170,7 +175,6 @@ impl Function {
                 parts.push((data, headers.len(), arr.ndim()));
                 headers.extend(arr.shape().iter().map(|&n| n as i64));
                 headers.extend(arr.strides().iter().map(|&s| s as i64));
-                work += arr.len();
                 keep.push(a);
             }
             let run = move |session: &mut Session| -> Result<Vec<OwnedArray>, String> {
@@ -188,13 +192,9 @@ impl Function {
                 let outs = (0..f.n_outputs()).map(|_| Ok(Destination::New));
                 Ok(f.call(session, ins, outs)?.map(|(_, a)| a).collect())
             };
-            // releasing the GIL costs ~100ns: only worth it with real work
-            let r = if work > 20_000 {
-                py.detach(move || run(session))
-            } else {
-                run(session)
-            };
-            r.map_err(runtime_error)
+            // without the GIL: other Python threads run meanwhile, and what the call
+            // runs on other threads may need it (numba kernels in object mode)
+            py.detach(move || run(session)).map_err(runtime_error)
         })();
         drop(keep);
         drop(guard);

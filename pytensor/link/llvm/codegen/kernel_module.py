@@ -61,6 +61,9 @@ class KernelModule:
     description: str = ""
     #: the compiled module, once linked (`link`)
     compiled: ir.CompiledModule | None = None
+    #: may its code run work on the runtime's thread pool (a parallel loop, a kernel
+    #: that does)?
+    uses_pool: bool = False
 
     @classmethod
     def new(

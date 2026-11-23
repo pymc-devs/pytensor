@@ -54,6 +54,8 @@ class Kernel:
     config: int
     description: str = ""
     keepalive: object = None
+    #: may it run work on the runtime's thread pool?
+    uses_pool: bool = False
 
 
 #: What generated code calls: a kernel available now, or generated code in a module of
@@ -250,6 +252,8 @@ def call_kernel(
         ptrs.append(p)
 
     index = cg.links.link_kernel(kernel)
+    if isinstance(kernel, Kernel) and kernel.uses_pool:
+        cg.unit.uses_pool = True
     fn = linked(cg, index)
     config = linked(cg, index + 1)
     mark = b.rt_scratch_mark(cg.ctx)
