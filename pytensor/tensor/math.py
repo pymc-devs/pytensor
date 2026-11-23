@@ -2777,7 +2777,7 @@ def var(input, axis=None, ddof=0, keepdims=False, corrected=False):
         shp = shape(input)
         reduced_dims = [shp[i] for i in axis]
         n_elems = variadic_mul(*reduced_dims)
-        div = (n_elems - ddof).astype(centered_input.dtype)
+        div = maximum(n_elems - ddof, 0).astype(centered_input.dtype)
         v = sum((centered_input**two), axis=axis, keepdims=keepdims)
         v = true_div(v, div)
 

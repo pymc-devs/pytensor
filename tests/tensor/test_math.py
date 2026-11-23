@@ -2628,6 +2628,13 @@ def test_var_std_multi_axis_ddof(axis, ddof, corrected, keepdims):
     np.testing.assert_allclose(f_std(val), np_std)
 
 
+def test_var_std_ddof_larger_than_sample_size():
+    # Like numpy, the divisor (N - ddof) is clipped at zero instead of going negative
+    x = vector("x", dtype="float64")
+    f = function([x], [var(x, ddof=3), std(x, ddof=3)])
+    np.testing.assert_allclose(f(np.array([1.0, 2.0])), [np.inf, np.inf])
+
+
 class TestSum:
     def test_sum_overflow(self):
         # Ensure that overflow errors are a little bit harder to get
