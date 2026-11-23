@@ -9,17 +9,29 @@ from tests.unittest_tools import assert_equal_computations
 
 
 class TestVectorizeGraph:
-    def test_pure_xtensor_graph(self):
+    @pytest.mark.parametrize(
+        "new_tensor_dims, expected_dims",
+        [((), ("c", "b", "a")), (("c",), ("b", "c", "a"))],
+    )
+    def test_pure_xtensor_graph(self, new_tensor_dims, expected_dims):
         x = xtensor("x", dims=("a",))
         out = x + 1
 
         x_new = xtensor("x_new", dims=("c", "a", "b"))
-        [out_vec] = vectorize_graph([out], {x: x_new})
+        [out_vec] = vectorize_graph([out], {x: x_new}, new_tensor_dims=new_tensor_dims)
 
         assert isinstance(out_vec.type, XTensorType)
-        assert out_vec.type.dims == ("c", "b", "a")
-        expected = x_new.transpose("c", "b", "a") + 1
+        assert out_vec.type.dims == expected_dims
+        expected = x_new.transpose(*expected_dims) + 1
         assert_equal_computations([out_vec], [expected])
+
+    def test_pure_xtensor_graph_rejects_unknown_batch_dim(self):
+        x = xtensor("x", dims=("a",))
+        x_new = xtensor("x_new", dims=("b", "a"))
+        with pytest.raises(
+            ValueError, match=r"not introduced by XTensor replacements: \['c'\]"
+        ):
+            vectorize_graph(x + 1, {x: x_new}, new_tensor_dims=("b", "c"))
 
     def test_pure_tensor_graph(self):
         x = tensor("x", shape=())
