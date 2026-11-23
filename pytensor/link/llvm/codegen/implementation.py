@@ -156,12 +156,16 @@ class Generated:
             elif isinstance(destination, ScalarDestination):
                 handles.append(ScalarOutput(destination))
             else:
+                # (the inputs it may overwrite: those the signature lets it, with
+                # layouts that give the output its own)
+                aliased = output.aliased_inputs
+                destroyed = tuple(i for i in destroyed_inputs(node, k) if i in aliased)
                 handles.append(
                     TensorOutput(
                         destination,
                         output.tensor.layout,
                         view_inputs(node, k),
-                        destroyed_inputs(node, k),
+                        destroyed,
                     )
                 )
         llvm_emit(node.op, node, cg, inputs, handles)

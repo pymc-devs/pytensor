@@ -12,6 +12,7 @@ from pytensor.link.llvm.codegen.interface import (
     supported_types,
 )
 from pytensor.link.llvm.codegen.num import cast, load, store
+from pytensor.link.llvm.codegen.signature import overwritten_layout
 from pytensor.link.llvm.codegen.types import element_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.scalar.basic import add as scalar_add
@@ -101,6 +102,12 @@ def _(op, node) -> bool:
     scalars = sum(1 for entry in op.idx_list if not isinstance(entry, slice))
     view_ndim = node.inputs[0].type.ndim - scalars
     return supported_types(node) and node.inputs[1].type.ndim <= view_ndim
+
+
+@llvm_layout.register(IncSubtensor)
+def _(op, node, input_layouts):
+    # x's, when the result can be written into it (else C)
+    return [overwritten_layout(node, 0, input_layouts)]
 
 
 @llvm_emit.register(IncSubtensor)

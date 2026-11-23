@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -68,6 +68,9 @@ class Codegen:
     #: the scratch memory taken in the scopes being emitted, innermost last: what to
     #: free at the end of each (`scratch_scope`)
     scratch_scopes: list[_ScratchScope] = field(default_factory=list)
+    #: the index checks deferred in the scopes being emitted (`deferred_checks`),
+    #: innermost last: per message, the flag set when one fails
+    deferred: list[dict[str, ir.Value]] = field(default_factory=list)
     _checks: int = field(default=0)
 
     def __post_init__(self) -> None:
@@ -346,10 +349,16 @@ class Codegen:
         n: ir.Value,
         message: str,
         bounds: IndexBounds = (None, None),
+        defer: bool = False,
     ) -> ir.Value:
         """Index `i` (i64) into an axis of length `n`: negative values wrap, out-of-range
         ones fail with `message`. Generates only what `bounds` (`index_bounds`), a
-        constant `i` and a constant `n` don't already guarantee."""
+        constant `i` and a constant `n` don't already guarantee.
+
+        With `defer`, inside `deferred_checks` for `message`, an index out of range
+        doesn't leave the loop it is in: it is clamped into the axis, and the failure is
+        reported when the scope ends. The axis must not be empty then (check that
+        before the loop)."""
         b = self.b
         if i.const_int is not None:
             bounds = (i.const_int, i.const_int)
@@ -357,9 +366,42 @@ class Codegen:
         if lo is None or lo < 0:
             i = b.select(b.slt(i, 0), b.add(i, n), i)
         nc = n.const_int
-        if lo is None or hi is None or nc is None or lo < -nc or hi >= nc:
-            self.check(b.ult(i, n), message)  # also catches what is still negative
-        return i
+        if not (lo is None or hi is None or nc is None or lo < -nc or hi >= nc):
+            return i
+        ok = b.ult(i, n)  # also catches what is still negative
+        if not defer:
+            self.check(ok, message)
+            return i
+        flag = self.deferred[-1].get(message) if self.deferred else None
+        if flag is None:
+            raise ValueError(f"a deferred check outside of deferred_checks: {message}")
+        # (a clamp stays a vector operation where the loads use the index one lane at a
+        # time; a select of 0 would be done lane by lane with them)
+        clamped = b.umin(i, b.sub(n, 1))
+        b.store(b.or_(b.load(ir.i1, flag), b.ne(clamped, i)), flag)
+        return clamped
+
+    @contextmanager
+    def deferred_checks(self, messages: Iterable[str]) -> Iterator[None]:
+        """Index checks with these `messages` deferred inside (`checked_index` with
+        `defer`) fail when the scope ends, not in the loop they are in: loops without
+        an exit in the middle can be vectorized. Use it around a loop whose results
+        aren't used when it fails. Like `scratch_scope`, the code inside must be one
+        region of control flow, of one function (a parallel body has scopes of its
+        own)."""
+        b = self.b
+        flags = {}
+        for message in messages:
+            flags[message] = b.alloca(ir.i1)
+            b.store(b.const_bool(False), flags[message])
+        self.deferred.append(flags)
+        try:
+            yield
+        finally:
+            self.deferred.pop()
+        if not self.b.terminated:
+            for message, flag in flags.items():
+                self.check(self.b.not_(self.b.load(ir.i1, flag)), message)
 
     def _policy(
         self, n_elements: Callable[[], ir.Value], parallel_cost: float | None
@@ -430,8 +472,10 @@ class Codegen:
 
 def loop_order(shape: Sequence[ir.Value], arrays: Sequence[Array]) -> list[int]:
     """The axis order (outermost first) to loop in: the memory order most arrays share
-    (by their packed axes; on a tie, the one of the later array, usually an output).
-    Identity when nothing is known."""
+    (by their packed axes). On a tie, the one with the longer innermost axis (static
+    lengths; an inner loop that is longer vectorizes better and costs less around
+    it), then the one of the later array, usually an output. Identity when nothing is
+    known."""
     static = [n.const_int for n in shape]
     votes: dict[
         tuple[int, ...], tuple[int, int]
@@ -443,7 +487,12 @@ def loop_order(shape: Sequence[ir.Value], arrays: Sequence[Array]) -> list[int]:
             votes[block] = (count + len(block), pos)
     if not votes:
         return list(range(len(shape)))
-    block = max(votes, key=lambda k: votes[k])
+
+    def rank(block: tuple[int, ...]) -> tuple[int, int, int]:
+        count, pos = votes[block]
+        return count, static[block[0]] or 0, pos
+
+    block = max(votes, key=rank)
     rest = [ax for ax in range(len(shape)) if ax not in block]
     return rest + list(reversed(block))
 
@@ -495,6 +544,10 @@ class _ParallelPolicy:
             # (a parallel body is a function of its own)
             with (
                 self.cg.scratch_scope(function=True),
+                # (the deferred checks of the loop around, in the body's function)
+                self.cg.deferred_checks(
+                    self.cg.deferred[-1] if self.cg.deferred else ()
+                ),
                 b.loop(b.sub(chunk.end, chunk.start)) as j,
             ):
                 body(b.add(chunk.start, j))

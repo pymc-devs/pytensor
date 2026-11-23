@@ -117,10 +117,21 @@ def test_take_patterns(idx_dtype):
 
 def test_take_out_of_bounds_raises():
     x = pt.vector("x")
+    y = pt.vector("y")
     v = pt.lvector("v")
-    f = pytensor.function([x, v], x[v] * 2, mode=NO_FALLBACK)
+    # (checked after the loop, which is vectorized: a bad index far into it too; an
+    # AdvancedSubtensor, and a FusedElemwise reading through the index)
+    f = pytensor.function([x, y, v], [x[v], (pt.exp(x[v]) * y).sum()], mode=NO_FALLBACK)
+    assert [s.split("{")[0] for s in steps(f)] == ["AdvancedSubtensor", "FusedElemwise"]
+    long = np.zeros(1000, dtype="int64")
+    for bad in ([0, 3], [0, -4], [*long, 3]):
+        with pytest.raises(Exception, match="out of bounds"):
+            f(np.arange(3.0), np.ones(len(bad)), np.array(bad))
+    # an empty axis: no index fits, but nothing to read is fine
     with pytest.raises(Exception, match="out of bounds"):
-        f(np.arange(3.0), np.array([0, 3]))
+        f(np.zeros(0), np.ones(1), np.array([0]))
+    res = f(np.zeros(0), np.ones(0), np.zeros(0, dtype="int64"))
+    assert res[0].shape == (0,) and res[1] == 0
     # unsigned indices don't wrap
     u = pt.vector("u", dtype="uint8")
     f = pytensor.function([x, u], [x[u] * 2, x[u[0]] * 2], mode=NO_FALLBACK)
@@ -441,6 +452,32 @@ def test_fused_elemwise_patterns():
         [rng.random(10), rng.random(30), rng.integers(0, 10, 30), rng.random((5, 7))],
     )
     assert any(s.startswith("FusedElemwise") for s in steps(f))
+
+
+def test_fused_elemwise_in_memory_order():
+    # transposes of C inputs: the loop nest follows their order, with reductions and
+    # increments along the innermost axis in memory (axis 0) carried in registers
+    m = pt.matrix("m", shape=(5, 7))
+    n = pt.matrix("n", shape=(5, 700))
+    idx = pt.lvector("idx")
+    a, c = m.T, n.T
+    rows = c[: idx.shape[0]]
+    outs = [
+        (pt.exp(a) * c[:7]).sum(axis=0),
+        (pt.exp(a) * c[:7]).sum(axis=1),
+        (pt.exp(a[idx]) * rows).sum(axis=1),
+        pt.inc_subtensor(a[idx], pt.exp(rows)),
+    ]
+    mode = NO_FALLBACK.clone(link_kwargs={"input_layout": "c", "check_layouts": True})
+    # (several chunks of increments, fused.CHUNK)
+    values = [
+        rng.random((5, 7)),
+        rng.random((5, 700)),
+        np.sort(rng.integers(-7, 7, 600)),
+    ]
+    f = compare([m, n, idx], outs, values, mode)
+    # (the reductions in one loop, the indexed read and increment in another)
+    assert sum(s.count("FusedElemwise") for s in steps(f)) == 2
 
 
 def test_fused_elemwise_indexed_increments():

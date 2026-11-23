@@ -24,7 +24,7 @@ its strides. They come from how a value is produced:
 * graph inputs are DYNAMIC unless checked.
 
 The layout of each output follows from what its op says: `llvm_layout`
-(codegen/interface.py), and its `view_map` and `destroy_map`. It is binding: the
+(codegen/interface.py), and its `view_map`. It is binding: the
 `LayoutFeature` of the graph holds the layout of every value (`node_outputs`), and the
 planner makes whatever runs a node give its outputs those layouts.
 """
@@ -492,10 +492,12 @@ def graph_layouts(inputs, outputs, input_layouts=None, inlined=False) -> dict:
 
     With `inlined`, every OpFromGraph is treated as inlined, which is what generated
     code does with them: its outputs get the layouts its inner graph gives them, even
-    if its `execution` says it is compiled on its own."""
+    if its `execution` says it is compiled on its own. (Except a FusedElemwise
+    generated as one loop, a node of its own: `fusable`.)"""
     from pytensor.compile.builders import OpFromGraph
     from pytensor.graph.traversal import io_toposort
     from pytensor.link.llvm.codegen.signature import node_outputs
+    from pytensor.link.llvm.dispatch.fused import fusable
 
     layouts = {}
     for k, v in enumerate(inputs):
@@ -503,7 +505,7 @@ def graph_layouts(inputs, outputs, input_layouts=None, inlined=False) -> dict:
         layouts[v] = layout if layout is not None else _default_layout(v)
     for node in io_toposort(inputs, outputs):
         ins = [layouts[i] if i in layouts else _default_layout(i) for i in node.inputs]
-        if inlined and isinstance(node.op, OpFromGraph):
+        if inlined and isinstance(node.op, OpFromGraph) and not fusable(node.op, node):
             inner = node.op.fgraph
             inner_lays = graph_layouts(inner.inputs, inner.outputs, ins, inlined=True)
             layouts.update(

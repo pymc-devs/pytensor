@@ -14,7 +14,12 @@ from dataclasses import dataclass, replace
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.features import op_view_parents
-from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
+from pytensor.link.llvm.analysis.layout import (
+    Layout,
+    itemsize_of,
+    new_memory_layout,
+    shape_of,
+)
 from pytensor.link.llvm.codegen.implementation import GENERATED, Implementation
 from pytensor.link.llvm.codegen.interface import has_emitter
 from pytensor.link.llvm.codegen.types import (
@@ -205,6 +210,21 @@ def destroyed_inputs(node: Apply, output: int) -> tuple[int, ...]:
     return ()
 
 
+def overwritten_layout(
+    node: Apply, output: int, input_layouts: Sequence[Layout | None]
+) -> Layout | None:
+    """For an op's `llvm_layout`: the layout output `output` declares if its emitter
+    writes it into the memory of an input it destroys (`TensorOutput.overwrite`),
+    which it may only where the input's layout implies the declared one. That is the
+    input's layout, where new memory can have it too (`new_memory_layout`). None if
+    the output can't overwrite an input."""
+    destroyed = destroyed_inputs(node, output)
+    if not destroyed:
+        return None
+    layouts = known_layouts(node, input_layouts)
+    return new_memory_layout(layouts[destroyed[0]], node.outputs[output].type)
+
+
 def node_outputs(
     node: Apply,
     input_layouts: Sequence[Layout | None] | None = None,
@@ -214,13 +234,12 @@ def node_outputs(
     """Return the `Output` of each output of `node`, run by `implementation`.
 
     * Its layout is what the implementation declares (for generated code, the op's
-      `llvm_layout`), or the default: C for new memory, nothing known for a view. An
-      output that may overwrite an input has that input's layout, where new memory can
-      have it too (`new_memory_layout`), so that it is the same whether the planner
-      lets it overwrite the input or not.
+      `llvm_layout`), or the default: C for new memory, nothing known for a view.
     * It may alias the inputs its `view_map` lists (if the implementation returns
-      views), and the input it may overwrite if that input is `writable` (the planner
-      lets the node overwrite it, and the implementation does).
+      views), and the input it may overwrite: one that is `writable` (the planner lets
+      the node overwrite it, and the implementation does) and whose layout implies the
+      declared one, so that the layout is the same whether it is overwritten or not
+      (an op whose emitter writes in place declares `overwritten_layout`).
     * It is passed in a slot if it may alias an input, its size is only known at run
       time, or the implementation can't write memory the caller provides; else in a
       buffer the caller provides.
@@ -241,13 +260,16 @@ def node_outputs(
             destroyed_inputs(node, position) if implementation.can_overwrite else ()
         )
         layout = declaration.layout
-        if destroyed:
-            layout = new_memory_layout(input_layouts[destroyed[0]], var.type)
-        elif layout is None:
+        if layout is None:
             ndim = var.type.ndim
             layout = Layout.dynamic(ndim) if viewed else Layout.c(ndim)
+        shape, itemsize = shape_of(var), itemsize_of(var)
         aliased = viewed + tuple(
-            k for k in destroyed if k in writable and k not in viewed
+            k
+            for k in destroyed
+            if k in writable
+            and k not in viewed
+            and input_layouts[k].implies(layout, shape, itemsize)
         )
         if aliased or not representation.static or not declaration.writes_provided:
             passing = Passing.CALLEE_SLOT
@@ -327,5 +349,6 @@ __all__ = [
     "known_layouts",
     "node_outputs",
     "node_signature",
+    "overwritten_layout",
     "skipped_inputs",
 ]

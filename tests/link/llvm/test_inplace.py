@@ -215,6 +215,14 @@ def test_the_emitter_decides_whether_to_overwrite():
         assert stats.inplace == [str(op)]  # it may
         np.testing.assert_allclose(f(X), X)
 
+    # not an input whose layout doesn't give the output the one its op declares (C,
+    # here): the layout is the same whether the planner lets it overwrite or not
+    f, stats = validated([x], [Halve()((x * 2).T)])
+    assert stats.inplace == []
+    r = f(X)
+    np.testing.assert_allclose(r, X.T)
+    assert r.flags.c_contiguous
+
     # a graph nobody validated (no DestroyHandler): nothing is overwritten
     program, stats = build_program(
         FunctionGraph([x], [Halve()(x)], clone=False), Options()

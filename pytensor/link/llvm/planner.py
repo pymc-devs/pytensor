@@ -72,6 +72,7 @@ from pytensor.link.llvm.dispatch.blockwise import (
     blockwise_core,
     blockwise_core_layouts,
 )
+from pytensor.link.llvm.dispatch.fused import fusable
 from pytensor.link.llvm.kernels.rust import (
     runtime,
     rust_implementation,
@@ -163,7 +164,7 @@ def flatten(
         execution = (
             getattr(op, "execution", None) if isinstance(op, OpFromGraph) else None
         )
-        if isinstance(op, OpFromGraph) and execution is None and fusable(op, node):
+        if execution is None and fusable(op, node):
             # a FusedElemwise we can generate as one loop: keep it as one node
             ins = [values.of(i, scope) for i in node.inputs]
             outs = [values.new(var.type) for var in node.outputs]
@@ -192,14 +193,6 @@ def _inlined_outputs(values: Values, inner, node, inner_scope, scope) -> None:
     stands for several variables of the outer graph: the graph's `ViewFeature` knows."""
     for inner_output, output in zip(inner.outputs, node.outputs, strict=True):
         scope[output] = values.of(inner_output, inner_scope)
-
-
-def fusable(op, node) -> bool:
-    """A FusedElemwise we can generate as one loop?"""
-    from pytensor.link.llvm.dispatch.fused import fused_supported
-    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
-
-    return isinstance(op, FusedElemwise) and fused_supported(op, node)
 
 
 # ------------------------------------------------------------------ how nodes run
@@ -482,7 +475,8 @@ class Planner:
         )
         signature = node_signature(node, in_layouts, folded=folded, writable=writable)
         function = node_function(unit, "node", node, GENERATED, signature)
-        if writable:
+        # (an output overwrites a writable input only where its layout allows that)
+        if any(writable & set(o.aliased_inputs) for o in signature.outputs):
             self.stats.inplace.append(str(node.op))
         if _is_unit(node):
             self.stats.n_units += 1

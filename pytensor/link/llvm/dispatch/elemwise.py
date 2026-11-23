@@ -16,6 +16,7 @@ from pytensor.link.llvm.codegen.interface import (
     supported_types,
 )
 from pytensor.link.llvm.codegen.num import cast, constant, load, store
+from pytensor.link.llvm.codegen.signature import overwritten_layout
 from pytensor.link.llvm.codegen.types import element_type, memory_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
 from pytensor.tensor.elemwise import CAReduce, Elemwise
@@ -50,10 +51,14 @@ def broadcast_shape(cg, node, inputs):
 def _(op, node, input_layouts):
     """New memory in the memory order most inputs are packed in (C if there is none):
     then all operands share one order and the loop is flat. Elemwise on transposed
-    inputs gives a transposed output instead of a strided loop. (Outputs in
-    `inplace_pattern` have their input's layout instead.)"""
+    inputs gives a transposed output instead of a strided loop. Outputs in
+    `inplace_pattern` have their input's layout, so that they can be written into it."""
     layouts = []
-    for output in node.outputs:
+    for k, output in enumerate(node.outputs):
+        overwritten = overwritten_layout(node, k, input_layouts)
+        if overwritten is not None:
+            layouts.append(overwritten)
+            continue
         shape = tuple(None if s is None else int(s) for s in output.type.shape)
         order = common_order(input_layouts, shape)
         if order is None:

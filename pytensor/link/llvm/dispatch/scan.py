@@ -48,6 +48,7 @@ from pytensor.link.llvm.codegen.interface import (
     supported_types,
 )
 from pytensor.link.llvm.codegen.num import cast, constant, load, store
+from pytensor.link.llvm.codegen.signature import overwritten_layout
 from pytensor.link.llvm.codegen.types import element_type, ir, is_absent
 
 
@@ -56,10 +57,14 @@ def register():
 
     @llvm_layout.register(Scan)
     def _(op, node, input_layouts):
-        # buffers allocated by the loop, C-contiguous (as the Rust kernel's)
+        # buffers allocated by the loop, C-contiguous (as the Rust kernel's), or the
+        # initial values they can be written into
         return [
-            None if is_absent(output.type) else Layout.c(output.type.ndim)
-            for output in node.outputs
+            None
+            if is_absent(output.type)
+            else overwritten_layout(node, k, input_layouts)
+            or Layout.c(output.type.ndim)
+            for k, output in enumerate(node.outputs)
         ]
 
     @llvm_supports.register(Scan)

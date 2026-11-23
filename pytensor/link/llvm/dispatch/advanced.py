@@ -12,14 +12,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytensor.scalar.basic as ps
-from pytensor.link.llvm.codegen.array import Array, advance
+from pytensor.link.llvm.codegen.array import Array, advance, size
 from pytensor.link.llvm.codegen.context import index_bounds
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
+    llvm_layout,
     llvm_supports,
     supported_types,
 )
 from pytensor.link.llvm.codegen.num import cast, load, store
+from pytensor.link.llvm.codegen.signature import overwritten_layout
 from pytensor.link.llvm.dispatch.scalar import emit_scalar
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -138,9 +140,10 @@ def operands(cg, base: Array, pat: Pattern):
     return base_op, idx_ops
 
 
-def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
+def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what, defer=False):
     """Pointer to the indexed element of `base`: base_ptr plus the index offsets
-    (negative indices wrap; out-of-range ones fail)."""
+    (negative indices wrap; out-of-range ones fail, when the loop is over with
+    `defer`: see `Codegen.checked_index`)."""
     b = cg.b
     p = base_ptr
     for j, ((arr, var), ip) in enumerate(zip(pat.indices, idx_ptrs, strict=True)):
@@ -148,7 +151,7 @@ def element(cg, base: Array, pat: Pattern, base_ptr, idx_ptrs, what):
         n = base.shape[axis]
         i = cast(b, load(b, arr.scalar_type, ip), arr.scalar_type, ps.int64)
         i = cg.checked_index(
-            i, n, f"index out of bounds for axis {axis} ({what})", pat.bounds[j]
+            i, n, f"index out of bounds for axis {axis} ({what})", pat.bounds[j], defer
         )
         p = advance(b, p, i, base.strides[axis], base.scalar_type)
     return p
@@ -164,10 +167,24 @@ def _(op, node, cg, inputs, outputs):
     k = len(idx_ops)
 
     def body(p):
-        src = element(cg, x, pat, p[0], p[1 : 1 + k], "read")
+        src = element(cg, x, pat, p[0], p[1 : 1 + k], "read", defer=True)
         store(b, out.scalar_type, load(b, x.scalar_type, src), p[-1])
 
-    cg.for_each(pat.view_shape, [base_op, *idx_ops, out], body)
+    # out-of-range indices fail after the loop, so that it can be vectorized; they are
+    # clamped meanwhile, so an indexed axis must not be empty if anything is read
+    reads = size(b, pat.view_shape)
+    axes = range(pat.first, pat.first + k)
+    messages = [f"index out of bounds for axis {axis} (read)" for axis in axes]
+    for axis, message in zip(axes, messages, strict=True):
+        cg.check(b.or_(b.ne(x.shape[axis], 0), b.eq(reads, 0)), message)
+    with cg.deferred_checks(messages):
+        cg.for_each(pat.view_shape, [base_op, *idx_ops, out], body)
+
+
+@llvm_layout.register(AdvancedIncSubtensor)
+def _(op, node, input_layouts):
+    # x's, when the result can be written into it (else C)
+    return [overwritten_layout(node, 0, input_layouts)]
 
 
 @llvm_emit.register(AdvancedIncSubtensor)

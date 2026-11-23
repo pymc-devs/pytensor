@@ -64,8 +64,9 @@ def llvm_layout(
     """Return the layout of each output of `node`, given its inputs' layouts.
 
     None leaves an output to the default: C-contiguous new memory, or nothing known for
-    a view (an output the `view_map` lists). An output that may overwrite an input has
-    that input's layout instead, whatever is declared here (`new_memory_layout`).
+    a view (an output the `view_map` lists). An emitter may write an output into an
+    input it destroys (`TensorOutput.overwrite`) only where the input's layout implies
+    the one declared here: one that does declares the input's (`overwritten_layout`).
 
     New memory is allocated in a packed layout; one that isn't packed means any strides,
     and the memory is allocated C-contiguous. A view's layout must be true of the view

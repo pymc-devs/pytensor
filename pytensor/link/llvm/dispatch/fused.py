@@ -34,6 +34,8 @@ from pytensor.tensor.subtensor import AdvancedSubtensor
 #: elements per chunk of a loop with register-carried increments (see `chunked`)
 CHUNK = 256
 
+OUT_OF_BOUNDS = "FusedElemwise: index out of bounds ({})"
+
 
 @dataclass
 class Read:
@@ -159,6 +161,14 @@ def fused_supported(op, node) -> bool:
     )
 
 
+def fusable(op, node) -> bool:
+    """A FusedElemwise generated as one loop? Then it is a node of its own; other
+    OpFromGraphs that aren't compiled units are inlined (`planner.flatten`)."""
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    return isinstance(op, FusedElemwise) and fused_supported(op, node)
+
+
 def _register():
     from pytensor.compile.builders import OpFromGraph
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
@@ -171,7 +181,7 @@ def _register():
 
     @llvm_layout.register(FusedElemwise)
     def _(op, node, input_layouts):
-        # generated as one loop (`planner.fusable`), else an OpFromGraph
+        # generated as one loop (`fusable`), else an OpFromGraph
         if not fused_supported(op, node):
             return llvm_layout.dispatch(OpFromGraph)(op, node, input_layouts)
         return [None] * len(node.outputs)
@@ -270,11 +280,13 @@ def emit_fused(op, node, cg, inputs, outputs):
         return inputs[k].load(b, i).astype(ps.int64).value
 
     def checked(v, n, what, k):
+        # (reads fail after the loop, so that it can be vectorized: `run`)
         return cg.checked_index(
             v,
             n,
-            f"FusedElemwise: index out of bounds ({what})",
+            OUT_OF_BOUNDS.format(what),
             index_bounds(node.inputs[k]),
+            defer=what == "read",
         )
 
     def body(ptr_in, ptr_out, loop_index, accs, runs=None, defer=None):
@@ -383,17 +395,23 @@ def emit_fused(op, node, cg, inputs, outputs):
             zip(out_keys, ptrs[len(in_keys) :], strict=True)
         )
 
+    # the axes of the nest in memory order (outermost first), and the innermost one
+    order = loop_order(shape, arrays)
+    inner = order[-1] if nd > 0 else None
+
+    def at(index, a, i):
+        """The loop indices (per axis) `index`, with `i` on axis `a`."""
+        return [i if axis == a else v for axis, v in enumerate(index)]
+
     # reductions that reduce the innermost axis are carried in registers there
     inner_red = [
-        i
-        for i, s in enumerate(outs)
-        if isinstance(s, Reduce) and nd > 0 and (nd - 1) in s.axes
+        i for i, s in enumerate(outs) if isinstance(s, Reduce) and inner in s.axes
     ]
     # increments through an index along the innermost axis keep their run in registers
     inner_inc = [
         i
         for i, s in enumerate(outs)
-        if isinstance(s, Write) and not s.set and nd > 0 and s.axis == nd - 1
+        if isinstance(s, Write) and not s.set and s.axis == inner
     ]
 
     def chunked(n, ptrs, index, init, nr):
@@ -401,7 +419,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         CHUNK elements: the values of a chunk go to stack buffers first, in a loop
         without the runs (so it can be vectorized), and are then added to their
         elements in a second loop. Same results as one loop, in the same order."""
-        a = nd - 1
+        a = inner
         bufs = {i: b.alloca(memory_type(out_types[i]), CHUNK) for i in inner_inc}
         _, po = split(ptrs)
 
@@ -422,7 +440,7 @@ def emit_fused(op, node, cg, inputs, outputs):
                 new, _ = body(
                     qi,
                     qo,
-                    [*index, i],
+                    at(index, a, i),
                     dict(zip(inner_red, accs, strict=True)),
                     defer=defer,
                 )
@@ -453,8 +471,13 @@ def emit_fused(op, node, cg, inputs, outputs):
         return b.fold(n_chunks, init, chunk)
 
     def nest():
-        def level(a, ptrs, index):
-            if a == nd - 1 and nd > 0:
+        def level(k, ptrs, index):
+            if k == nd:  # (nd == 0)
+                pi, po = split(ptrs)
+                body(pi, po, index, {})
+                return
+            a = order[k]
+            if a == inner:
                 pi, po = split(ptrs)
                 init = [load(b, outs[i].acc, po[i]) for i in inner_red]
                 nr = len(inner_red)
@@ -475,7 +498,7 @@ def emit_fused(op, node, cg, inputs, outputs):
                     new, new_runs = body(
                         qi,
                         qo,
-                        [*index, i],
+                        at(index, a, i),
                         dict(zip(inner_red, carried[:nr], strict=True)),
                         runs,
                     )
@@ -495,18 +518,14 @@ def emit_fused(op, node, cg, inputs, outputs):
                         i, out_types[i], po[i], *final[nr + 2 * n : nr + 2 * n + 2]
                     )
                 return
-            if a == nd:
-                pi, po = split(ptrs)
-                body(pi, po, index, {})
-                return
             with b.loop(shape[a]) as i:
                 q = [
                     advance(b, p, i, arr.strides[a], arr.scalar_type)
                     for p, arr in zip(ptrs, arrays, strict=True)
                 ]
-                level(a + 1, q, [*index, i])
+                level(k + 1, q, at(index, a, i))
 
-        level(0, [arr.data for arr in arrays], [])
+        level(0, [arr.data for arr in arrays], [None] * nd)
         return []
 
     # one flat loop when nothing is indexed, every reduction reduces everything, and the
@@ -521,8 +540,22 @@ def emit_fused(op, node, cg, inputs, outputs):
             for a in range(nd)
         )
     )
+
+    def run(loop):
+        """`loop()`, with the indexed reads failing after it, so that it can be
+        vectorized. Their indices are clamped meanwhile: an axis read through an index
+        must not be empty if the loop runs."""
+        n = size(b, shape)
+        message = OUT_OF_BOUNDS.format("read")
+        for j, read in enumerate(reads):
+            if read is not None and j in plain_in:
+                length = inputs[j].shape[read.axis]
+                cg.check(b.or_(b.ne(length, 0), b.eq(n, 0)), message)
+        with cg.deferred_checks([message]):
+            loop()
+
     if not flat_ok:
-        nest()
+        run(nest)
         _finish(cg, outs, out_arrays)
         return
 
@@ -531,10 +564,11 @@ def emit_fused(op, node, cg, inputs, outputs):
     flat_arrays = [plain_in[j] for j in in_keys] + [
         plain_out[i] for i in out_keys if not isinstance(outs[i], Reduce)
     ]
-    order = loop_order(shape, flat_arrays)
+    # (the nest has its own `order`)
+    flat_order = loop_order(shape, flat_arrays)
     contig = b.const_bool(True)
     for arr in flat_arrays:
-        contig = b.and_(contig, arr.is_contiguous(b, shape, order))
+        contig = b.and_(contig, arr.is_contiguous(b, shape, flat_order))
 
     def flat():
         red = [i for i in out_keys if isinstance(outs[i], Reduce)]
@@ -567,9 +601,9 @@ def emit_fused(op, node, cg, inputs, outputs):
     if c == 1:
         flat()
     elif c == 0:
-        nest()
+        run(nest)
     else:
-        b.if_else(contig, flat, nest)
+        run(lambda: b.if_else(contig, flat, nest))
     _finish(cg, outs, out_arrays)
 
 
@@ -604,4 +638,4 @@ def _finish(cg, outs, out_arrays):
 
 _register()
 
-__all__ = ["emit_fused", "fused_spec", "fused_supported"]
+__all__ = ["emit_fused", "fusable", "fused_spec", "fused_supported"]

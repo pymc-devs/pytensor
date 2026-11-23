@@ -331,6 +331,26 @@ def test_elemwise_output_follows_its_inputs():
     np.testing.assert_allclose(g(xv, yv, zv), np.exp(xv.T) + yv.T - zv)
 
 
+def test_fused_loop_has_its_own_layouts_inside_generated_code():
+    from pytensor.link.llvm.analysis.layout import graph_layouts
+    from pytensor.link.llvm.dispatch.fused import fusable
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    # (generated code inlines OpFromGraphs, but a FusedElemwise run as one loop is a
+    # node of its own: not the layouts of its inner graph, transposed like the inputs)
+    x = pt.dmatrix("x")
+    y = pt.dmatrix("y")
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c"})
+    f = pytensor.function([x, y], [pt.exp(x.T) * y.T, (x.T * y.T).sum()], mode=mode)
+    fgraph = f.maker.fgraph
+    (node,) = [n for n in fgraph.apply_nodes if isinstance(n.op, FusedElemwise)]
+    assert fusable(node.op, node)
+    ins = [C(2), C(2)]
+    inlined = graph_layouts(fgraph.inputs, fgraph.outputs, ins, inlined=True)
+    alone = graph_layouts(fgraph.inputs, fgraph.outputs, ins)
+    assert [inlined[v] for v in node.outputs] == [alone[v] for v in node.outputs]
+
+
 def test_declared_outputs():
     from pytensor.link.llvm.codegen.signature import Passing
 
