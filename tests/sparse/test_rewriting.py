@@ -85,8 +85,8 @@ def test_local_mul_s_d():
         x = getattr(pytensor.sparse, sp_format + "_matrix")()
         y = matrix()
 
-        # The transpose makes the dense operand non-contiguous
-        f = pytensor.function([x, y], smath.mul_s_d(x, y.T), mode="CVM")
+        # The strided transpose makes the dense operand non C-contiguous
+        f = pytensor.function([x, y], smath.mul_s_d(x, y.T[::2, ::2]), mode="CVM")
 
         assert not any(
             isinstance(node.op, smath.MultiplySparseDense)
@@ -96,9 +96,10 @@ def test_local_mul_s_d():
         x_value = sp.sparse.random(
             3, 4, density=0.5, format=sp_format, dtype=config.floatX, random_state=0
         )
-        y_value = np.arange(12, dtype=config.floatX).reshape(4, 3)
+        y_value = np.arange(48, dtype=config.floatX).reshape(8, 6)
         utt.assert_allclose(
-            x_value.multiply(y_value.T).toarray(), f(x_value, y_value).toarray()
+            x_value.multiply(y_value.T[::2, ::2]).toarray(),
+            f(x_value, y_value).toarray(),
         )
 
 
