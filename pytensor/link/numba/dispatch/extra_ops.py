@@ -273,6 +273,9 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def unravelindex(indices, shape):
+        if np.any((indices < 0) | (indices >= np.prod(shape))):
+            raise ValueError("invalid entry in index array")
+
         a = np.ones(len(shape), dtype=np.int64)
         if c_order:
             # C-Order: Reverse shape (ignore dim0), cumulative product, then reverse back
@@ -298,7 +301,7 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
         # (special case for single entry is handled with an outer function below)
         return unraveled_coords
 
-    cache_version = 1
+    cache_version = 2
     cache_key = sha256(
         str((type(op), op.order, len(node.outputs), cache_version)).encode()
     ).hexdigest()

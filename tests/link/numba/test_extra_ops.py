@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor import config
+from pytensor import config, function
 from pytensor.tensor import extra_ops
 from pytensor.tensor.extra_ops import RavelMultiIndex
-from tests.link.numba.test_basic import compare_numba_and_py
+from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
 
 
 rng = np.random.default_rng(42849)
@@ -376,6 +376,15 @@ def test_UnravelIndex(arr, shape, requires_obj_mode):
             outputs,
             [test_arr],
         )
+
+
+@pytest.mark.parametrize("idx", [-1, 24])
+def test_UnravelIndex_out_of_bounds(idx):
+    arr = pt.lvector()
+    out = extra_ops.UnravelIndex("C")(arr, pt.as_tensor([2, 3, 4]))
+    fn = function([arr], out, mode=numba_mode)
+    with pytest.raises(ValueError, match="invalid entry in index array"):
+        fn(np.array([1, idx], dtype="int64"))
 
 
 @pytest.mark.parametrize(
