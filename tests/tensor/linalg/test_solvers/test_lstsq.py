@@ -4,7 +4,15 @@ import pytest
 from pytensor import function
 from pytensor.tensor.linalg import lstsq, tensorsolve
 from pytensor.tensor.math import _allclose
-from pytensor.tensor.type import lmatrix, lscalar, matrix, scalar, tensor4, vector
+from pytensor.tensor.type import (
+    lmatrix,
+    lscalar,
+    matrix,
+    scalar,
+    tensor3,
+    tensor4,
+    vector,
+)
 from tests import unittest_tools as utt
 
 
@@ -87,3 +95,16 @@ class TestLstsq:
         f = function([x, y, z], b)
         with pytest.raises(np.linalg.LinAlgError):
             f([2, 1], [2, 1], [2, 1])
+
+
+def test_tensorsolve_output_ndim():
+    # The solution has a.ndim - b.ndim dimensions, not always 2
+    A = tensor3("A", dtype="float64")
+    B = matrix("B", dtype="float64")
+    X = tensorsolve(A, B)
+    assert X.type.ndim == 1
+    fn = function([A, B], X)
+
+    a = np.eye(6).reshape(2, 3, 6) * 3
+    b = np.ones((2, 3))
+    np.testing.assert_allclose(fn(a, b), np.linalg.tensorsolve(a, b))

@@ -4,7 +4,7 @@ from pytensor import scalar as ps
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.type import dmatrix, dvector, iscalar, matrix
+from pytensor.tensor.type import dmatrix, dvector, iscalar, tensor
 
 
 class Lstsq(Op):
@@ -52,7 +52,7 @@ class TensorSolve(Op):
         a = as_tensor_variable(a)
         b = as_tensor_variable(b)
         out_dtype = ps.upcast(a.dtype, b.dtype)
-        x = matrix(dtype=out_dtype)
+        x = tensor(dtype=out_dtype, shape=(None,) * (a.type.ndim - b.type.ndim))
         return Apply(self, [a, b], [x])
 
     def perform(self, node, inputs, outputs):
