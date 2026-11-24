@@ -902,11 +902,11 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         """
         return px.shape.transpose(self, *dim, missing_dims=missing_dims)
 
-    def stack(self, dim, **dims):
+    def stack(self, dim=None, **dims):
         """Stack existing dimensions into a single new dimension."""
         return px.shape.stack(self, dim, **dims)
 
-    def unstack(self, dim, **dims):
+    def unstack(self, dim=None, **dims):
         """Unstack a dimension into multiple dimensions of a given size.
 
         Because XTensorVariables don't have coords, this operation requires the sizes of each unstacked dimension to be specified.
