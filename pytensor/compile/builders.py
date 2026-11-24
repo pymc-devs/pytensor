@@ -10,6 +10,7 @@ from functools import partial
 
 from pytensor.compile.inner_function import HasInnerFunction
 from pytensor.compile.sharedvalue import SharedVariable
+from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, disconnected_type, grad, pushforward
 from pytensor.graph.basic import (
     Apply,
@@ -23,6 +24,7 @@ from pytensor.graph.op import Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
+from pytensor.scalar.basic import discrete_dtypes
 from pytensor.tensor.shape import Shape_i
 
 
@@ -593,10 +595,17 @@ class OpFromGraph(HasInnerFunction, Op):
             return pullback_overrides
 
         all_inner_outputs = [inner_out.copy() for inner_out in inner_outputs]
+        # The cotangent of a discrete output is float, so it can't share the output's type
+        output_grad_types = [
+            out_t.clone(dtype=config.floatX)
+            if getattr(out_t, "dtype", None) in discrete_dtypes
+            else out_t
+            for out_t in self.output_types
+        ]
         all_output_grads = [
-            disconnected_type() if disconnected else out_t()
-            for out_t, disconnected in zip(
-                self.output_types, disconnected_output_grads, strict=True
+            disconnected_type() if disconnected else og_t()
+            for og_t, disconnected in zip(
+                output_grad_types, disconnected_output_grads, strict=True
             )
         ]
         connected_inner_outputs = [
@@ -681,7 +690,11 @@ class OpFromGraph(HasInnerFunction, Op):
             )
             connected_output_grads = [
                 output_grad
-                for output_grad in output_grads
+                if getattr(output_grad.type, "dtype", None) in (None, og_t.dtype)
+                else output_grad.astype(og_t.dtype)
+                for output_grad, og_t in zip(
+                    output_grads, output_grad_types, strict=True
+                )
                 if not isinstance(output_grad.type, DisconnectedType)
             ]
             connected_input_grads = iter(

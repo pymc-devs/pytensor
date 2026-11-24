@@ -520,6 +520,34 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         out = test_ofg(y, y)
         assert out.eval() == 4
 
+    def test_pullback_discrete_output(self):
+        # Regression test for https://github.com/pymc-devs/pytensor/issues/2717
+        x = vector("x", dtype="float64")
+        k0 = scalar("k0", dtype="int64")
+        ix, ik = x.type(), k0.type()
+        c, k = OpFromGraph([ix, ik], [ix * 2, ik + 1])(x, k0)
+        g = grad(
+            None,
+            x,
+            known_grads={c: pt.ones_like(c), k: pt.zeros((), dtype="float64")},
+        )
+        np.testing.assert_allclose(g.eval({x: [1.0, 2.0], k0: 3}), [2.0, 2.0])
+
+        # Scan sends a float zero cotangent for the integer carry
+        x0 = scalar("x0", dtype="float64")
+        ix, ik = x0.type(), k0.type()
+        step = OpFromGraph([ix, ik], [pt.sin(ix) * ik, ik + 1])
+        verify_grad(
+            lambda x0: scan(
+                step,
+                outputs_info=[x0, constant(1, dtype="int64")],
+                n_steps=3,
+                return_updates=False,
+            )[0][-1],
+            [np.array(0.3)],
+            rng=np.random.default_rng(2717),
+        )
+
     @pytest.mark.parametrize("use_custom_pullback", [False, True])
     def test_pullback_disconnected_output_grad(self, use_custom_pullback):
         x, y = dscalars("x", "y")
