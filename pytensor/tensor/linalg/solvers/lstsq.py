@@ -4,7 +4,7 @@ from pytensor import scalar as ps
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import as_tensor_variable
-from pytensor.tensor.type import dmatrix, dvector, iscalar, matrix
+from pytensor.tensor.type import dvector, iscalar, matrix, tensor
 
 
 class Lstsq(Op):
@@ -18,7 +18,7 @@ class Lstsq(Op):
             self,
             [x, y, rcond],
             [
-                dmatrix(),
+                tensor(dtype="float64", shape=(None,) * y.type.ndim),
                 dvector(),
                 iscalar(),
                 dvector(),

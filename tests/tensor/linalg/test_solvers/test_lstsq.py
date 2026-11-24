@@ -87,3 +87,17 @@ class TestLstsq:
         f = function([x, y, z], b)
         with pytest.raises(np.linalg.LinAlgError):
             f([2, 1], [2, 1], [2, 1])
+
+
+def test_lstsq_vector_rhs():
+    # With a vector right-hand side the solution is a vector, like numpy
+    x = matrix("x", dtype="float64")
+    y = vector("y", dtype="float64")
+    sol = lstsq(x, y, -1)[0]
+    assert sol.type.ndim == 1
+    fn = function([x, y], sol)
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    X = rng.random((5, 3))
+    Y = rng.random(5)
+    np.testing.assert_allclose(fn(X, Y), np.linalg.lstsq(X, Y, rcond=-1)[0])
