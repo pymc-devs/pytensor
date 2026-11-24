@@ -280,23 +280,25 @@ def matrix_power(M, n):
 
     # Shortcuts when 0 < n <= 3
     if n == 0:
-        return ptb.eye(M.shape[-2])
+        from pytensor.tensor.extra_ops import broadcast_to
+
+        return broadcast_to(ptb.eye(M.shape[-2]), M.shape)
 
     elif n == 1:
         return M
 
     elif n == 2:
-        return ptm.dot(M, M)
+        return ptm.matmul(M, M)
 
     elif n == 3:
-        return ptm.dot(ptm.dot(M, M), M)
+        return ptm.matmul(ptm.matmul(M, M), M)
 
     result = z = None
 
     while n > 0:
-        z = M if z is None else ptm.dot(z, z)
+        z = M if z is None else ptm.matmul(z, z)
         n, bit = divmod(n, 2)
         if bit:
-            result = z if result is None else ptm.dot(result, z)
+            result = z if result is None else ptm.matmul(result, z)
 
     return result

@@ -42,6 +42,16 @@ class TestMatrixPower:
         n_p = np.linalg.matrix_power(a, n)
         assert np.allclose(n_p, Q.eval({A: a}))
 
+    @pytest.mark.parametrize("n", [-1, 0, 1, 2, 3, 4, 5])
+    def test_batched(self, n):
+        rng = np.random.default_rng(utt.fetch_seed())
+        a = rng.normal(size=(3, 2, 2)).astype(config.floatX)
+        A = tensor("A", shape=(None, 2, 2), dtype=config.floatX)
+        Q = matrix_power(A, n)
+        np.testing.assert_allclose(
+            Q.eval({A: a}), np.linalg.matrix_power(a, n), rtol=1e-5, atol=1e-5
+        )
+
     def test_non_square_matrix(self):
         A = matrix("A", dtype=config.floatX)
         Q = matrix_power(A, 3)
