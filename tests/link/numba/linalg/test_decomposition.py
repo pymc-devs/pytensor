@@ -686,3 +686,13 @@ def test_pivot_to_permutation(inverse):
     else:
         p, *_ = scipy.linalg.lu(A, p_indices=True)
         np.testing.assert_allclose(f(piv), p)
+
+
+@pytest.mark.parametrize("pivoting", (False, True))
+@pytest.mark.parametrize("shape", ((5, 3), (3, 5)), ids=["tall", "wide"])
+def test_qr_mode_r_non_square(shape, pivoting):
+    # mode="r" returns the full (M, N) R factor, like scipy
+    A = pt.matrix("A", dtype="float64")
+    A_val = np.random.default_rng(0).normal(size=shape)
+    outputs = qr(A, mode="r", pivoting=pivoting)
+    compare_numba_and_py([A], outputs, [A_val])

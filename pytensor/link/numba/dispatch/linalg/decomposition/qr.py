@@ -477,10 +477,7 @@ def qr_r_pivot_impl(x, mode="r", pivoting=True, overwrite_a=False, lwork=None):
         )
         JPVT = (JPVT - 1).astype(np.int32)
 
-        if M < N:
-            R = np.triu(x_copy)
-        else:
-            R = np.triu(x_copy[:N, :])
+        R = np.triu(x_copy)
 
         return R, JPVT
 
@@ -542,10 +539,7 @@ def qr_r_no_pivot_impl(x, mode="r", pivoting=False, overwrite_a=False, lwork=Non
             INFO,
         )
 
-        if M < N:
-            R = np.triu(x_copy)
-        else:
-            R = np.triu(x_copy[:N, :])
+        R = np.triu(x_copy)
 
         # Return a tuple with R only to match the scipy qr interface
         return (R,)
