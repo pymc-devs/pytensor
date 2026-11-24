@@ -411,6 +411,35 @@ class TestPushforwardPullback(PushforwardPullbackChecker):
         f = pytensor.function([m, v, m_, v_], all_outs)
         f(mval, vval, m_val, v_val)
 
+    def test_pullback_repeated_and_nested_outputs(self):
+        # https://github.com/pymc-devs/pytensor/issues/2700
+        x = pt.dscalar("x")
+        g1 = pt.dscalar("g1")
+        g2 = pt.dscalar("g2")
+        y = x**2
+        repeated = pullback([y, y], x, [g1, g2])
+        nested = pullback([x, 2 * x], x, [g1, g2])
+        fn = function([x, g1, g2], [repeated, nested])
+        np.testing.assert_allclose(
+            fn(3.0, 5.0, 7.0), [2 * 3.0 * (5.0 + 7.0), 5.0 + 14.0]
+        )
+
+    @pytest.mark.parametrize("use_op_pushforward", [True, False])
+    def test_pushforward_add_sub(self, use_op_pushforward):
+        # https://github.com/pymc-devs/pytensor/issues/2700
+        a = pt.dscalar("a")
+        b = pt.dscalar("b")
+        a_dot = pt.dscalar("a_dot")
+        b_dot = pt.dscalar("b_dot")
+        outs = [
+            pushforward(
+                out, [a, b], [a_dot, b_dot], use_op_pushforward=use_op_pushforward
+            )
+            for out in (a + b, a - b, a + 2 * b)
+        ]
+        fn = function([a, b, a_dot, b_dot], outs, on_unused_input="ignore")
+        np.testing.assert_allclose(fn(1.0, 1.0, 3.0, 5.0), [8.0, -2.0, 13.0])
+
     @pytest.mark.parametrize(
         "use_op_pushforward",
         [pytest.param(True, marks=pytest.mark.xfail()), False],
