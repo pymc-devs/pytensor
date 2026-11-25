@@ -99,7 +99,7 @@ def numba_funcify_SVD(op, node, **kwargs):
                 overwrite_a=effective_overwrite_a,
             )
 
-    cache_version = 3
+    cache_version = 4
     return svd, cache_version
 
 
@@ -177,7 +177,7 @@ def numba_funcify_Eigh(op, node, **kwargs):
                 effective_overwrite_a,
             )
 
-    cache_version = 2
+    cache_version = 3
     return eigh, cache_version
 
 

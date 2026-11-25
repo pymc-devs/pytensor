@@ -10,7 +10,6 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     val_to_int_ptr,
 )
 from pytensor.link.numba.dispatch.linalg.utils import (
-    _c_work_array,
     _check_linalg_matrix,
     _fortran_work_array,
 )
@@ -466,23 +465,15 @@ def svd_gesdd_full_impl(A, full_matrices=True, overwrite_a=False):
             return U, S, VT
 
     else:
-        # Real A: a c-contiguous buffer reinterpreted as fortran-order is A.T (M and N
-        # swapped in LAPACK's view). For SVD this lets us solve the swapped (N, M)
-        # problem and recover A's SVD by swapping roles: if A = U S Vt, then
-        # A.T = V S U.T, so LAPACK's U' maps to Vt.T and LAPACK's Vt' maps to U.T.
-        # Choosing this from the type keeps U and Vt one layout on every return path.
-        swap = A.layout == "C"
+        # A c-contiguous A is copied, not passed to gesdd as A.T, because the SVD of A.T
+        # has different singular vector signs, and the signs must not depend on layout.
 
         def impl(A, full_matrices=True, overwrite_a=False):
             _M = np.int32(A.shape[0])
             _N = np.int32(A.shape[1])
             _K = min(_M, _N)
 
-            if swap:
-                A_copy = _c_work_array(A, overwrite_a).T
-                _M, _N = _N, _M
-            else:
-                A_copy = _fortran_work_array(A, overwrite_a)
+            A_copy = _fortran_work_array(A, overwrite_a)
 
             if full_matrices:
                 JOBZ = val_to_int_ptr(ord("A"))
@@ -497,8 +488,6 @@ def svd_gesdd_full_impl(A, full_matrices=True, overwrite_a=False):
             if _K == 0:
                 U.fill(0)
                 VT.fill(0)
-                if swap:
-                    return VT.T, S, U.T
                 return U, S, VT
             M = val_to_int_ptr(_M)
             N = val_to_int_ptr(_N)
@@ -554,10 +543,6 @@ def svd_gesdd_full_impl(A, full_matrices=True, overwrite_a=False):
                 U[:] = np.nan
                 VT[:] = np.nan
 
-            if swap:
-                # Solved SVD of A.T; map back: A's U = (LAPACK's VT).T,
-                # A's VT = (LAPACK's U).T. The .T's are zero-cost stride swaps.
-                return VT.T, S, U.T
             return U, S, VT
 
     return impl

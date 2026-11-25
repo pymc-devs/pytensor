@@ -69,25 +69,18 @@ def test_Eig(input_dtype, symmetric):
 @pytest.mark.parametrize("driver", ["evr", "evd"], ids=lambda x: f"driver={x}")
 def test_Eigh(lower, overwrite_a, driver):
     x = pt.dmatrix()
-    test_x = (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))
+    # With this seed, factoring the other triangle flips eigenvector signs in every case.
+    rng = np.random.default_rng(1)
+    test_x = rng.random(size=(3, 3))
+    test_x = test_x.T @ test_x
     g = Eigh(lower=lower, overwrite_a=overwrite_a, driver=driver)(x)
 
-    # The numba c-contig overwrite_a path uses an UPLO flip that scipy's
-    # python implementation doesn't, so eigenvector signs may differ per
-    # column (both are valid). Compare W exactly and |V| element-wise.
-    def eigh_assert(numba_out, py_out):
-        if numba_out.ndim == 1:
-            np.testing.assert_allclose(numba_out, py_out, rtol=1e-4)
-        else:
-            np.testing.assert_allclose(np.abs(numba_out), np.abs(py_out), rtol=1e-4)
-
-    fn, _ = compare_numba_and_py(
+    fn, res = compare_numba_and_py(
         [In(x, mutable=overwrite_a)],
         g,
         [test_x],
         numba_mode=numba_inplace_mode,
         inplace=True,
-        assert_fn=eigh_assert,
     )
 
     op = fn.maker.fgraph.outputs[0].owner.op
@@ -97,23 +90,82 @@ def test_Eigh(lower, overwrite_a, driver):
     else:
         assert op.destroy_map == {}
 
-    # Eigenvector signs are not unique, so check the eigenvalue equation
-    # A v = w v per call rather than comparing V matrices across calls.
-    def assert_reconstruction(val, expect_mutation):
-        snapshot = np.array(val)
-        w, v = fn(val)
-        np.testing.assert_allclose(test_x @ v, v * w, atol=1e-10)
-        np.testing.assert_allclose(np.sort(w), np.sort(np.linalg.eigvalsh(test_x)))
-        if expect_mutation:
-            assert not np.allclose(val, snapshot)
-        else:
-            np.testing.assert_allclose(val, snapshot)
+    val_f_contig = np.copy(test_x, order="F")
+    res_f_contig = fn(val_f_contig)
+    for x, x_f_contig in zip(res, res_f_contig, strict=True):
+        np.testing.assert_allclose(x_f_contig, x)
+    assert (test_x == val_f_contig).all() == (not overwrite_a)
 
-    # Real symmetric c-contig inputs are reused via UPLO flip when overwrite_a,
-    # so both f- and c-contig get mutated. Non-contig falls back to a copy.
-    assert_reconstruction(np.copy(test_x, order="F"), expect_mutation=overwrite_a)
-    assert_reconstruction(np.copy(test_x, order="C"), expect_mutation=overwrite_a)
-    assert_reconstruction(np.repeat(test_x, 2, axis=0)[::2], expect_mutation=False)
+    val_c_contig = np.copy(test_x, order="C")
+    res_c_contig = fn(val_c_contig)
+    for x, x_c_contig in zip(res, res_c_contig, strict=True):
+        np.testing.assert_allclose(x_c_contig, x)
+    assert (test_x == val_c_contig).all() == (not overwrite_a)
+
+    val_not_contig = np.repeat(test_x, 2, axis=0)[::2]
+    res_not_contig = fn(val_not_contig)
+    for x, x_not_contig in zip(res, res_not_contig, strict=True):
+        np.testing.assert_allclose(x_not_contig, x)
+    np.testing.assert_allclose(val_not_contig, test_x)
+
+
+@pytest.mark.parametrize("lower", [True, False], ids=lambda x: f"lower={x}")
+@pytest.mark.parametrize(
+    "overwrite_a, overwrite_b",
+    [(False, False), (True, False), (False, True)],
+    ids=["no_overwrite", "overwrite_a", "overwrite_b"],
+)
+def test_Eigh_generalized(lower, overwrite_a, overwrite_b):
+    A = pt.dmatrix("A")
+    B = pt.dmatrix("B")
+    # With this seed, factoring the other triangle flips eigenvector signs in every case.
+    rng = np.random.default_rng(1)
+    A_val = rng.random(size=(3, 3))
+    A_val = A_val.T @ A_val
+    B_val = rng.random(size=(3, 3))
+    B_val = B_val.T @ B_val + 3 * np.eye(3)
+    g = Eigh(lower=lower, overwrite_a=overwrite_a, overwrite_b=overwrite_b)(A, B)
+
+    fn, res = compare_numba_and_py(
+        [In(A, mutable=overwrite_a), In(B, mutable=overwrite_b)],
+        g,
+        [A_val, B_val],
+        numba_mode=numba_inplace_mode,
+        inplace=True,
+    )
+
+    op = fn.maker.fgraph.outputs[0].owner.op
+    assert isinstance(op, Eigh)
+    if overwrite_a:
+        assert op.destroy_map == {1: [0]}
+    elif overwrite_b:
+        assert op.destroy_map == {1: [1]}
+    else:
+        assert op.destroy_map == {}
+
+    A_val_f_contig = np.copy(A_val, order="F")
+    B_val_f_contig = np.copy(B_val, order="F")
+    res_f_contig = fn(A_val_f_contig, B_val_f_contig)
+    for x, x_f_contig in zip(res, res_f_contig, strict=True):
+        np.testing.assert_allclose(x_f_contig, x)
+    assert (A_val == A_val_f_contig).all() == (not overwrite_a)
+    assert (B_val == B_val_f_contig).all() == (not overwrite_b)
+
+    A_val_c_contig = np.copy(A_val, order="C")
+    B_val_c_contig = np.copy(B_val, order="C")
+    res_c_contig = fn(A_val_c_contig, B_val_c_contig)
+    for x, x_c_contig in zip(res, res_c_contig, strict=True):
+        np.testing.assert_allclose(x_c_contig, x)
+    assert (A_val == A_val_c_contig).all() == (not overwrite_a)
+    assert (B_val == B_val_c_contig).all() == (not overwrite_b)
+
+    A_val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
+    B_val_not_contig = np.repeat(B_val, 2, axis=0)[::2]
+    res_not_contig = fn(A_val_not_contig, B_val_not_contig)
+    for x, x_not_contig in zip(res, res_not_contig, strict=True):
+        np.testing.assert_allclose(x_not_contig, x)
+    np.testing.assert_allclose(A_val_not_contig, A_val)
+    np.testing.assert_allclose(B_val_not_contig, B_val)
 
 
 def test_Eigh_integer_input():
@@ -183,9 +235,10 @@ def test_SVD_inplace(full_matrices, compute_uv, overwrite_a, is_complex):
 
     ref_s = np.linalg.svd(val, full_matrices=full_matrices, compute_uv=False)
 
-    # gesdd reuses the buffer when the donated array is f-contig (always) or
-    # c-contig (real-typed only — complex would need a conjugation pass).
-    can_reuse_c = overwrite_a and not is_complex
+    # gesdd reuses an f-contig donation. Only real singular values alone also reuse a
+    # c-contig one, since they are the same for A.T.
+    can_reuse_c = overwrite_a and not is_complex and not compute_uv
+    ref_out = fn(np.copy(val, order="F"))
 
     def check(layout_val, expect_mutation):
         snapshot = np.array(layout_val)
@@ -194,6 +247,9 @@ def test_SVD_inplace(full_matrices, compute_uv, overwrite_a, is_complex):
         np.testing.assert_allclose(s, ref_s, atol=1e-4, rtol=1e-4)
         if compute_uv:
             U, _, Vt = out
+            # Singular vector signs are arbitrary, but must not depend on layout.
+            np.testing.assert_allclose(U, ref_out[0])
+            np.testing.assert_allclose(Vt, ref_out[2])
             if full_matrices:
                 # Pad s into the rectangular shape so we can reconstruct.
                 k = s.shape[0]
