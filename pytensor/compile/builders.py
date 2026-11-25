@@ -511,6 +511,14 @@ class OpFromGraph(HasInnerFunction, Op):
             and self._frozen_rop == other._frozen_rop
         )
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # The cached pullback and pushforward builders are local closures, which
+        # pickle can't store. They are rebuilt on demand.
+        state["_lop_op_cache"] = {}
+        state["_rop_op_cache"] = None
+        return state
+
     def __hash__(self):
         return hash((type(self), self.fgraph, self.is_inline))
 
