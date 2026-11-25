@@ -4,6 +4,7 @@ from numba.core.types import Complex, Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
     _get_underlying_float,
@@ -14,6 +15,30 @@ from pytensor.link.numba.dispatch.linalg.utils import (
     _check_linalg_matrix,
     _fortran_work_array,
 )
+
+
+@numba_basic.numba_njit
+def _symmetric_fortran_work_array(A, lower, overwrite):
+    """Return symmetric ``A`` in LAPACK's layout, reusing it if ``overwrite`` allows."""
+    if overwrite and A.flags.f_contiguous:
+        return A
+    if not (overwrite and A.flags.c_contiguous):
+        return _copy_to_fortran_order(A)
+
+    # A C buffer handed to LAPACK as its transpose with UPLO flipped describes the same
+    # matrix, but LAPACK then reduces the other triangle and returns eigenvectors with
+    # different signs than the copying path. Mirroring the referenced triangle onto the
+    # other lets the F view keep the requested UPLO.
+    n = A.shape[0]
+    if lower:
+        for i in range(n):
+            for j in range(i + 1, n):
+                A[i, j] = A[j, i]
+    else:
+        for i in range(n):
+            for j in range(i + 1, n):
+                A[j, i] = A[i, j]
+    return A.T
 
 
 def _eigh(a, UPLO, overwrite_a=False):
@@ -158,15 +183,8 @@ def eigh_impl(A, UPLO, overwrite_a=False):
                 raise np.linalg.LinAlgError("Last 2 dimensions of A must be square")
 
             # See the complex branch above for why A and Z must stay distinct.
-            # For real symmetric A, a c-contig buffer reinterpreted as f-contig equals A^T == A, so we can reuse a
-            # c-contig donated A by flipping UPLO. Z is allocated separately, so V lands in it correctly.
             lower = UPLO == 0
-            if overwrite_a and (A.flags.f_contiguous or A.flags.c_contiguous):
-                A_copy = A
-                if A.flags.c_contiguous:
-                    lower = not lower
-            else:
-                A_copy = _copy_to_fortran_order(A)
+            A_copy = _symmetric_fortran_work_array(A, lower, overwrite_a)
 
             JOBZ = val_to_int_ptr(ord("V"))
             RANGE = val_to_int_ptr(ord("A"))
@@ -363,21 +381,9 @@ def eigh_evd_impl(A, UPLO, overwrite_a=False):
             if A.shape[-2] != _N:
                 raise np.linalg.LinAlgError("Last 2 dimensions of A must be square")
 
-            # syevd writes V back into A's buffer. For real symmetric A a c-contig buffer reinterpreted
-            # as f-contig equals A, so we can reuse a c-contig donated A by flipping UPLO. The eigenvectors
-            # LAPACK writes back are in column-major stride within the buffer; the numpy view is c-contig,
-            # so we transpose-on-return (zero-cost stride swap) to expose them as the f-order V the rest of the
-            # dispatch expects.
+            # syevd writes V back into A_copy, so the returned V shares the donated buffer.
             lower = UPLO == 0
-            if overwrite_a and (A.flags.f_contiguous or A.flags.c_contiguous):
-                A_copy = A
-                flip = A.flags.c_contiguous
-            else:
-                A_copy = _copy_to_fortran_order(A)
-                flip = False
-
-            if flip:
-                lower = not lower
+            A_copy = _symmetric_fortran_work_array(A, lower, overwrite_a)
 
             JOBZ = val_to_int_ptr(ord("V"))
             UPLO_ptr = val_to_int_ptr(ord("L") if lower else ord("U"))
@@ -431,8 +437,6 @@ def eigh_evd_impl(A, UPLO, overwrite_a=False):
                 W[:] = np.nan
                 A_copy[:] = np.nan
 
-            if flip:
-                return W, A_copy.T
             return W, A_copy
 
     return impl
@@ -549,28 +553,12 @@ def eigh_generalized_impl(A, B, UPLO, overwrite_a=False, overwrite_b=False):
             if B.shape[-1] != _N or B.shape[-2] != _N:
                 raise np.linalg.LinAlgError("A and B must have the same shape")
 
-            # Real symmetric: c-contig A reinterpreted as f-contig equals A, so a c-contig donated A can be reused via
-            # a UPLO flip. sygvd writes V back into A's buffer in column-major stride; the numpy view is still c-contig
-            # labeled, so we transpose-on-return (zero-cost stride swap) to expose V in f-order. B's matched
-            # layout requirement (c-contig when A flipped, f-contig otherwise) lets B also stay in-place; B's post-call
-            # content is discarded scratch (Cholesky factor) so its layout doesn't propagate.
+            # sygvd writes V back into A_copy and leaves its Cholesky factor of B in B_copy
+            # as scratch.
             lower = UPLO == 0
-            if overwrite_a and (A.flags.f_contiguous or A.flags.c_contiguous):
-                A_copy = A
-                flip = A.flags.c_contiguous
-            else:
-                A_copy = _copy_to_fortran_order(A)
-                flip = False
+            A_copy = _symmetric_fortran_work_array(A, lower, overwrite_a)
 
-            if overwrite_b and (
-                (flip and B.flags.c_contiguous) or (not flip and B.flags.f_contiguous)
-            ):
-                B_copy = B
-            else:
-                B_copy = _copy_to_fortran_order(B)
-
-            if flip:
-                lower = not lower
+            B_copy = _symmetric_fortran_work_array(B, lower, overwrite_b)
 
             ITYPE = val_to_int_ptr(np.int32(1))
             JOBZ = val_to_int_ptr(ord("V"))
@@ -612,8 +600,6 @@ def eigh_generalized_impl(A, B, UPLO, overwrite_a=False, overwrite_b=False):
                 W[:] = np.nan
                 A_copy[:] = np.nan
 
-            if flip:
-                return W, A_copy.T
             return W, A_copy
 
     return impl
