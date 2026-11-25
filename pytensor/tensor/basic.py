@@ -2218,6 +2218,8 @@ class Split(COp):
                 static_split_size = None
             except IndexError:
                 raise ValueError("Number of splits is larger than splits size")
+            if static_split_size is not None and static_split_size < 0:
+                static_split_size = None  # invalid: `perform` raises
             static_out_shape = x_static_shape.copy()
             static_out_shape[self.axis] = static_split_size
             outputs.append(tensor(shape=tuple(static_out_shape), dtype=x_dtype))
