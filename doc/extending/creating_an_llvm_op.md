@@ -1,6 +1,12 @@
 (creating_an_llvm_op)=
 # Adding an op to the LLVM backend
 
+:::{warning}
+The LLVM backend is **experimental**. It may compute wrong results, crash, or change
+incompatibly without notice, and it is not ready for real work. PyTensor warns the
+first time a function is compiled with it.
+:::
+
 This tutorial implements a new op for the LLVM backend, start to finish. It first
 introduces the interface the implementation is written with, `pytensor_llvm.ir`, and
 then uses it for a small tensor op and a scalar op, and explains layouts (what the

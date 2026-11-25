@@ -1,6 +1,12 @@
 (libdoc_link_llvm)=
 # The LLVM backend
 
+:::{warning}
+The LLVM backend is **experimental**. It may compute wrong results, crash, or change
+incompatibly without notice, and it is not ready for real work. PyTensor warns the
+first time a function is compiled with it.
+:::
+
 The graph stays in PyTensor. Code is generated from Python: a dispatch function per Op
 emits LLVM IR through a small wrapper around LLVM (`pytensor_llvm.ir`), using the real
 node — its types, constants, `view_map`/`destroy_map`, `infer_shape`. Rust provides the

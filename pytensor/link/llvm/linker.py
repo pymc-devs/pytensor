@@ -1,8 +1,22 @@
+import warnings
+from pathlib import Path
+
+import pytensor
 from pytensor.link.basic import JITLinker
+
+
+EXPERIMENTAL_WARNING = (
+    "The LLVM backend (mode='LLVM') is experimental: it may compute wrong results, "
+    "crash, or change incompatibly without notice. Do not rely on it for real work."
+)
+_warned = False
 
 
 class LLVMLinker(JITLinker):
     """Compile a FunctionGraph with the LLVM backend.
+
+    .. warning:: The LLVM backend is experimental: it may compute wrong results,
+       crash, or change incompatibly without notice.
 
     The graph is planned in Python (`program.py`) into items that run Rust kernels,
     code generated from Python, or numba implementations; a generated function, the
@@ -72,6 +86,15 @@ class LLVMLinker(JITLinker):
 
     def fgraph_convert(self, fgraph, **kwargs):
         from pytensor.link.llvm.program import Options, compile_program
+
+        global _warned
+        if not _warned:
+            _warned = True
+            warnings.warn(
+                EXPERIMENTAL_WARNING,
+                UserWarning,
+                skip_file_prefixes=(str(Path(pytensor.__file__).parent),),
+            )
 
         opts = Options(**{k: getattr(self, k) for k in self.OPTIONS})
         self.program, fn, self.stats = compile_program(fgraph, opts)
