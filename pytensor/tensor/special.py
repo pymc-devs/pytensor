@@ -5,7 +5,7 @@ import numpy as np
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import as_tensor_variable
-from pytensor.tensor.basic import constant, expand_dims
+from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.math import (
     add,
@@ -21,7 +21,7 @@ from pytensor.tensor.math import (
     sum,
     switch,
 )
-from pytensor.tensor.symbolic import FusibleSymbolicOp
+from pytensor.tensor.symbolic import FusibleSymbolicOp, resolve_float_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
 
 
@@ -44,8 +44,8 @@ class Softmax(FusibleSymbolicOp):
         super().__init__(**kwargs)
 
     def build_inner_graph(self, x):
-        x_stable = x - x.max(axis=self.axis, keepdims=True)
-        e_x = exp(x_stable)
+        x_max = x.max(axis=self.axis, keepdims=True, initial=-np.inf)
+        e_x = exp(x - x_max)
         return [e_x / e_x.sum(axis=self.axis, keepdims=True)]
 
     def pullback(self, inputs, outputs, output_grads):
@@ -85,7 +85,8 @@ class LogSoftmax(FusibleSymbolicOp):
         super().__init__(**kwargs)
 
     def build_inner_graph(self, x):
-        x_stable = x - x.max(axis=self.axis, keepdims=True)
+        x_max = x.max(axis=self.axis, keepdims=True, initial=-np.inf)
+        x_stable = x - x_max
         return [x_stable - log(exp(x_stable).sum(axis=self.axis, keepdims=True))]
 
     def pullback(self, inputs, outputs, output_grads):
@@ -121,9 +122,8 @@ class LogSumExp(FusibleSymbolicOp):
 
     def build_inner_graph(self, x):
         x_max = x.max(axis=self.axis, keepdims=True, initial=-np.inf)
-        # Do not offset when x_max = -inf, to avoid nan in the output
-        x_max = switch(isinf(x_max), constant(0.0, ndim=x_max.ndim), x_max)
         out = log(exp(x - x_max).sum(axis=self.axis, keepdims=True)) + x_max
+        out = switch(isinf(x_max), x_max, out)
         return [out.squeeze(axis=self.axis)]
 
 
@@ -168,11 +168,12 @@ class LogAddExp(FusibleSymbolicOp):
 
     # See the note on `XLogY.inline`.
     inline = False
+    resolve_dtypes = resolve_float_dtypes
 
     def build_inner_graph(self, *xs):
         x_max = reduce(maximum, xs)
         # Do not offset when x_max = -inf, to avoid nan in the output
-        x_max = switch(isinf(x_max), constant(0.0, ndim=x_max.ndim), x_max)
+        x_max = switch(isinf(x_max), 0.0, x_max)
         return [log(add(*(exp(x - x_max) for x in xs))) + x_max]
 
 
@@ -260,6 +261,7 @@ class XLogY(FusibleSymbolicOp):
     # `(a-1)*log(y)` into `a*log(y) - log(y)`, which yields nan when log(y) is
     # -inf at the boundary). After stabilize the body is exposed for fusion.
     inline = False
+    resolve_dtypes = resolve_float_dtypes
 
     def build_inner_graph(self, x, y):
         return [switch(eq(x, 0), 0, mul(x, log(y)))]
@@ -296,6 +298,7 @@ class XLog1PY(FusibleSymbolicOp):
 
     # See note on `XLogY.inline`. Same hazard at y = -1 where log1p(y) = -inf.
     inline = False
+    resolve_dtypes = resolve_float_dtypes
 
     def build_inner_graph(self, x, y):
         return [switch(eq(x, 0), 0, mul(x, log1p(y)))]

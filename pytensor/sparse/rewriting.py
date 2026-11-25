@@ -1145,7 +1145,7 @@ class MulSDCSC(_NoPythonCOp):
         )
 
     def c_code_cache_version(self):
-        return (3,)
+        return (4,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (
@@ -1208,6 +1208,7 @@ class MulSDCSC(_NoPythonCOp):
             dtype_{_zout} * const __restrict__ zout = (dtype_{_zout}*)PyArray_DATA({_zout});
 
             const npy_intp Sb = PyArray_STRIDES({_b})[0];
+            const npy_intp Sb1 = PyArray_STRIDES({_b})[1] / PyArray_ITEMSIZE({_b});
 
             // loop over columns
             for (npy_intp j = 0; j < N; ++j)
@@ -1222,7 +1223,7 @@ class MulSDCSC(_NoPythonCOp):
                     const dtype_{_b}* __restrict__ b_row = (dtype_{_b}*)(PyArray_BYTES({_b}) + Sb * i);
 
                     // write resulting gradient to sparse output
-                    zout[i_idx] = data[i_idx] * b_row[j];
+                    zout[i_idx] = data[i_idx] * b_row[j * Sb1];
                 }}
             }}
         }}
@@ -1283,7 +1284,7 @@ class MulSDCSR(_NoPythonCOp):
         )
 
     def c_code_cache_version(self):
-        return (3,)
+        return (4,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (
@@ -1346,6 +1347,7 @@ class MulSDCSR(_NoPythonCOp):
             dtype_{_zout} * const __restrict__ zout = (dtype_{_zout}*)PyArray_DATA({_zout});
 
             const npy_intp Sb = PyArray_STRIDES({_b})[0];
+            const npy_intp Sb1 = PyArray_STRIDES({_b})[1] / PyArray_ITEMSIZE({_b});
 
             // loop over columns
             for (npy_intp j = 0; j < N; ++j)
@@ -1360,7 +1362,7 @@ class MulSDCSR(_NoPythonCOp):
                     npy_int32 i = indices[i_idx];
 
                     // write resulting gradient to sparse output
-                    zout[i_idx] = data[i_idx] * b_row[i];
+                    zout[i_idx] = data[i_idx] * b_row[i * Sb1];
                 }}
             }}
         }}

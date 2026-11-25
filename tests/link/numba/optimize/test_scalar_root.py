@@ -1,0 +1,210 @@
+from functools import partial
+
+import numpy as np
+import pytest
+
+import pytensor
+import pytensor.tensor as pt
+from pytensor.tensor.optimize import root_scalar
+from tests.link.numba.test_basic import compare_numba_and_py
+
+
+pytestmark = [
+    pytest.mark.filterwarnings("error"),
+    # scipy warns on these in the perform reference runs
+    pytest.mark.filterwarnings("ignore:overflow encountered:RuntimeWarning"),
+    pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning"),
+    pytest.mark.filterwarnings("ignore:Tolerance of:RuntimeWarning"),
+    pytest.mark.filterwarnings("ignore:Derivative was zero:RuntimeWarning"),
+]
+
+pytest.importorskip("numba")
+
+# Roots and flags match scipy's up to ulp differences between numba's and numpy's math
+# functions in the objective.
+matches_scipy = partial(np.testing.assert_allclose, rtol=1e-10, strict=True)
+
+
+def _bracket(a):
+    return {"bracket": pt.stack([-2 * a, 0.0])}
+
+
+# The root of x + 2 * a * cos(x) near zero at a = 1.
+ROOT = -1.02986653
+METHODS = [
+    pytest.param("newton", lambda a: {"jac": True}, id="newton"),
+    pytest.param("halley", lambda a: {"jac": True, "hess": True}, id="halley"),
+    pytest.param("secant", lambda a: {}, id="secant"),
+    pytest.param("brentq", _bracket, id="brentq"),
+    pytest.param("bisect", _bracket, id="bisect"),
+    pytest.param("brenth", _bracket, id="brenth"),
+    pytest.param("ridder", _bracket, id="ridder"),
+    pytest.param("toms748", _bracket, id="toms748"),
+]
+BRACKET_METHODS = ["brentq", "bisect", "brenth", "ridder", "toms748"]
+OPEN_METHODS = [
+    ("secant", {}),
+    ("newton", {"jac": True}),
+    ("halley", {"jac": True, "hess": True}),
+]
+
+
+def _root_graph(method, options):
+    x = pt.dscalar("x")
+    a = pt.dscalar("a")
+    solution, success = root_scalar(
+        equation=x + 2 * a * pt.cos(x), variable=x, method=method, **options(a)
+    )
+    return [x, a], [solution, success, pytensor.grad(solution, a)]
+
+
+def _root_function(method, options):
+    inputs, outputs = _root_graph(method=method, options=options)
+    return pytensor.function(inputs, outputs, mode="NUMBA")
+
+
+@pytest.mark.parametrize("method, options", METHODS)
+def test_root_scalar(method, options):
+    """At the root of f(x, a) = x + 2 a cos(x), dx/da = -f_a / f_x = -2 cos(x) / (1 - 2 a sin(x))."""
+    inputs, outputs = _root_graph(method=method, options=options)
+
+    _, (_, success, gradient) = compare_numba_and_py(
+        graph_inputs=inputs,
+        graph_outputs=outputs,
+        test_inputs=[0.0, 1.0],
+        assert_fn=matches_scipy,
+        # The object-mode pass cannot type the float64 bracket ends
+        eval_obj_mode=False,
+    )
+
+    assert success
+    np.testing.assert_allclose(
+        gradient, -2 * np.cos(ROOT) / (1 - 2 * np.sin(ROOT)), rtol=1e-6
+    )
+
+
+@pytest.mark.parametrize("method, options", METHODS)
+def test_root_scalar_maxiter(method, options):
+    fn = _root_function(
+        method=method,
+        options=lambda a: {**options(a), "optimizer_kwargs": {"maxiter": 1}},
+    )
+
+    _, success, _ = fn(0.0, 1.0)
+
+    assert not success
+
+
+@pytest.mark.parametrize("method", BRACKET_METHODS)
+@pytest.mark.parametrize(
+    "equation, bracket",
+    [
+        (lambda x: x + 2 * pt.cos(x), (0.0, 1.0)),
+        (lambda x: 1e-170 * (x - 5), (0.0, 1.0)),
+        (lambda x: pt.log(x) - 0.5, (-1.0, 3.0)),
+        (lambda x: 1 / x - 1, (0.0, 2.0)),
+        (lambda x: x, (-1e-160, 1e160)),
+        (lambda x: x - 1, (-1e308, 1e308)),
+        (lambda x: pt.expm1((x + 3000.3) / 1000) - 1e-7, (-4000.0, -2000.0)),
+        (lambda x: pt.switch((x > 0.5) & (x < 2.5), np.nan, x - 3), (-1.0, 5.0)),
+        (lambda x: x + 2 * pt.cos(x), (-2.0,)),
+        (lambda x: pt.switch(x > 1.5, np.nan, x), (0.0, 2.0)),
+        (lambda x: pt.switch(x > 1.5, np.inf, x), (0.0, 2.0)),
+        (
+            lambda x: pt.switch(x < 0.5, np.inf, pt.switch(x > 1.5, np.nan, x - 1)),
+            (0.0, 2.0),
+        ),
+        (lambda x: pt.switch((x > 0.6) & (x < 1.2), np.inf, x * x - 2), (0.0, 2.0)),
+    ],
+    ids=[
+        "no_sign_change",
+        "no_sign_change_underflow",
+        "nan_at_an_end",
+        "inf_at_an_end",
+        "ratio_overflow",
+        "huge_bracket",
+        "negative_root_far_from_zero",
+        "nan_inside_bracket",
+        "short_bracket",
+        "zero_then_nan_end",
+        "zero_then_inf_end",
+        "inf_then_nan_end",
+        "inf_inside_bracket",
+    ],
+)
+def test_root_scalar_bracket_edge_cases(method, equation, bracket):
+    """Bad brackets, non-finite values and extreme scales give scipy's result, including where scipy itself fails."""
+    x = pt.dscalar("x")
+    solution, success = root_scalar(
+        equation=equation(x), variable=x, method=method, bracket=bracket
+    )
+
+    compare_numba_and_py(
+        graph_inputs=[x],
+        graph_outputs=[solution, success],
+        test_inputs=[0.0],
+        assert_fn=matches_scipy,
+        # The object-mode pass cannot type the float64 bracket ends
+        eval_obj_mode=False,
+    )
+
+
+@pytest.mark.parametrize("method, options", OPEN_METHODS)
+@pytest.mark.parametrize(
+    "dtype, equation, x0",
+    [("float32", lambda x: x**3 - 7, 1.0), ("float64", lambda x: x**3 - 1e30, 2e10)],
+    ids=["float32", "root_near_1e10"],
+)
+def test_root_scalar_open_methods_match_scipy(method, options, dtype, equation, x0):
+    """scipy iterates in the variable's dtype and stops when the iterate stops moving."""
+    x = pt.scalar("x", dtype=dtype)
+    solution, success = root_scalar(
+        equation=equation(x), variable=x, method=method, **options
+    )
+
+    compare_numba_and_py(
+        graph_inputs=[x],
+        graph_outputs=[solution, success],
+        test_inputs=[np.array(x0, dtype)],
+        assert_fn=partial(np.testing.assert_allclose, rtol=1e-6, strict=True),
+    )
+
+
+@pytest.mark.parametrize("method, options", OPEN_METHODS)
+def test_root_scalar_open_methods_flat_region(method, options):
+    """A flat objective stops scipy's open methods unconverged: secant on equal values, newton and halley on a zero slope."""
+    x = pt.dscalar("x")
+    solution, success = root_scalar(
+        equation=pt.switch(x > 5, x - 6, 1.0), variable=x, method=method, **options
+    )
+
+    compare_numba_and_py(
+        graph_inputs=[x],
+        graph_outputs=[solution, success],
+        test_inputs=[0.0],
+        assert_fn=matches_scipy,
+    )
+
+
+@pytest.mark.parametrize(
+    "method, options",
+    [("newton", lambda a: {"jac": True}), ("brentq", _bracket)],
+    ids=["newton", "brentq"],
+)
+def test_root_scalar_keeps_variable_dtype(method, options):
+    x = pt.fscalar("x")
+    a = pt.fscalar("a")
+    solution, _ = root_scalar(
+        equation=x + 2 * a * pt.cos(x), variable=x, method=method, **options(a)
+    )
+
+    _, (root,) = compare_numba_and_py(
+        graph_inputs=[x, a],
+        graph_outputs=[solution],
+        test_inputs=[np.float32(0.0), np.float32(1.0)],
+        # The object-mode pass cannot type the float64 bracket ends
+        eval_obj_mode=False,
+    )
+
+    assert root.dtype == np.float32
+    np.testing.assert_allclose(root, ROOT, rtol=1e-6)

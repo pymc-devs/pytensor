@@ -13,6 +13,7 @@ from pytensor.gradient import grad
 from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.scan.op import Scan
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -725,17 +726,23 @@ class TestDiagonalSolveToDivision:
         assert_equal_computations([rewritten], [expected])
 
     @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
-    def test_solve_triangular_unit_diag(self, b_ndim):
-        d = pt.dvector("d")
+    @pytest.mark.parametrize("batch_shape", [(), (2,)], ids=["unbatched", "batched"])
+    def test_solve_triangular_unit_diag(self, b_ndim, batch_shape):
+        d = pt.tensor("d", shape=(*batch_shape, None), dtype="float64")
         b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
-        D = pt.diag(d)
+        D = alloc_diag(d, axis1=-2, axis2=-1)
         out = solve_triangular(D, b, lower=True, unit_diagonal=True, b_ndim=b_ndim)
 
         rewritten = rewrite_graph(
             out, include=("canonicalize", "stabilize", "specialize")
         )
 
-        assert_equal_computations([rewritten], [b])
+        expected = b
+        if batch_shape:
+            expected = pt.broadcast_to(
+                b[None], (np.int64(batch_shape[0]), *b.type.shape)
+            )
+        assert_equal_computations([rewritten], [expected])
 
     @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
     def test_cho_solve_diag(self, b_ndim):
@@ -774,6 +781,42 @@ def test_solve_sylvester_both_diag(make_diag):
     expected = rewrite_graph(C / (a[:, None] + b[None, :]), include=passes)
 
     assert_equal_computations([rewritten], [expected])
+
+
+def test_solve_sylvester_complex_symmetric_not_rewritten():
+    A = pt.zmatrix("A", shape=(3, 3))
+    C = pt.zmatrix("C", shape=(3, 3))
+
+    passes = ("canonicalize", "stabilize", "specialize")
+    A_sym = assume(A, symmetric=True)
+    rewritten = rewrite_graph(solve_sylvester(A_sym, A_sym, C), include=passes)
+    expected = rewrite_graph(solve_sylvester(A, A, C), include=passes)
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_solve_sylvester_both_symmetric():
+    A = pt.dmatrix("A", shape=(4, 4))
+    B = pt.dmatrix("B", shape=(3, 3))
+    C = pt.dmatrix("C", shape=(4, 3))
+    A_sym = assume(A, symmetric=True)
+    B_sym = assume(B, symmetric=True)
+
+    passes = ("canonicalize", "stabilize")
+    result = RewriteTester(
+        [A, B, C], [solve_sylvester(A_sym, B_sym, C)], include=passes
+    )
+
+    a, U = pt.linalg.eigh(A)
+    b, V = pt.linalg.eigh(B)
+    expected = U @ ((U.mT @ C @ V) / (a[:, None] + b[None, :])) @ V.mT
+    result.assert_graph(rewrite_graph(expected, include=passes))
+
+    rng = np.random.default_rng(812)
+    A_val = rng.normal(size=(4, 4))
+    B_val = rng.normal(size=(3, 3))
+    result.assert_eval(
+        A_val @ A_val.T + np.eye(4), B_val + B_val.T, rng.normal(size=(4, 3))
+    )
 
 
 @pytest.mark.parametrize("dtype", ["float64", "complex128"])

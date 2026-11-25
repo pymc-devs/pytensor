@@ -314,19 +314,45 @@ and a static shape/broadcastable pattern with a ``1``\/``True`` for every shape
 dimension that is one and ``None``\/``False`` for every dimension with an unknown
 shape.
 
-For Python numbers, the static shape/broadcastable pattern is ``()`` but the dtype must be
-inferred.  Python integers are stored in the smallest dtype that can hold
-them, so small constants like ``1`` are stored in a `bscalar`.
-Likewise, Python floats are stored in an `fscalar` if `fscalar` suffices to hold
-them perfectly, but a `dscalar` otherwise.
+Python numbers have scalar shape ``()``. Their dtype depends on whether they
+are converted on their own or passed directly to an operation. The following
+rules describe the default ``cast_policy='numpy+floatX'``.
 
-.. note::
+A standalone constant gets a default dtype::
 
-    When ``config.floatX == float32`` (see :mod:`config`), then Python floats
-    are stored instead as single-precision floats.
+    pt.constant(2)       # int64
+    pt.constant(2.0)     # config.floatX
+    pt.constant(2, dtype="float32")  # explicitly float32
 
-    For fine control of this rounding policy, see
-    `pytensor.tensor.basic.autocast_float`.
+A Python number passed directly to an arithmetic operation is weakly typed.
+Its precision follows the operation and its typed operands::
+
+    x = pt.fvector("x")
+    x + 2               # float32
+    x ** 2              # float32
+    pt.ivector() + 1    # int32
+
+NumPy values and symbolic constants already have a dtype, which participates
+in promotion. For example, ``x + np.float64(2)`` is ``float64``. With
+``floatX='float64'``, ``x + pt.constant(2)`` is also ``float64``: that constant
+was already constructed as int64. Use ``pt.constant(2, dtype=x.dtype)`` when a
+constant must match ``x``.
+
+An operation may require a floating computation even when its arguments are
+integers. True division of integer inputs uses ``floatX``; ``pt.sqrt(2)`` uses
+float64 because its standalone int64 input is promoted to floating point. ``pt.sqrt(2.0)``
+uses ``floatX``. Computing ``math.sqrt(2)`` in Python leaves a Python float
+that can take its precision from a typed operand when used in an expression.
+
+With ``floatX='float32'``, ``pt.fvector() + pt.ivector()`` is float32, although
+NumPy would promote those dtypes to float64. Other operations have their
+own conventions: floating-point functions select a suitable working dtype,
+sums and products widen small integer outputs, linear
+algebra uses the core operation's working dtype, and random variables use the
+distribution's sampling dtype or an explicit ``dtype`` argument.
+
+The legacy ``cast_policy='custom'`` instead chooses constant dtypes based on
+which types can represent their values. See :attr:`config.cast_policy`.
 
 .. function:: as_tensor_variable(x, name=None, ndim=None)
 

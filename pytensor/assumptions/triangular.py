@@ -24,7 +24,7 @@ from pytensor.tensor.linalg.decomposition.lu import LU
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.inverse import MatrixInverse
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm
 from pytensor.tensor.math import Dot
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.variable import TensorConstant
@@ -88,6 +88,8 @@ register_assumption(LOWER_TRIANGULAR, Dot)(all_inputs_have_key)
 register_assumption(UPPER_TRIANGULAR, Dot)(all_inputs_have_key)
 register_assumption(LOWER_TRIANGULAR, KroneckerProduct)(all_inputs_have_key)
 register_assumption(UPPER_TRIANGULAR, KroneckerProduct)(all_inputs_have_key)
+register_assumption(LOWER_TRIANGULAR, Sqrtm)(propagate_first)
+register_assumption(UPPER_TRIANGULAR, Sqrtm)(propagate_first)
 register_assumption(LOWER_TRIANGULAR, Subtensor)(subtensor_propagates_matrix_property)
 register_assumption(UPPER_TRIANGULAR, Subtensor)(subtensor_propagates_matrix_property)
 
@@ -124,10 +126,12 @@ def _schur_upper(key, op, feature, fgraph, node, input_states):
 
 @register_assumption(UPPER_TRIANGULAR, QZ)
 def _qz_upper(key, op, feature, fgraph, node, input_states):
-    # AA (output 0) and BB (output 1) are upper triangular
+    # BB (output 1) is upper triangular. AA (output 0) is upper triangular only for
+    # complex QZ; real QZ gives quasi-upper-triangular AA (2x2 blocks)
     n_out = len(node.outputs)
     states = [FactState.UNKNOWN] * n_out
-    states[0] = FactState.TRUE
+    if op.complex_output:
+        states[0] = FactState.TRUE
     states[1] = FactState.TRUE
     return states
 

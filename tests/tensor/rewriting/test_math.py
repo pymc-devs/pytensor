@@ -12,6 +12,7 @@ import pytensor.tensor as pt
 from pytensor import shared
 from pytensor.assumptions import assume
 from pytensor.compile import optdb
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.debugmode import DebugMode
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
@@ -122,6 +123,7 @@ from pytensor.tensor.rewriting.math import (
     local_sum_prod_of_mul_or_div,
     local_useless_abs,
     mul_canonizer,
+    non_negative_comparison,
     parse_mul_tree,
     perform_sigm_times_exp,
     simplify_mul,
@@ -201,6 +203,10 @@ def inputs(xbc=(0, 0), ybc=(0, 0), zbc=(0, 0)):
     y = TensorType(dtype="float64", shape=ybc)("y")
     z = TensorType(dtype="float64", shape=zbc)("z")
     return x, y, z
+
+
+def _elemwise_int_dtype(x):
+    return "int8" if config.cast_policy == "custom" else x.dtype
 
 
 def test_add_canonizer_problem0():
@@ -329,6 +335,31 @@ class TestAlgebraicCanonizer:
         )
         result.assert_graph(x + y)
 
+    @pytest.mark.parametrize("pad_twice", [False, True])
+    def test_neg_of_left_expanded_flat_add(self, pad_twice):
+        # Regression test for #2697.
+        x, y = pt.vectors("xy")
+        total = x + y
+        padded = total[None, :]
+        if pad_twice:
+            padded = padded[None, :, :]
+        negated = -padded
+        result = RewriteTester(
+            [x, y], [negated, total], include=None, custom_rewrite=local_add_canonizer
+        )
+        result.assert_graph(negated, total)
+
+    def test_neg_of_left_expanded_zero_input_op(self):
+        value = OpFromGraph([], [pt.constant([1.0, 2.0])])()
+        negated = -value[None, :]
+        result = RewriteTester(
+            [],
+            [negated],
+            include=None,
+            custom_rewrite=in2out(local_add_canonizer, ignore_newtrees=True),
+        )
+        result.assert_graph(negated)
+
     def test_elemwise_multiple_inputs_rewrites(self):
         """Verify that the `AlgebraicCanonizer` merges sequential ``Elemwise({mul,add})``."""
         # Test with and without DimShuffle
@@ -357,52 +388,12 @@ class TestAlgebraicCanonizer:
             # (fx*fy*(fx+fy+dz),(fx,fy,dz),(dxv,dyv,dzv),2,'float64'),  # check mixed type add
             # (dz*fy*(fx+fy),(fx,fy,dz),(dxv,dyv,dzv),2,'float64'),  # check mixed type mul
             # check with dimshuffle of constant
-            (
-                fx + fy + fz + 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
-            ),
-            (
-                fx * fy * fz * 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
-            ),
+            (fx + fy + fz + 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
+            (fx * fy * fz * 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
             # (2+fx+fy+fz,(fx,fy,fz),(fxv,fyv,fzv),1,'float32'),
             # (2*fx*fy*fz,(fx,fy,fz),(fxv,fyv,fzv),1,'float32'),
-            (
-                2 + fx + fy + fz + 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
-            ),
-            (
-                2 * fx * fy * fz * 2,
-                (fx, fy, fz),
-                (fxv, fyv, fzv),
-                1,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
-            ),
+            (2 + fx + fy + fz + 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
+            (2 * fx * fy * fz * 2, (fx, fy, fz), (fxv, fyv, fzv), 1, "float32"),
             # (fx*fy*2*(fx+fy+fz),(fx,fy,fz),(fxv,fyv,fzv),2,'float32'),
             # (fx*fy*(2+fx+fy+fz),(fx,fy,fz),(fxv,fyv,fzv),2,'float32'),
             (
@@ -410,11 +401,7 @@ class TestAlgebraicCanonizer:
                 (fx, fy, fz),
                 (fxv, fyv, fzv),
                 2,
-                {
-                    "custom": "float32",
-                    "numpy+floatX": config.floatX,
-                    "numpy": "float64",
-                },
+                "float32",
             ),
             # check with broadcast of row
             # (fx+fy+fz+fv,(fx,fy,fz,fv),(fxv,fyv,fzv,fvv),1,'float32'),
@@ -778,38 +765,11 @@ class TestAlgebraicCanonizer:
         for id, (g, sym_inputs, val_inputs, out_dtype) in enumerate(
             [
                 (((2.0 * dx) / (4.0 * dy)), [dx, dy], [dxv, dyv], "float64"),
-                (
-                    ((2.0 * fx) / (4.0 * fy)),
-                    [fx, fy],
-                    [fxv, fyv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2.0 * fx) / (4.0 * fy), [fx, fy], [fxv, fyv], "float32"),
                 (((2.0 * dv) / (4.0 * dy)), [dv, dy], [dvv, dyv], "float64"),
-                (
-                    ((2.0 * fv) / (4.0 * fy)),
-                    [fv, fy],
-                    [fvv, fyv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2.0 * fv) / (4.0 * fy), [fv, fy], [fvv, fyv], "float32"),
                 (((2.0 * dx) / (4.0 * dv)), [dx, dv], [dxv, dvv], "float64"),
-                (
-                    ((2.0 * fx) / (4.0 * fv)),
-                    [fx, fv],
-                    [fxv, fvv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2.0 * fx) / (4.0 * fv), [fx, fv], [fxv, fvv], "float32"),
             ]
         ):
             if isinstance(out_dtype, dict):
@@ -831,27 +791,9 @@ class TestAlgebraicCanonizer:
         for id, (g, sym_inputs, val_inputs, out_dtype) in enumerate(
             [
                 ((2 * dx) / 2, [dx], [dxv], "float64"),
-                (
-                    (2 * fx) / 2,
-                    [fx],
-                    [fxv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2 * fx) / 2, [fx], [fxv], "float32"),
                 ((2 * dv) / 2, [dv], [dvv], "float64"),
-                (
-                    (2 * fv) / 2,
-                    [fv],
-                    [fvv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2 * fv) / 2, [fv], [fvv], "float32"),
             ]
         ):
             if isinstance(out_dtype, dict):
@@ -886,38 +828,11 @@ class TestAlgebraicCanonizer:
         for id, (g, sym_inputs, val_inputs, out_dtype) in enumerate(
             [
                 ((2 * dx) / (3 * abs(dx)), [dx], [0.5 - dxv], "float64"),
-                (
-                    (2 * fx) / (3 * abs(fx)),
-                    [fx],
-                    [0.5 - fxv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2 * fx) / (3 * abs(fx)), [fx], [0.5 - fxv], "float32"),
                 ((2 * dx) / (3 * abs(dx)), [dx], [0.1 * dxv], "float64"),
-                (
-                    (2 * fx) / (3 * abs(fx)),
-                    [fx],
-                    [0.1 * fxv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2 * fx) / (3 * abs(fx)), [fx], [0.1 * fxv], "float32"),
                 ((2 * dv) / (3 * abs(dv)), [dv], [0.5 - dvv], "float64"),
-                (
-                    (2 * fv) / (3 * abs(fv)),
-                    [fv],
-                    [0.5 - fvv],
-                    {
-                        "custom": "float32",
-                        "numpy+floatX": config.floatX,
-                        "numpy": "float64",
-                    },
-                ),
+                ((2 * fv) / (3 * abs(fv)), [fv], [0.5 - fvv], "float32"),
             ]
         ):
             if isinstance(out_dtype, dict):
@@ -1269,6 +1184,50 @@ def test_local_elemwise_sub_zeros():
     ) or isinstance(f.maker.fgraph.toposort()[0].inputs[1], TensorConstant)
     utt.assert_allclose(f(mat_val), np.zeros(mat_val.shape))
     assert check_stack_trace(f, ops_to_check="all")
+
+
+def test_non_negative_comparison():
+    x = pt.dvector("x", shape=(3,))
+    non_positive = pt.constant(np.zeros(3, dtype="int8"))
+    negative = pt.constant(np.full(3, -1, dtype="int8"))
+    outputs = [
+        exp(x) >= non_positive,
+        pt_abs(x) < negative,
+        non_positive <= sqr(x),
+        negative > exp(x),
+        exp(x) > negative,
+        exp(x) <= negative,
+    ]
+    result = RewriteTester([x], outputs)
+    expected = [pt.alloc(np.array(value), 3) for value in [True, False] * 3]
+    result.assert_graph(*expected, strict_dtype=True)
+    result.assert_eval(np.array([-1000, 0, 1.0]))
+
+
+def test_non_negative_comparison_nan_unsafe_excluded():
+    x = pt.dvector("x", shape=(3,))
+    zero = pt.constant(np.zeros(3, dtype="int8"))
+    out = exp(x) >= zero
+    result = RewriteTester([x], [out], exclude=["nan_unsafe"])
+    result.assert_graph(out)
+    result.assert_eval(np.array([np.nan, -np.inf, 0]))
+
+
+def test_non_negative_comparison_unresolved():
+    x = pt.dscalar("x")
+    value = exp(x)
+    outputs = [
+        value <= 0,
+        value > 0,
+        value >= 1,
+        value >= np.nan,
+        value.astype("int8") >= 0,
+        value >= pt.constant([0, -1, -2], dtype="int8"),
+    ]
+    result = RewriteTester(
+        [x], outputs, include=None, custom_rewrite=non_negative_comparison
+    )
+    result.assert_graph(*outputs)
 
 
 class TestLocalUselessElemwiseComparison:
@@ -2065,7 +2024,7 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=np.int8),
+                    x >= np.zeros((1, 1), dtype=_elemwise_int_dtype(x)),
                     pt.log1p(x),
                     np.array([[np.nan]], dtype=np.float32),
                 )
@@ -2090,7 +2049,7 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=np.int8),
+                    x >= np.zeros((1, 1), dtype=_elemwise_int_dtype(x)),
                     pt.log1p(-x),
                     np.array([[np.nan]], dtype=np.float32),
                 )
@@ -2113,7 +2072,7 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x <= np.array([[0]], dtype=np.int8),
+                    x <= np.zeros((1, 1), dtype=_elemwise_int_dtype(x)),
                     x,
                     np.array([[np.nan]], dtype=np.float32),
                 )
@@ -2359,7 +2318,7 @@ class TestSqrSqrt:
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
-            ge(x, np.zeros((1, 1), dtype="int8")),
+            ge(x, np.zeros((1, 1), dtype=_elemwise_int_dtype(x))),
             x,
             np.full((1, 1), np.nan, dtype=out.type.dtype),
         )
@@ -2381,7 +2340,7 @@ class TestSqrSqrt:
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
-            ge(x, np.zeros((1,), dtype="int8")),
+            ge(x, np.zeros((1,), dtype=_elemwise_int_dtype(x))),
             x,
             np.full((1,), np.nan, dtype=dtype),
         )
@@ -4672,7 +4631,9 @@ class TestSigmoidRewrites:
         assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 
         # Test `inv_1_plus_exp`
-        f = pytensor.function([x], 1 - pt.fill(x, 1.0) / (1 + exp(-x)), mode=m)
+        f = pytensor.function(
+            [x], 1 - pt.full_like(x, 1.0, dtype=x.dtype) / (1 + exp(-x)), mode=m
+        )
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
         assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 

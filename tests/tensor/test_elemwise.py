@@ -19,7 +19,7 @@ from pytensor.graph.replace import vectorize_graph
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.numba import NumbaLinker
-from pytensor.scalar import ScalarOp, float32, float64, int32, int64
+from pytensor.scalar import ScalarOp, float64
 from pytensor.scalar import add as scalar_add
 from pytensor.scalar import exp as scalar_exp
 from pytensor.scalar import xor as scalar_xor
@@ -815,6 +815,30 @@ def check_elemwise_runtime_broadcast(mode):
 
 
 class TestElemwise(unittest_tools.InferShapeTester):
+    @config.change_flags(cast_policy="numpy+floatX", floatX="float64")
+    def test_weak_scalar_promotion(self):
+        x = pt.fvector("x")
+        for out in (x + 2, 2.5 * x, x / 2, x**2, pt.clip(x, 0, 1)):
+            assert out.dtype == "float32"
+        assert (x + np.float64(2)).dtype == "float64"
+        assert (x + pt.constant(2)).dtype == "float64"
+        # The condition does not participate in branch promotion.
+        assert pt.switch(pt.lvector(), x, 0).dtype == "float32"
+        # Second only broadcasts its value; the first argument supplies its shape.
+        assert pt.second(x, 2).dtype == "int64"
+        assert pt.polygamma(0, x).owner.inputs[0].dtype == "int64"
+        assert (pt.bvector() / 128).dtype == "float64"
+        assert (pt.vector(dtype="uint8") / -1).dtype == "float64"
+
+    @config.change_flags(cast_policy="numpy+floatX", floatX="float64")
+    def test_weak_scalar_promotion_grad(self):
+        # Scalar gradients mix their inputs with Python literals
+        x = pt.fscalar("x")
+        ops = (pt.sqrt, pt.tanh, pt.sigmoid, pt.log1p, pt.arctan, pt.arcsin, pt.sqr)
+        for op in ops:
+            assert grad(op(x), x).dtype == "float32"
+        assert grad(x**3, x).dtype == "float32"
+
     def test_elemwise_grad_bool(self):
         x = scalar(dtype="bool")
         y = bscalar()
@@ -1016,9 +1040,6 @@ def test_not_implemented_elemwise_grad():
     # Regression test for unimplemented gradient in an Elemwise Op.
 
     class TestOp(ps.ScalarOp):
-        def __init__(self):
-            self.output_types_preference = ps.upgrade_to_float
-
         def impl(self, n, x):
             return x * n
 
@@ -1079,12 +1100,10 @@ class TestVectorize:
 
 def test_gradient_mixed_discrete_output_scalar_op():
     class MixedDtypeScalarOp(ScalarOp):
-        def make_node(self, *inputs):
-            float_op = float64 if config.floatX == "float64" else float32
-            int_op = int64 if config.floatX == "int64" else int32
-            inputs = [float_op()]
-            outputs = [float_op(), int_op()]
-            return Apply(self, inputs, outputs)
+        nout = 2
+
+        def resolve_dtypes(self, input_dtypes):
+            return input_dtypes, (config.floatX, "int32")
 
         def perform(self, node, inputs, outputs):
             raise NotImplementedError()

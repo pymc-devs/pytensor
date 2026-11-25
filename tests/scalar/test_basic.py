@@ -57,6 +57,7 @@ from pytensor.scalar.basic import (
     tan,
     tanh,
     true_div,
+    upcast,
 )
 from pytensor.tensor import tensor_from_scalar
 from pytensor.tensor.type import fscalar, imatrix, matrix
@@ -289,6 +290,22 @@ class TestLogical:
             assert fn(a, b) == ~a, (a,)
 
 
+@pytest.mark.parametrize(
+    ("cast_policy", "floatX", "dtypes", "expected"),
+    [
+        ("custom", "float16", ("int8", "uint8", "float16"), "float32"),
+        ("custom", "float16", ("uint8", "float16", "int8"), "float16"),
+        ("numpy+floatX", "float16", ("float16", "int16"), "float16"),
+        ("numpy+floatX", "float16", ("int64", np.dtype("float32")), "float64"),
+        ("numpy+floatX", "float32", ("int64", "uint64"), "float32"),
+        ("numpy+floatX", "float32", ("int64", np.dtype("float64")), "float64"),
+    ],
+)
+def test_upcast(cast_policy, floatX, dtypes, expected):
+    with pytensor.config.change_flags(cast_policy=cast_policy, floatX=floatX):
+        assert upcast(*dtypes) == expected
+
+
 class TestUpgradeToFloat:
     # Test for Ops whose output has to be floating point, even when all
     # inputs are ints.
@@ -463,10 +480,21 @@ def test_grad_abs():
 def test_constant():
     c = constant(2, name="a")
     assert c.name == "a"
-    assert c.dtype == "int8"
+    expected = "int8" if pytensor.config.cast_policy == "custom" else "int64"
+    assert c.dtype == expected
     c = constant(2, dtype="float32")
     assert c.name is None
     assert c.dtype == "float32"
+
+
+@pytensor.config.change_flags(cast_policy="numpy+floatX", floatX="float64")
+def test_weak_scalar_promotion():
+    x = float32("x")
+    for out in (x + 2, 2.5 * x, x / 2, x**2):
+        assert out.dtype == "float32"
+    assert add(int8("i"), 1).dtype == "int8"
+    with pytest.raises(OverflowError):
+        add(int8("i"), 128)
 
 
 def test_shape():
@@ -504,7 +532,7 @@ def test_scalar_hash_default_output_type_preference():
 
     new_eq = EQ()
     old_eq = EQ()
-    del old_eq.output_types_preference  # mimic old Op
+    old_eq.output_types_preference = None  # mimic an old pickle
     assert new_eq == old_eq
     assert hash(new_eq) == hash(old_eq)
 

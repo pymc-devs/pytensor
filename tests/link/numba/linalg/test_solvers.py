@@ -10,7 +10,7 @@ from pytensor import In, config
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.decomposition.svd import svd
-from pytensor.tensor.linalg.products import expm
+from pytensor.tensor.linalg.products import expm, sqrtm
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular, solve_triangular
@@ -477,6 +477,8 @@ def readonly(x):
         (svd, (np.asfortranarray(GENERAL),), "FCF"),
         (expm, (GENERAL,), "C"),
         (expm, (np.asfortranarray(GENERAL),), "F"),
+        (sqrtm, (POSDEF,), "F"),
+        (sqrtm, (np.asfortranarray(POSDEF),), "C"),
     ],
     ids=[
         "solve_triangular_c",
@@ -492,6 +494,8 @@ def readonly(x):
         "svd_f",
         "expm_c",
         "expm_f",
+        "sqrtm_c",
+        "sqrtm_f",
     ],
 )
 def test_output_layouts(op, values, expected, overwrite):

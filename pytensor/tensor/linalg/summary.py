@@ -17,6 +17,7 @@ from pytensor.tensor.linalg.dtype_utils import (
     linalg_output_dtype,
     linalg_real_output_dtype,
 )
+from pytensor.tensor.reshape import join_dims
 from pytensor.tensor.type import scalar
 
 
@@ -237,7 +238,9 @@ def norm(
             or (ord in ("f", "fro") and core_ndim == 2)
             or (ord == 2 and core_ndim == 1)
         ):
-            x = x.reshape(tuple(x.shape[:-2]) + (-1,) + (1,) * (core_ndim - 1))
+            x = ptb.shape_padright(
+                join_dims(x, start_axis=batch_ndim, n_axes=core_ndim), core_ndim - 1
+            )
             batch_T_dim_order = tuple(range(batch_ndim)) + tuple(
                 range(batch_ndim + core_ndim - 1, batch_ndim - 1, -1)
             )
@@ -271,9 +274,7 @@ def norm(
 
     if len(axis) == 1:
         # Vector norms
-        if ord in [None, "fro", "f"] and (core_ndim == 2):
-            # This is here to catch the case where X is a 2D tensor but the user wants to treat it as a batch of
-            # vectors. Other vector norms will work fine in this case.
+        if ord is None or (ord in ["fro", "f"] and core_ndim == 2):
             ret = ptm.sqrt(ptm.sum((x.conj() * x).real, axis=axis, keepdims=keepdims))
         elif (ord == "inf") or (ord == np.inf):
             ret = ptm.max(ptm.abs(x), axis=axis, keepdims=keepdims)

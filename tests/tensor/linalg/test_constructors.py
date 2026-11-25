@@ -1,8 +1,11 @@
 import numpy as np
 import scipy
 
+import pytensor
 from pytensor import tensor as pt
+from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg import block_diag
 from tests import unittest_tools as utt
 
@@ -38,6 +41,21 @@ def test_block_diagonal_grad():
     B = np.array([[5.0, 6.0], [7.0, 8.0]])
 
     utt.verify_grad(block_diag, pt=[A, B], rng=np.random.default_rng())
+
+
+def test_block_diagonal_batched_grad():
+    # The batched ARange that sliced out each block is gone (#2702). The
+    # Blockwise(AdvancedSubtensor) left on the output gradient should go too (#2704)
+    A = pt.tensor3("A")
+    B = pt.matrix("B")
+    grad = pytensor.grad((block_diag(A, B) ** 2).sum(), A)
+    fn = pytensor.function([A, B], grad, mode=Mode(linker="py", optimizer="fast_run"))
+    blockwise_core_ops = sorted(
+        type(node.op.core_op).__name__
+        for node in fn.maker.fgraph.apply_nodes
+        if isinstance(node.op, Blockwise)
+    )
+    assert blockwise_core_ops == ["AdvancedSubtensor", "BlockDiagonal"]
 
 
 def test_block_diagonal_blockwise():

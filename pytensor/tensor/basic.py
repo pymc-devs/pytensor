@@ -1528,7 +1528,12 @@ def infer_static_shape(
 
     sh = folded_shape = [check_type(as_tensor_variable(s, ndim=0)) for s in shape]
 
-    if not all(isinstance(s, Constant) for s in folded_shape):
+    if any(s.owner is not None for s in folded_shape):
+        try:
+            return sh, tuple(get_scalar_constant_value(s).item() for s in sh)
+        except NotScalarConstantError:
+            pass
+
         shape_fg = FunctionGraph(outputs=sh, features=[ShapeFeature()], clone=True)
         with config.change_flags(optdb__max_use_ratio=10, cxx=""):
             infer_shape_db.default_query.rewrite(shape_fg)
@@ -2957,17 +2962,21 @@ def flatten(x, ndim=1):
     if ndim < 1 or (ndim > 1 and ndim > _x.ndim):
         raise ValueError(f"ndim {ndim} out of bound [1, {_x.ndim + 1})")
 
-    if ndim > 1:
-        # Index per-axis (`Shape_i` folds to a constant for static shapes)
-        # rather than slicing the shape vector
-        x_shape = _x.shape
-        dims = (*(x_shape[i] for i in range(ndim - 1)), -1)
-    else:
-        dims = (-1,)
-
-    if len(dims) == _x.ndim:
+    if ndim == _x.ndim:
         # Nothing to ravel
         return _x
+
+    if ndim > 1:
+        from pytensor.tensor.math import variadic_mul
+
+        # Index per-axis (`Shape_i` folds to a constant for static shapes)
+        # rather than slicing the shape vector. The raveled length is written
+        # out because -1 is ambiguous when a kept dimension has length 0.
+        x_shape = _x.shape
+        raveled_length = variadic_mul(*(x_shape[i] for i in range(ndim - 1, _x.ndim)))
+        dims = (*(x_shape[i] for i in range(ndim - 1)), raveled_length)
+    else:
+        dims = (-1,)
 
     x_reshaped = _x.reshape(dims)
     shape_kept_dims = _x.type.shape[: ndim - 1]

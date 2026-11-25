@@ -1,6 +1,6 @@
 ## License notice
 All the notebooks in this example gallery are provided under a
-[3-Clause BSD License](https://github.com/pymc-devs/pytensor/blob/main/doc/LICENSE.txt)
+[3-Clause BSD License](https://github.com/pymc-devs/pytensor/blob/main/LICENSE.txt)
 which allows modification, and redistribution for any
 use provided the copyright and license notices are preserved.
 

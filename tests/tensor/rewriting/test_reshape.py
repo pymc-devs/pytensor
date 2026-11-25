@@ -1,3 +1,5 @@
+import numpy as np
+
 from pytensor.graph import FunctionGraph, rewrite_graph
 from pytensor.graph.traversal import apply_ancestors
 from pytensor.tensor.basic import expand_dims
@@ -5,7 +7,7 @@ from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.shape import Reshape, specify_shape
 from pytensor.tensor.type import tensor
-from tests.unittest_tools import assert_equal_computations
+from tests.unittest_tools import RewriteTester, assert_equal_computations
 
 
 def test_local_split_dims_to_reshape():
@@ -36,6 +38,15 @@ def test_local_join_dims_to_reshape():
     assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 0
     assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
     assert fg.outputs[0].type.shape == (2, 10, 3)
+
+
+def test_local_join_dims_to_reshape_dynamic_shape():
+    x = tensor("x", shape=(None, None, None, None))
+    x_join = join_dims(x, start_axis=1, n_axes=2)
+
+    result = RewriteTester([x], [x_join])
+    result.assert_graph(x.reshape((x.shape[0], x.shape[1] * x.shape[2], x.shape[3])))
+    result.assert_eval(np.zeros((0, 3, 4, 5), dtype=x.dtype))
 
 
 def test_local_join_dims_noop():

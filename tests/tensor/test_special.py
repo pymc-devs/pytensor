@@ -186,11 +186,31 @@ def test_vectorize_softmax(op, constructor, core_axis, batch_axis):
 def test_softmax_stability(constructor, scipy_fn, mode):
     """The helpers must be stable in any mode, whatever graph they end up emitting."""
     x = matrix("x")
-    x_val = np.array([[800.0, 805.0]], dtype=config.floatX)
+    x_val = np.array(
+        [[800.0, 805.0], [1.0, -np.inf], [-np.inf, -np.inf], [np.inf, 1.0]],
+        dtype=config.floatX,
+    )
 
     f = function([x], constructor(x, axis=-1), mode=mode)
 
-    np.testing.assert_allclose(f(x_val), scipy_fn(x_val, axis=-1), rtol=1e-6)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = f(x_val)
+        np.testing.assert_allclose(out[:2], scipy_fn(x_val[:2], axis=-1), rtol=1e-6)
+    assert np.isnan(out[2:]).all()
+
+
+@pytest.mark.parametrize("op", [logaddexp, xlogy, xlog1py])
+@pytest.mark.parametrize("floatX", ["float32", "float64"])
+@config.change_flags(cast_policy="numpy+floatX")
+def test_float_operation_weak_scalar_promotion(op, floatX):
+    with config.change_flags(floatX=floatX):
+        x = vector("x", dtype="float32")
+        for inputs in ((x, 2), (2.5, x)):
+            out = op(*inputs)
+            assert out.dtype == "float32"
+            assert all(inp.dtype == "float32" for inp in out.owner.inputs)
+        assert op(x, np.float64(2)).dtype == "float64"
+        assert op(vector(dtype="int8"), 128).dtype == "float32"
 
 
 def test_logaddexp():
@@ -261,6 +281,11 @@ def test_logsumexp(shape, axis, keepdims):
         pytensor_out,
         scipy_out,
     )
+
+
+@config.change_flags(cast_policy="numpy+floatX", floatX="float64")
+def test_logsumexp_preserves_float32():
+    assert logsumexp(vector(dtype="float32")).dtype == "float32"
 
 
 def test_logsumexp_zero_size():

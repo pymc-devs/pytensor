@@ -157,19 +157,20 @@ class FusedElemwise(FinalizedOpFromGraph):
             z = x[idx_a] + y[idx_b]      → [((0,), 0), ((1,), 0)]
             write-only inc(tgt, v, idx)  → [None]
 
-    indexed_outputs : tuple of ((tuple[int, ...], int, str) | None)
+    indexed_outputs : tuple of ((tuple[int, ...], int, tuple[str, ...]) | None)
         One entry per index array k, parallel to ``indexed_inputs``.
         ``None`` if index k has no write role.
-        Otherwise ``(sources, source_axis, mode)``:
+        Otherwise ``(sources, source_axis, modes)``:
 
         - ``sources``: which Elemwise output positions are written
           through this index into the update target buffer.
         - ``source_axis``: which target-array axis is indexed.
-        - ``mode``: ``"inc"`` (accumulate) or ``"set"`` (overwrite).
+        - ``modes``: one ``"inc"`` (accumulate) or ``"set"`` (overwrite)
+          per output position in ``sources``.
 
         Examples::
 
-            tgt[idx] += exp(x)   → indexed_outputs=[((0,), 0, "inc")]
+            tgt[idx] += exp(x)   → indexed_outputs=[((0,), 0, ("inc",))]
 
     basic_outputs : tuple of ((int, int | None, str) | None)
         Per output, an optional ``(start, stop, mode)`` for a 1D unit-step
@@ -212,7 +213,7 @@ class FusedElemwise(FinalizedOpFromGraph):
         self.basic_outputs = basic_outputs
         self.reduced_outputs = reduced_outputs
         # A read buffer can occupy multiple input slots (e.g. read through
-        # several indices); construct_nominal_fgraph dedupes those to one
+        # several indices); freezing maps those to one
         # nominal, leaving the extra slots as unused NominalVariables, which is
         # safe because reads don't destroy. Write targets always get their own
         # fresh inner input (see FuseElemwise) so a destroyed buffer is
@@ -274,7 +275,7 @@ class FusedElemwise(FinalizedOpFromGraph):
         return type(self)(
             inputs,
             inner.outputs,
-            fgraph=inner.freeze(),
+            fgraph=inner,
             destroy_map=destroy_map,
             indexed_inputs=self.indexed_inputs,
             indexed_outputs=self.indexed_outputs,
@@ -344,10 +345,10 @@ def _op_debug_information_FusedElemwise(op, node):
     for k, entry in enumerate(op.indexed_outputs):
         if entry is None:
             continue
-        sources, _source_axis, mode = entry
+        sources, _source_axis, modes = entry
         idx_label = f"idx_{k}"
 
-        for out_idx in sources:
+        for out_idx, mode in zip(sources, modes, strict=True):
             if out_idx < len(node.outputs):
                 info[node.outputs[out_idx]] = (
                     f"indexed {mode} ({buffer_labels[out_idx]}, {idx_label})"
@@ -405,6 +406,9 @@ class FuseElemwise(GraphRewriter):
                 return None
         else:
             if isinstance(op, AdvancedIncSubtensor):
+                # Fused increments accumulate every occurrence of an index.
+                if op.ignore_duplicates and not op.set_instead_of_inc:
+                    return None
                 n_skip = 2
             else:
                 return None
@@ -975,7 +979,8 @@ class FuseElemwise(GraphRewriter):
             )
 
             # indexed_inputs_spec: ((read_positions, axis) | None, ...)
-            # indexed_outputs_spec: ((write_positions, axis, "inc"|"set") | None, ...)
+            # indexed_outputs_spec: ((write_positions, axis, modes) | None, ...)
+            # Modes are per output; writes sharing an index can mix set and inc.
             indexed_inputs_spec = tuple(
                 (tuple(reads), axis) if reads else None
                 for (_, axis), (reads, _) in idx_groups.items()
@@ -984,7 +989,10 @@ class FuseElemwise(GraphRewriter):
                 (
                     tuple(writes),
                     key[1],
-                    "set" if write_targets[writes[0]].op.set_instead_of_inc else "inc",
+                    tuple(
+                        "set" if write_targets[w].op.set_instead_of_inc else "inc"
+                        for w in writes
+                    ),
                 )
                 if writes
                 else None

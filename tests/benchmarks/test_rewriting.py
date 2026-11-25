@@ -2,11 +2,18 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.scalar as ps
 import pytensor.tensor as pt
 import pytensor.xtensor as px
 from pytensor import config
+from pytensor.compile import optdb
+from pytensor.compile.aliasing import add_supervisor_to_fgraph
+from pytensor.compile.io import In
 from pytensor.graph import FunctionGraph
 from pytensor.graph.rewriting import rewrite_graph
+from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.scalar import Composite
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.xtensor.shape import stack as xstack
 
 
@@ -117,3 +124,54 @@ def test_xtensor_attention_rewrite_benchmark(n_layers, benchmark):
         )
 
     benchmark(rewrite_once)
+
+
+def _random_inplace_graph(n, seed):
+    rng = np.random.default_rng(seed)
+    xs = [pt.vector(f"x{i}", shape=(4,)) for i in range(3)]
+    s = [ps.float64(f"s{i}") for i in range(3)]
+    comp = Composite(s, [s[0] + s[1], s[1] * s[2] + 1])
+    idx = np.array([0, 2])
+    pool = list(xs)
+    for _ in range(n):
+        a, b, c = (
+            pool[int(i)] for i in rng.integers(max(0, len(pool) - 30), len(pool), 3)
+        )
+        match rng.integers(7):
+            case 0:
+                v = pt.exp(a) + b
+            case 1:
+                v = a * b
+            case 2:
+                v = a[1:3].inc(b[0:2])
+            case 3:
+                v = pt.zeros(4)[idx].inc(b[:2])
+            case 4:
+                v = pt.exp(a)[idx].inc(b[:2])
+            case 5:
+                o1, v = Elemwise(comp)(a, b, c)
+                pool.append(o1)
+            case _:
+                v = a[::-1] + b
+        pool.append(v)
+    outs = [pool[int(i)] for i in rng.integers(len(pool) // 2, len(pool), 10)]
+    return xs, outs
+
+
+def test_inplace_rewrite_benchmark(benchmark):
+    xs, outs = _random_inplace_graph(300, seed=0)
+    fg = rewrite_graph(
+        FunctionGraph(xs, outs),
+        include=("fast_run",),
+        exclude=("inplace",),
+    )
+    inplace = optdb.query(RewriteDatabaseQuery(include=["inplace"]))
+
+    def rewrite_func():
+        fg_clone = fg.clone()
+        add_supervisor_to_fgraph(fg_clone, [In(x) for x in fg_clone.inputs])
+        inplace.rewrite(fg_clone)
+        return sum(bool(node.op.destroy_map) for node in fg_clone.apply_nodes)
+
+    assert rewrite_func() == 141
+    benchmark.pedantic(rewrite_func, rounds=3, iterations=1)

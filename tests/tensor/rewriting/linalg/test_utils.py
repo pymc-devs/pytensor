@@ -1,10 +1,13 @@
 from pytensor import tensor as pt
+from pytensor.assumptions import assume
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.rewriting.linalg.utils import (
     clients_through_expand_dims,
     strip_left_expand_dims_and_transpose,
 )
 from pytensor.tensor.type import matrix, tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_strip_left_expand_dims_and_transpose():
@@ -43,3 +46,9 @@ def test_clients_through_expand_dims():
         for client, idx in clients_through_expand_dims(fgraph, X)
     }
     assert clients == {(direct, 0), (once, 1), (twice, 0), (right_expanded, 0)}
+
+
+def test_transpose_of_complex_positive_definite_kept():
+    x = pt.zmatrix("x")
+    rewritten = rewrite_graph(assume(x, positive_definite=True).mT)
+    assert_equal_computations([rewritten], [x.mT])

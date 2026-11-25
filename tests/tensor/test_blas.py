@@ -936,6 +936,26 @@ def test_gemm_static_shape():
     assert gemm_no_inplace(z, a, x, y, b).type.shape == (5, 3)
 
 
+@pytest.mark.parametrize("cast_policy", ["custom", "numpy+floatX"])
+def test_gemm_keeps_unfused_terms(cast_policy):
+    # The explicit float64 scale upcasts a; neither this term nor i can go into gemm.
+    a = fmatrix("a")
+    b, c, d = dmatrix("b"), dmatrix("c"), dmatrix("d")
+    i = matrix("i", dtype="int64")
+    scale = np.float64(2.5)
+    with config.change_flags(cast_policy=cast_policy):
+        out = scale * a + b + dot(c, d) + i
+    f = function([a, b, c, d, i], out, mode=mode_blas_opt)
+    assert any(isinstance(node.op, Gemm) for node in f.maker.fgraph.apply_nodes)
+
+    rng = np.random.default_rng(unittest_tools.fetch_seed())
+    a_v, b_v, c_v, d_v = (rng.normal(size=(3, 3)).astype(x.dtype) for x in (a, b, c, d))
+    i_v = rng.integers(-5, 5, size=(3, 3))
+    np.testing.assert_allclose(
+        f(a_v, b_v, c_v, d_v, i_v), scale * a_v + b_v + c_v @ d_v + i_v
+    )
+
+
 def test_dot22():
     for dtype1 in ["float32", "float64", "complex64", "complex128"]:
         a = matrix(dtype=dtype1)

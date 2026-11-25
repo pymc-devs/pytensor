@@ -1,4 +1,5 @@
 import math
+from functools import cache
 from hashlib import sha256
 
 import numba
@@ -8,6 +9,7 @@ from numba.core.extending import get_cython_function_address
 
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
+from pytensor.link.numba.dispatch import _gamma_tables as gamma_tables
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
@@ -33,7 +35,15 @@ from pytensor.scalar.basic import (
     Sign,
     Switch,
 )
-from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
+from pytensor.scalar.math import (
+    Erf,
+    Erfc,
+    GammaLn,
+    Log1mexp,
+    Psi,
+    Sigmoid,
+    Softplus,
+)
 
 
 def scalar_op_cache_key(op, **extra_fields):
@@ -412,13 +422,128 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
     return sigmoid, scalar_op_cache_key(op, cache_version=2)
 
 
+@cache
+def _gamma_kernels(njit, dtype):
+    """lgamma and digamma (for x > 0) in `dtype` from the panels in _gamma_tables.
+
+    [1, 64) is a table lookup and a polynomial, with no libm call; below 1,
+    lgamma(x + 1) - log(x) and psi(x + 1) - 1 / x; from 64, Stirling's series.
+    float64 is within 2 ulp (lgamma) and 3 (digamma) of mpmath, float32 within 3,
+    next to the zeros at 1, 2 and 1.4616 too. float32 has its own shorter tables
+    and every operation stays in float32. Only fma contraction is allowed, and
+    LLVM inlines them, so the caller's fastmath flags do not reach them:
+    reassociation would drop x0's low part.
+    """
+    real = np.dtype(dtype).type
+    if dtype == "float32":
+        lgamma_table, psi_table = gamma_tables.LGAMMA32, gamma_tables.PSI32
+        x0_hi, x0_lo = gamma_tables.X0_HI32, gamma_tables.X0_LO32
+        stirling = gamma_tables.STIRLING32
+    else:
+        lgamma_table, psi_table = gamma_tables.LGAMMA, gamma_tables.PSI
+        x0_hi, x0_lo = gamma_tables.X0_HI, gamma_tables.X0_LO
+        stirling = gamma_tables.STIRLING
+    # d/dx sum_k A_k x^-(2k + 1) = -x^-2 sum_k (2k + 1) A_k x^-2k
+    dstirling = (stirling * np.arange(1, 2 * stirling.size, 2)).astype(dtype)
+    stirling_c = real(gamma_tables.STIRLING_C)
+    inv_pow2 = np.array([1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125], dtype=dtype)
+    half, one, two, four, eight = map(real, (0.5, 1, 2, 4, 8))
+    sixteen, thirty_two, sixty_four = map(real, (16, 32, 64))
+
+    def strict(fn):
+        return njit(fn, fastmath={"contract"}, forceinline=True)
+
+    @strict
+    def horner(coefs, row, s):
+        top = coefs.shape[1] - 1
+        p = coefs[row, top]
+        for k in range(top - 1, -1, -1):
+            p = p * s + coefs[row, k]
+        return p
+
+    @strict
+    def panel_series(table, y):
+        # Panel m of octave e of y in [1, 64), 32 panels an octave
+        e = int(y >= two) + int(y >= four) + int(y >= eight) + int(y >= sixteen)
+        e += int(y >= thirty_two)
+        u = (y * inv_pow2[e] - one) * thirty_two
+        m = int(u)
+        return horner(table, 32 * e + m, two * (u - real(m)) - one)
+
+    stirling_row = stirling.reshape(1, -1)
+    dstirling_row = dstirling.reshape(1, -1)
+
+    @strict
+    def gammaln(x):
+        if x >= sixty_four:
+            inv = one / x
+            series = inv * horner(stirling_row, 0, inv * inv)
+            return (x - half) * (np.log(x) - one) + stirling_c + series
+        if x > 0:
+            # the table holds lgamma / ((x - 1) (x - 2)) on [1, 4)
+            f = panel_series(lgamma_table, x if x >= one else x + one)
+            if x >= four:
+                return f
+            if x >= one:
+                return (x - one) * (x - two) * f
+            return x * (x - one) * f - np.log(x)
+        return real(math.lgamma(x))
+
+    @strict
+    def psi_positive(x):
+        if x >= sixty_four:
+            inv = one / x
+            p = inv * inv
+            return np.log(x) - half * inv - p * horner(dstirling_row, 0, p)
+        y = x if x >= one else x + one
+        r = panel_series(psi_table, y)
+        if y < two:
+            # r (y - x0) with x0 in two parts; y - x0_hi is exact
+            r = r * (y - x0_hi) - r * x0_lo
+        return r if x >= one else r - one / x
+
+    return gammaln, psi_positive
+
+
 @register_scalar_funcify(GammaLn)
 def numba_funcify_GammaLn(op, node, **kwargs):
+    dtype = node.outputs[0].type.dtype
+    if dtype not in ("float32", "float64"):
+
+        @numba_basic.numba_njit
+        def gammaln(x):
+            return math.lgamma(x)
+
+        return gammaln, scalar_op_cache_key(op)
+
+    # keyed on numba_njit too, which the pure-Python test path patches
+    kernel, _ = _gamma_kernels(numba_basic.numba_njit, dtype)
+    real = np.dtype(dtype).type
+
     @numba_basic.numba_njit
     def gammaln(x):
-        return math.lgamma(x)
+        return kernel(real(x))
 
-    return gammaln, scalar_op_cache_key(op)
+    return gammaln, scalar_op_cache_key(op, cache_version=3)
+
+
+@register_scalar_funcify(Psi)
+def numba_funcify_Psi(op, node, **kwargs):
+    scipy_psi, scipy_key = numba_funcify_ScalarOp(op, node=node, **kwargs)
+    dtype = node.outputs[0].type.dtype
+    if dtype not in ("float32", "float64"):
+        return scipy_psi, scipy_key
+
+    _, kernel = _gamma_kernels(numba_basic.numba_njit, dtype)
+    real = np.dtype(dtype).type
+
+    @numba_basic.numba_njit
+    def psi(x):
+        x = real(x)
+        # scipy's psi, in double, below 0
+        return kernel(x) if x > 0 else real(scipy_psi(x))
+
+    return psi, scalar_op_cache_key(op, cache_version=3, scipy=scipy_key)
 
 
 @register_scalar_funcify(Log1mexp)

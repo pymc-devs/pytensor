@@ -49,6 +49,11 @@ def test_join_dims():
     assert join_dims(x, 1, n_axes=1).eval({x: x_value}).shape == (2, 3, 4, 5)
     assert join_dims(x, 1, n_axes=0).eval({x: x_value}).shape == (2, 1, 3, 4, 5)
 
+    x_dynamic = pt.tensor4("x_dynamic")
+    empty_value = np.zeros((0, 3, 4, 5), dtype=config.floatX)
+    x_dynamic_joined = join_dims(x_dynamic, start_axis=1, n_axes=2)
+    assert x_dynamic_joined.eval({x_dynamic: empty_value}).shape == (0, 12, 5)
+
     x = pt.tensor("x", shape=(3, 5))
     x_joined = join_dims(x)
     x_batched = pt.tensor("x_batched", shape=(10, 3, 5))

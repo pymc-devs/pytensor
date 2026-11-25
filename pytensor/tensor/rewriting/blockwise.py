@@ -16,14 +16,13 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
+    broadcast_like,
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.elemwise import (
-    InplaceGraphOptimizer,
-    apply_local_dimshuffle_merge,
-)
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
+from pytensor.tensor.rewriting.inplace import InplaceGraphOptimizer
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -36,6 +35,17 @@ def blockwise_of(core_op: OpPatternOpTypeType | OpPattern) -> OpPattern:
     if not isinstance(core_op, Op | OpPattern):
         core_op = OpPattern(core_op)
     return OpPattern(Blockwise, core_op=core_op)
+
+
+def broadcast_like_blockwise(values, node, *, fgraph):
+    """Match Blockwise outputs by broadcasting their leading batch axes."""
+    return broadcast_like(
+        values,
+        node,
+        fgraph=fgraph,
+        batch_ndim=node.op.batch_ndim(node),
+        stack_trace=True,
+    )
 
 
 @node_rewriter([Blockwise])
@@ -73,9 +83,9 @@ def local_useless_unbatched_blockwise(fgraph, node):
 
     if batch_ndims:
         # Remove dummy batch dims
-        axis = tuple(range(batch_ndims))
         inputs = [
-            apply_local_dimshuffle_merge(fgraph, inp.squeeze(axis)) for inp in inputs
+            apply_local_dimshuffle_merge(fgraph, _squeeze_left(inp, batch_ndims))
+            for inp in inputs
         ]
     new_outs = op.core_op.make_node(*inputs).outputs
     if batch_ndims:

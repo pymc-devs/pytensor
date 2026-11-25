@@ -6,7 +6,7 @@ import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
 from pytensor.tensor.linalg import det, norm, slogdet, trace
-from pytensor.tensor.type import matrix, scalar, tensor, vector
+from pytensor.tensor.type import matrix, scalar, tensor, tensor3, vector
 from tests import unittest_tools as utt
 
 
@@ -106,6 +106,35 @@ class TestNorm:
             TypeError, match="'axis' must be None, an integer, or a tuple of integers"
         ):
             norm([[1, 2], [3, 4]], axis=axis)
+
+    @pytest.mark.parametrize(
+        "dtype", [config.floatX, "complex128"], ids=["real", "complex"]
+    )
+    @pytest.mark.parametrize("keepdims", [True, False])
+    def test_default_vector_norm_explicit_axis(self, dtype, keepdims):
+        x = vector("x", dtype=dtype)
+        axes = [0, -1, (0,), (-1,)]
+        f = function([x], [norm(x, axis=axis, keepdims=keepdims) for axis in axes])
+        for values in [[], [3], [3, 4]]:
+            values = np.asarray(values, dtype=dtype)
+            if dtype.startswith("complex"):
+                values = values * (1 + 1j)
+            expected = np.linalg.norm(values, keepdims=keepdims)
+            for result in f(values):
+                assert result.shape == expected.shape
+                utt.assert_allclose(result, expected)
+
+    @pytest.mark.parametrize("keepdims", [True, False])
+    def test_default_norm_empty_batch(self, keepdims):
+        rng = np.random.default_rng(utt.fetch_seed())
+        x = tensor3("x")
+        f = function([x], norm(x, keepdims=keepdims))
+        for shape in [(0, 2, 3), (2, 0, 3), (2, 3, 0), (2, 2, 3)]:
+            values = rng.standard_normal(shape).astype(config.floatX)
+            result = f(values)
+            expected = np.linalg.norm(values, axis=(-2, -1), keepdims=keepdims)
+            assert result.shape == expected.shape
+            utt.assert_allclose(result, expected)
 
     @pytest.mark.parametrize(
         "ord",

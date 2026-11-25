@@ -1077,8 +1077,8 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
         out_idx
         for entry in indexed_outputs
         if entry is not None
-        for out_idx in entry[0]
-        if entry[2] == "inc"
+        for out_idx, mode in zip(entry[0], entry[2], strict=True)
+        if mode == "inc"
     )
     reduced_idxs = frozenset(i for i, r in enumerate(reduced_outputs) if r is not None)
     assert not (inc_outputs & reduced_idxs), (
@@ -1111,6 +1111,11 @@ def numba_funcify_FusedElemwise(op, node, **kwargs):
     input_bc_patterns = tuple(
         elemwise_node.inputs[p].type.broadcastable for p in array_pos_map
     )
+    if not input_bc_patterns:
+        raise ValueError(
+            f"{type(op).__name__} requires at least one array input; "
+            "scalar-only computations should use a ScalarOp."
+        )
 
     # Reduction outputs keep their reduced axes as bc=True (size-1, keepdims) and
     # are accumulated in acc_dtype; post_specs squeezes + casts them back to the

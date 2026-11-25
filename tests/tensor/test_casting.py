@@ -37,7 +37,7 @@ class TestCasting:
 
         xval = np.asarray(np.random.random(10) * 10, dtype=type_fn.dtype)
         yval = f(xval)
-        assert str(yval.dtype) == op_fn.scalar_op.output_types_preference.spec[0].dtype
+        assert str(yval.dtype) == op_fn.scalar_op.o_type.dtype
 
     def test_illegal(self):
         x = zmatrix()

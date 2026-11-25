@@ -200,33 +200,35 @@ import ``pytensor`` and print the config variable, as in:
 
 .. attribute:: cast_policy
 
-    String value: either ``'numpy+floatX'`` or ``'custom'``
+    String value: ``'numpy+floatX'`` (default) or ``'custom'``.
 
-    Default: ``'custom'``
+    Controls how Python values acquire dtypes when constructing a graph.
 
-    This specifies how data types are implicitly determined by PyTensor during the
-    creation of constants or in the results of arithmetic operations.
+    Under ``'numpy+floatX'``, a standalone Python integer becomes ``int64`` and
+    a standalone Python float becomes ``floatX``. NumPy scalars and arrays keep
+    their explicit dtype.
 
-    The ``'custom'`` value corresponds to a set of custom rules originally used
-    in PyTensor.  These rules can be partially customized (e.g. see the in-code
-    help of ``pytensor.scalar.basic.NumpyAutocaster``).  This will be deprecated
-    in the future.
+    In arithmetic expressions, Python numbers are weakly typed: the operation
+    resolves their precision from its typed operands.
+    Thus ``fvector() + 2.0`` stays ``float32`` and ``ivector() + 1`` stays
+    ``int32``. Integer literals that cannot fit the dtype selected for integer
+    arithmetic raise ``OverflowError``. Operations that require floating-point
+    arithmetic resolve a floating dtype before converting the literal.
 
-    The ``'numpy+floatX'`` setting attempts to mimic NumPy casting rules,
-    although it prefers to use ``float32`` numbers instead of ``float64`` when
-    ``config.floatX`` is set to ``'float32'`` and the associated data is not
-    explicitly typed as ``float64`` (e.g. regular Python floats).  Note that
-    ``'numpy+floatX'`` is not currently behaving exactly as planned (it is a
-    work-in-progress), and thus it should considered experimental.
+    With ``floatX='float32'``, numeric promotion also favors ``float32`` over
+    ``float64`` when no operand is explicitly ``float64``. For example,
+    ``fvector() + ivector()`` is ``float32``. Operations retain their own output
+    rules: floating-point functions, reductions, linear algebra, and random
+    variables determine their output dtype separately.
 
-    At the moment it behaves differently from NumPy in the following situations:
+    The legacy ``'custom'`` policy chooses constant dtypes from their values:
+    small Python integers become ``int8``, and exactly representable Python
+    floats can become ``float32``. Its floating-point rounding rules can be
+    customized with ``pytensor.scalar.basic.autocast_float``. This policy will
+    be deprecated in the future.
 
-    * On mixed scalar and array operations, NumPy tries to prevent the scalar
-      from upcasting the array's type unless it is of a fundamentally
-      different type. PyTensor does not attempt to do the same at this point,
-      so users should be careful, since scalars may upcast arrays when they
-      otherwise wouldn't in NumPy. This behavior should change in the near
-      future.
+    See :ref:`libdoc_tensor_autocasting` for examples and the distinction between
+    a Python literal and an already typed symbolic constant.
 
 .. attribute:: mode
 
@@ -727,13 +729,6 @@ import ``pytensor`` and print the config variable, as in:
 
     Relax the tolerance of ``pytensor.tensor.math._allclose``: ``0`` leaves it
     unchanged, ``1`` relaxes it slightly, and ``2`` relaxes it further.
-
-.. attribute:: tensor__insert_inplace_optimizer_validate_nb
-
-    Int value, default: ``-1``
-
-    Number of inplace rewrites between graph validations. ``-1`` selects ``1``
-    for graphs with fewer than 500 nodes and ``10`` for larger graphs.
 
 .. attribute:: optdb__position_cutoff
 

@@ -201,8 +201,8 @@ def add_basic_configvars():
         "cast_policy",
         "Rules for implicit type casting",
         EnumStr(
-            "custom",
-            ["numpy+floatX"],
+            "numpy+floatX",
+            ["custom"],
             # The 'numpy' policy was originally planned to provide a
             # smooth transition from numpy. It was meant to behave the
             # same as numpy+floatX, but keeping float64 when numpy
@@ -532,13 +532,6 @@ def add_tensor_configvars():
         "Use amd's amdlibm numerical library",
         BoolParam(False),
         # Added elsewhere in the c key only when needed.
-        in_c_key=False,
-    )
-
-    config.add(
-        "tensor__insert_inplace_optimizer_validate_nb",
-        "-1: auto, if graph have less then 500 nodes 1, else 10",
-        IntParam(-1),
         in_c_key=False,
     )
 

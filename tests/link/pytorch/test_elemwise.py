@@ -5,7 +5,7 @@ import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.math as ptm
 from pytensor.configdefaults import config
-from pytensor.scalar.basic import ScalarOp, get_scalar_type
+from pytensor.scalar.basic import ScalarOp
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import ProdWithoutZeros
 from pytensor.tensor.special import log_softmax, softmax
@@ -167,11 +167,12 @@ def test_vmap_elemwise():
 
     class TestOp(ScalarOp):
         def __init__(self):
-            super().__init__(
-                output_types_preference=lambda *_: [get_scalar_type("float32")]
-            )
+            super().__init__()
             self.call_shapes = []
             self.nin = 1
+
+        def resolve_dtypes(self, input_dtypes):
+            return input_dtypes, ("float32",)
 
         def perform(self, *_):
             raise RuntimeError("In perform")

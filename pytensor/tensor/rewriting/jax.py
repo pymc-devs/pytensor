@@ -1,9 +1,11 @@
 import pytensor.tensor as pt
 from pytensor.compile import optdb
-from pytensor.graph.rewriting.basic import dfs_rewriter, node_rewriter
-from pytensor.tensor.basic import MakeVector
+from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter, node_rewriter
+from pytensor.tensor.basic import MakeVector, get_underlying_scalar_constant_value
+from pytensor.tensor.blockwise import Blockwise, JAXBlockwise, _squeeze_left
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
+from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_merge
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
 from pytensor.tensor.variable import TensorVariable
@@ -145,6 +147,55 @@ def shape_parameter_as_tuple(fgraph, node):
 optdb.register(
     "jax_shape_parameter_as_tuple",
     dfs_rewriter(shape_parameter_as_tuple),
+    "jax",
+    position=100,
+)
+
+
+@node_rewriter([Blockwise])
+def blockwise_unbatched_scalar_inputs(fgraph, node):
+    """Lower Blockwise with explicit scalar inputs that bypass vectorization.
+
+    Removing padding before JAX conversion preserves concrete values such as
+    ``Shape_i`` outputs. Unbatched scalars that are already traced stay traced.
+    """
+    unbatched_inputs = tuple(
+        i
+        for i, (inp, sig) in enumerate(
+            zip(node.inputs, node.op.inputs_sig, strict=True)
+        )
+        if not sig and all(inp.type.broadcastable)
+    )
+    if not unbatched_inputs:
+        return None
+
+    batch_ndim = node.op.batch_ndim(node)
+    inputs = list(node.inputs)
+    for i in unbatched_inputs:
+        scalar_input = apply_local_dimshuffle_merge(
+            fgraph, _squeeze_left(inputs[i], batch_ndim)
+        )
+        inputs[i] = pt.as_tensor_variable(
+            get_underlying_scalar_constant_value(
+                scalar_input, raise_not_constant=False
+            ),
+            dtype=scalar_input.dtype,
+        )
+    inner_inputs = [inp.type() for inp in inputs]
+    padded_inputs = [
+        pt.shape_padleft(inp, batch_ndim) if i in unbatched_inputs else inp
+        for i, inp in enumerate(inner_inputs)
+    ]
+    inner_outputs = node.op(*padded_inputs, return_list=True)
+    outputs = JAXBlockwise(
+        inner_inputs, inner_outputs, destroy_map=node.op.destroy_map
+    )(*inputs, return_list=True)
+    return copy_stack_trace(node.outputs, outputs)
+
+
+optdb.register(
+    "jax_blockwise_unbatched_scalar_inputs",
+    dfs_rewriter(blockwise_unbatched_scalar_inputs),
     "jax",
     position=100,
 )

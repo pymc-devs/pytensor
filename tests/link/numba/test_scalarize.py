@@ -3,6 +3,7 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor import In
 from pytensor import scalar as ps
+from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.basic import scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
 from pytensor.tensor.rewriting.scalarize import (
@@ -57,6 +58,24 @@ def test_scalarized_elemwise():
         custom_rewrite=ScalarizeRewriter(),
     )
     result.assert_graph(output)
+
+
+def test_scalarized_elemwise_stale_view_shape():
+    x = pt.dvector("x")
+    scalar = ps.float64("scalar")
+    fgraph = FunctionGraph([x], [pt.exp(x[:, None])], clone=False)
+    # Replacing x narrows its shape, but the view keeps its old broadcast flags.
+    fgraph.replace(x, tensor_from_scalar(scalar)[None], import_missing=True)
+
+    result = RewriteTester(
+        [scalar],
+        fgraph.outputs,
+        include=None,
+        custom_rewrite=ScalarizeRewriter(),
+        linker="numba",
+    )
+    result.assert_graph(tensor_from_scalar(ps.exp(scalar))[None, None])
+    result.assert_eval(0.5)
 
 
 def test_scalarized_elemwise_preserves_input_trace():

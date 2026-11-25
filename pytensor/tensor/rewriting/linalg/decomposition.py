@@ -5,6 +5,7 @@ from pytensor.assumptions import (
     DIAGONAL,
     LOWER_TRIANGULAR,
     ORTHOGONAL,
+    POSITIVE_DEFINITE,
     SYMMETRIC,
     UPPER_TRIANGULAR,
     check_assumption,
@@ -26,14 +27,14 @@ from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
-from pytensor.tensor.linalg.products import KroneckerProduct, kron
+from pytensor.tensor.linalg.products import KroneckerProduct, Sqrtm, kron
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.blockwise import blockwise_of
+from pytensor.tensor.rewriting.blockwise import blockwise_of, broadcast_like_blockwise
 from pytensor.tensor.rewriting.linalg.utils import (
     clients_through_expand_dims,
     strip_left_expand_dims_and_transpose,
@@ -88,9 +89,6 @@ def cholesky_ldotlt(fgraph, node):
 def cholesky_of_diag(fgraph, node):
     """cholesky(D) -> diag(sqrt(diagonal(D))) for diagonal D."""
     [X] = node.inputs
-
-    if all(X.type.broadcastable[-2:]):
-        return [pt.sqrt(X)]
 
     if not check_assumption(fgraph, X, DIAGONAL):
         return None
@@ -430,7 +428,12 @@ def eig_to_eigh(fgraph, node):
     # Eigh is a subclass of Eig, so this tracker also matches Eigh — skip it
     if isinstance(node.op.core_op, Eigh):
         return None
-    if not check_assumption(fgraph, X, SYMMETRIC):
+    # eigh needs a Hermitian input, which a complex symmetric matrix is not
+    is_hermitian = check_assumption(fgraph, X, POSITIVE_DEFINITE) or (
+        not X.type.dtype.startswith("complex")
+        and check_assumption(fgraph, X, SYMMETRIC)
+    )
+    if not is_hermitian:
         return None
 
     w, v = eigh(X)
@@ -441,6 +444,14 @@ def eig_to_eigh(fgraph, node):
     copy_stack_trace(old_w, w)
     copy_stack_trace(old_v, v)
     return [w, v]
+
+
+def _hermitian_diagonal(X):
+    # LAPACK ignores the imaginary part of a Hermitian diagonal
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+    if X.type.dtype.startswith("complex"):
+        return diag_vals.real
+    return diag_vals
 
 
 @register_canonicalize
@@ -458,7 +469,7 @@ def eigh_of_diag(fgraph, node):
         [X] = node.inputs
         if not check_assumption(fgraph, X, DIAGONAL):
             return None
-        diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+        diag_vals = _hermitian_diagonal(X)
         sort_idx = pt.argsort(diag_vals, axis=-1)
         new_w = pt.take_along_axis(diag_vals, sort_idx, axis=-1)
         new_v = pt.eye(X.shape[-1])[sort_idx].mT
@@ -468,8 +479,8 @@ def eigh_of_diag(fgraph, node):
             return None
         if not check_assumption(fgraph, B, DIAGONAL):
             return None
-        diag_a = pt.diagonal(A, axis1=-2, axis2=-1)
-        diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
+        diag_a = _hermitian_diagonal(A)
+        diag_b = _hermitian_diagonal(B)
         eigvals = diag_a / diag_b
         sort_idx = pt.argsort(eigvals, axis=-1)
         new_w = pt.take_along_axis(eigvals, sort_idx, axis=-1)
@@ -479,11 +490,34 @@ def eigh_of_diag(fgraph, node):
     else:
         return None
 
-    w, v = node.outputs
-    copy_stack_trace(w, new_w)
-    copy_stack_trace(v, new_v)
+    return broadcast_like_blockwise([new_w, new_v], node, fgraph=fgraph)
 
-    return [new_w, new_v]
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Eigh)])
+def eigh_of_sqrtm(fgraph, node):
+    """eigh(sqrtm(A)) -> (sqrt(w), V) with w, V = eigh(A), for positive definite A.
+
+    sqrtm(A) shares the eigenvectors of A, and sqrt preserves the ascending order of
+    the eigenvalues. sqrtm(A) is Hermitian, so its transpose is its conjugate, with
+    eigenvectors conj(V).
+    """
+    if len(node.inputs) != 1:
+        return None
+
+    [X] = node.inputs
+    core, transposed = strip_left_expand_dims_and_transpose(X)
+    match core.owner_op_and_inputs:
+        case (Blockwise(Sqrtm()), A) if check_assumption(fgraph, A, POSITIVE_DEFINITE):
+            pass
+        case _:
+            return None
+
+    w, V = eigh(A)
+    if transposed and V.type.dtype.startswith("complex"):
+        V = V.conj()
+    return broadcast_like_blockwise([pt.sqrt(pt.maximum(w, 0)), V], node, fgraph=fgraph)
 
 
 @register_canonicalize
@@ -531,35 +565,17 @@ def lu_of_diag(fgraph, node):
     out_dtype = node.outputs[-1].type.dtype
     n = X.shape[-1]
 
-    new_U = X.astype(out_dtype) if X.type.dtype != out_dtype else X
-
     if core_op.permute_l:
         # Returns (PL, U) — PL = I
-        new_PL = pt.eye(n, dtype=out_dtype)
-        pl, u = node.outputs
-        copy_stack_trace(pl, new_PL)
-        copy_stack_trace(u, new_U)
-        return [new_PL, new_U]
-
-    if core_op.p_indices:
+        results = [pt.eye(n, dtype=out_dtype), X]
+    elif core_op.p_indices:
         # Returns (p_idx, L, U) — p_idx = arange(n), L = I
-        new_p = pt.arange(n, dtype="int32")
-        new_L = pt.eye(n, dtype=out_dtype)
-        p, l, u = node.outputs
-        copy_stack_trace(p, new_p)
-        copy_stack_trace(l, new_L)
-        copy_stack_trace(u, new_U)
-        return [new_p, new_L, new_U]
-
-    # Default: returns (P, L, U) — P = I, L = I
-    p_dtype = node.outputs[0].type.dtype
-    new_P = pt.eye(n, dtype=p_dtype)
-    new_L = pt.eye(n, dtype=out_dtype)
-    p, l, u = node.outputs
-    copy_stack_trace(p, new_P)
-    copy_stack_trace(l, new_L)
-    copy_stack_trace(u, new_U)
-    return [new_P, new_L, new_U]
+        results = [pt.arange(n, dtype="int32"), pt.eye(n, dtype=out_dtype), X]
+    else:
+        # Default: returns (P, L, U) — P = I, L = I
+        p_dtype = node.outputs[0].type.dtype
+        results = [pt.eye(n, dtype=p_dtype), pt.eye(n, dtype=out_dtype), X]
+    return broadcast_like_blockwise(results, node, fgraph=fgraph)
 
 
 @register_canonicalize
@@ -572,14 +588,8 @@ def lu_factor_of_diag(fgraph, node):
     if not check_assumption(fgraph, X, DIAGONAL):
         return None
 
-    n = X.shape[-1]
-    new_LU = X
-    new_pivots = pt.arange(n, dtype="int32")
-
-    lu_out, piv_out = node.outputs
-    copy_stack_trace(lu_out, new_LU)
-    copy_stack_trace(piv_out, new_pivots)
-    return [new_LU, new_pivots]
+    new_pivots = pt.arange(X.shape[-1], dtype="int32")
+    return broadcast_like_blockwise([X, new_pivots], node, fgraph=fgraph)
 
 
 @register_canonicalize
@@ -602,11 +612,8 @@ def qr_of_diag(fgraph, node):
 
     if core_op.mode == "raw":
         # Raw returns (H, tau, R). For diagonal: H=D, tau=zeros(n), R=D
-        new_H = X.astype(out_dtype) if X.type.dtype != out_dtype else X
-        n = X.shape[-1]
-        new_tau = pt.zeros(n, dtype=out_dtype)
-        new_R = new_H
-        results = [new_H, new_tau, new_R]
+        new_tau = pt.zeros(X.shape[:-1], dtype=out_dtype)
+        results = [X, new_tau, X]
     elif core_op.mode == "r":
         new_R = alloc_diag(pt.abs(diag_vals).astype(out_dtype), axis1=-2, axis2=-1)
         results = [new_R]
@@ -616,14 +623,9 @@ def qr_of_diag(fgraph, node):
         results = [new_Q, new_R]
 
     if core_op.pivoting:
-        n = X.shape[-1]
-        new_p = pt.arange(n, dtype="int32")
-        results.append(new_p)
+        results.append(pt.arange(X.shape[-1], dtype="int32"))
 
-    for old, new in zip(node.outputs, results, strict=True):
-        copy_stack_trace(old, new)
-
-    return results
+    return broadcast_like_blockwise(results, node, fgraph=fgraph)
 
 
 @register_canonicalize
@@ -646,7 +648,7 @@ def schur_of_diag(fgraph, node):
 
     match node.op.core_op.sort:
         case None:
-            new_T = X.astype(out_dtype) if X.type.dtype != out_dtype else X
+            new_T = X
             new_Z = pt.eye(n, dtype=out_dtype)
         case "lhp":
             select = diag_vals < 0
@@ -659,13 +661,12 @@ def schur_of_diag(fgraph, node):
 
     if node.op.core_op.sort is not None:
         sort_idx = pt.argsort(-select.astype("int64"))
-        new_T = alloc_diag(diag_vals[sort_idx], axis1=-2, axis2=-1)
-        new_Z = pt.eye(n, dtype=out_dtype)[:, sort_idx]
+        new_T = alloc_diag(
+            pt.take_along_axis(diag_vals, sort_idx, axis=-1), axis1=-2, axis2=-1
+        )
+        new_Z = pt.eye(n, dtype=out_dtype)[sort_idx].mT
 
-    T, Z = node.outputs
-    copy_stack_trace(T, new_T)
-    copy_stack_trace(Z, new_Z)
-    return [new_T, new_Z]
+    return broadcast_like_blockwise([new_T, new_Z], node, fgraph=fgraph)
 
 
 @register_canonicalize
@@ -689,12 +690,10 @@ def qz_of_diag(fgraph, node):
     out_dtype = node.outputs[0].type.dtype
     n = A.shape[-1]
 
-    new_AA = A.astype(out_dtype) if A.type.dtype != out_dtype else A
-    new_BB = B.astype(out_dtype) if B.type.dtype != out_dtype else B
-
     if core_op.sort is None:
+        new_AA, new_BB = A, B
         new_Q = pt.eye(n, dtype=out_dtype)
-        new_Z = pt.eye(n, dtype=out_dtype)
+        new_Z = new_Q
         diag_a = pt.diagonal(A, axis1=-2, axis2=-1)
         diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
     else:
@@ -716,24 +715,18 @@ def qz_of_diag(fgraph, node):
                 )
 
         sort_idx = pt.argsort(-select.astype("int64"))
-        new_AA = alloc_diag(diag_a[sort_idx], axis1=-2, axis2=-1)
-        new_BB = alloc_diag(diag_b[sort_idx], axis1=-2, axis2=-1)
+        diag_a = pt.take_along_axis(diag_a, sort_idx, axis=-1)
+        diag_b = pt.take_along_axis(diag_b, sort_idx, axis=-1)
+        new_AA = alloc_diag(diag_a, axis1=-2, axis2=-1)
+        new_BB = alloc_diag(diag_b, axis1=-2, axis2=-1)
         # Q = Z = permutation matrix: Q.T @ diag(a) @ Z = diag(a[perm])
-        perm = pt.eye(n, dtype=out_dtype)[:, sort_idx]
+        perm = pt.eye(n, dtype=out_dtype)[sort_idx].mT
         new_Q = perm
         new_Z = perm
-        diag_a = diag_a[sort_idx]
-        diag_b = diag_b[sort_idx]
 
     if core_op.return_eigenvalues:
-        alpha_dtype = node.outputs[2].type.dtype
-        new_alpha = diag_a.astype(alpha_dtype)
-        new_beta = diag_b.astype(out_dtype)
-        results = [new_AA, new_BB, new_alpha, new_beta, new_Q, new_Z]
+        results = [new_AA, new_BB, diag_a, diag_b, new_Q, new_Z]
     else:
         results = [new_AA, new_BB, new_Q, new_Z]
 
-    for old, new in zip(node.outputs, results, strict=True):
-        copy_stack_trace(old, new)
-
-    return results
+    return broadcast_like_blockwise(results, node, fgraph=fgraph)

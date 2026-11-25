@@ -9,13 +9,20 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import Mode
 from pytensor.gradient import grad
 from pytensor.graph.basic import Constant
-from pytensor.tensor.pad import PadMode, pad
+from pytensor.tensor.pad import Pad, PadMode, pad
 from pytensor.tensor.subtensor import Subtensor
 from tests import unittest_tools as utt
 
 
 floatX = pytensor.config.floatX
 RTOL = ATOL = 1e-8 if floatX.endswith("64") else 1e-4
+
+
+def test_pad_inputs_keep_independent_dtypes():
+    op = Pad(pad_mode="edge")
+    out = op(pt.fvector(), 1)
+    assert out.owner.inputs[0].dtype == "float32"
+    assert np.dtype(out.owner.inputs[1].dtype).kind in "iu"
 
 
 @pytest.mark.parametrize("kwargs", [{}, {"constant_values": 0}], ids=["none", "valid"])

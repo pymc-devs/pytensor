@@ -267,6 +267,21 @@ class TestIndexedReadFusion:
 class TestIndexedWriteFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
 
+    def test_set_and_inc_shared_index(self):
+        """Writes sharing an index must keep their own set/inc modes."""
+        x = pt.vector("x", shape=(3,))
+        idx = pt.constant(np.array([0, 0, 2]))
+        zeros = pt.zeros(3)
+
+        set_out = zeros[idx].set(x + 1)
+        inc_out = zeros[idx].inc(x * 2)
+        fn = function([x], [set_out, inc_out], mode=NUMBA_MODE)
+        assert_fused(fn)
+
+        got_set, got_inc = fn([1.0, 2.0, 3.0])
+        np.testing.assert_allclose(got_set, [3.0, 0.0, 4.0])
+        np.testing.assert_allclose(got_inc, [6.0, 0.0, 6.0])
+
     def test_no_fusion_when_right_pad_covers_index(self):
         s = pt.scalar("s")
         idx = pt.lvector("idx")
@@ -663,6 +678,17 @@ class TestIndexedWriteFusion:
 
 class TestRepeatedAccumulationIndices:
     """Test inc_subtensor with repeated indices (same position accumulated multiple times)."""
+
+    def test_ignore_duplicates_not_fused(self):
+        x = pt.vector("x", shape=(3,))
+        idx = np.array([0, 0, 2])
+        out = pt.inc_subtensor(pt.zeros(3)[idx], x + 1, ignore_duplicates=True)
+        fn = function([x], out, mode=NUMBA_MODE)
+
+        assert not any(
+            isinstance(node.op, FusedElemwise) for node in fn.maker.fgraph.toposort()
+        )
+        np.testing.assert_allclose(fn([1.0, 2.0, 3.0]), [3.0, 0.0, 4.0])
 
     def test_repeated_inc_subtensor(self):
         """inc_subtensor with repeated indices should accumulate correctly."""

@@ -2875,7 +2875,13 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
     even_median = (k_values + km1_values) / 2.0
     odd_median = k_values.astype(even_median.type.dtype)
     even_k = eq(mod(raveled_size, 2), 0)
-    return pytensor.ifelse(even_k, even_median, odd_median, name="median")
+    result = pytensor.ifelse(even_k, even_median, odd_median, name="median")
+    if result.type.dtype.startswith("float"):
+        # NaNs sort last, so any NaN along the axis shows up as the largest value.
+        # Like numpy, propagate it instead of returning a finite or infinite value.
+        has_nan = isnan(x_sorted[..., -1])
+        result = switch(has_nan, np.nan, result)
+    return result
 
 
 @scalar_elemwise
@@ -3842,6 +3848,7 @@ def prod(
 
 
 class MulWithoutZeros(BinaryScalarOp):
+    name = "mul_without_zeros"
     # "identity" here is zero, as in Reduce we don't want to start
     # with reducing (1, something_else): this leads to the erroneous
     # case where a vector of zeros is reduced by binary reductions
@@ -3868,7 +3875,7 @@ class MulWithoutZeros(BinaryScalarOp):
         return (1,)
 
 
-mul_without_zeros = MulWithoutZeros(ps.upcast_out, name="mul_without_zeros")
+mul_without_zeros = MulWithoutZeros()
 
 
 class ProdWithoutZeros(FixedOpCAReduce):

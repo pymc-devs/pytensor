@@ -9,8 +9,15 @@ from numpy.lib.array_utils import normalize_axis_tuple
 
 import pytensor
 from pytensor.graph import FunctionGraph, Variable
+from pytensor.scalar.basic import as_variables
+from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.utils import hash_from_code
+
+
+def as_tensor_variables(*inputs, resolve_dtypes=None):
+    """Convert inputs together. See `pytensor.scalar.basic.as_variables`."""
+    return as_variables(inputs, as_tensor_variable, resolve_dtypes)
 
 
 def hash_from_ndarray(data) -> str:
