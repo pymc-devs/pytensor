@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor import config, scan
+from pytensor import config, function, scan
+from pytensor.compile.mode import get_mode
 from pytensor.raise_op import CheckAndRaise
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting.constant_folding import scan_constant_folding
@@ -121,3 +122,91 @@ def test_constant_nested_scan():
     ]
     assert not any(isinstance(node.op, Scan) for node in outer_scan.fgraph.apply_nodes)
     result.assert_eval(2.0)
+
+
+@pytest.mark.parametrize("output_kind", ["last", "full"])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "FAST_RUN",
+        "FAST_COMPILE",
+        pytest.param(
+            get_mode("FAST_RUN").excluding("eigh_of_diag"),
+            id="FAST_RUN_no_eigh_of_diag",
+        ),
+    ],
+)
+def test_constant_scan_rewrites_inner_graph(mode, output_kind):
+    """Constant-folded Scan should rewrite its inner graph like the outer graph."""
+    _, eigenvectors = pt.linalg.eigh(25.0 * pt.eye(2))
+    corner = eigenvectors[0, 0]
+    trace = scan(
+        lambda total: total + corner,
+        outputs_info=[pt.zeros(())],
+        n_steps=2,
+        return_updates=False,
+    )
+    target = trace[-1] if output_kind == "last" else trace
+    fn = function([], [target, corner], mode=mode)
+    assert not any(isinstance(n.op, Scan) for n in fn.maker.fgraph.apply_nodes)
+    res_trace, res_corner = fn()
+    expected = (
+        2.0 * res_corner
+        if output_kind == "last"
+        else np.array([res_corner, 2.0 * res_corner])
+    )
+    np.testing.assert_allclose(res_trace, expected)
+
+
+@config.change_flags(on_opt_error="raise")
+def test_untraced_scan_that_opts_out_of_folding():
+    """Generic constant_folding must not bypass Scan's inner opt-out checks."""
+    check = CheckAndRaise(ValueError, "invalid value")
+    out = scan(
+        lambda previous: check(previous + 1, pt.constant(False)),
+        outputs_info=pt.constant(0.0),
+        n_steps=4,
+        return_updates=False,
+    )
+    fn = function([], out[-1], mode="FAST_RUN")
+    assert any(isinstance(n.op, Scan) for n in fn.maker.fgraph.apply_nodes)
+    with pytest.raises(ValueError, match="invalid value"):
+        fn()
+
+
+@pytest.mark.parametrize("opt_out", [False, True])
+@config.change_flags(on_opt_error="raise")
+def test_constant_nested_scan_inside_constant_scan(opt_out):
+    """Nested Scans inside a constant Scan fold unless an inner op opts out."""
+    check = CheckAndRaise(ValueError, "nested opt-out")
+    _, eigenvectors = pt.linalg.eigh(25.0 * pt.eye(2))
+    corner = eigenvectors[0, 0]
+
+    def outer_step(previous):
+        def inner_step(value):
+            next_val = value + corner
+            return check(next_val, pt.constant(False)) if opt_out else next_val
+
+        inner = scan(
+            inner_step,
+            outputs_info=pt.zeros(()),
+            n_steps=3,
+            return_updates=False,
+        )
+        return previous + inner[-1]
+
+    out = scan(
+        outer_step,
+        outputs_info=pt.zeros(()),
+        n_steps=2,
+        return_updates=False,
+    )
+    fn = function([], [out[-1], corner], mode="FAST_RUN")
+    if opt_out:
+        assert any(isinstance(n.op, Scan) for n in fn.maker.fgraph.apply_nodes)
+        with pytest.raises(ValueError, match="nested opt-out"):
+            fn()
+    else:
+        assert not any(isinstance(n.op, Scan) for n in fn.maker.fgraph.apply_nodes)
+        res_out, res_corner = fn()
+        np.testing.assert_allclose(res_out, 6.0 * res_corner)

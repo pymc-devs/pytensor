@@ -1618,6 +1618,12 @@ class Scan(HasInnerFunction, Op, ScanMethodsMixin):
         )
         return clone
 
+    def do_constant_folding(self, fgraph, node):
+        # Scan folding requires checking inner-graph opt-outs and rewriting a
+        # copy of the inner graph under the active compile mode first; see
+        # `scan_constant_folding`.
+        return False
+
     def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):
         """
 
