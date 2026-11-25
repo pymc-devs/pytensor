@@ -224,8 +224,11 @@ def test_stack_unstack_methods_keyword_dims():
     fn = xr_function([x], [stacked, unstacked])
     x_test = xr_arange_like(x)
     res_stacked, res_unstacked = fn(x_test)
-    xr_assert_allclose(res_stacked, x_test.stack(bc=("b", "c")))
-    xr_assert_allclose(res_unstacked, x_test)
+    expected_res_stacked = x_test.stack(bc=("b", "c"))
+    # xarray's unstack takes dim names only, it gets the sizes from the coords
+    expected_res_unstacked = expected_res_stacked.unstack("bc")
+    xr_assert_allclose(res_stacked, expected_res_stacked)
+    xr_assert_allclose(res_unstacked, expected_res_unstacked)
 
 
 @pytest.mark.parametrize("dim", ("a", "b", "new"))
