@@ -235,9 +235,10 @@ def test_SVD_inplace(full_matrices, compute_uv, overwrite_a, is_complex):
 
     ref_s = np.linalg.svd(val, full_matrices=full_matrices, compute_uv=False)
 
-    # gesdd reuses the buffer when the donated array is f-contig (always) or
-    # c-contig (real-typed only — complex would need a conjugation pass).
-    can_reuse_c = overwrite_a and not is_complex
+    # gesdd reuses an f-contig donation. Only real singular values alone also reuse a
+    # c-contig one, since they are the same for A.T.
+    can_reuse_c = overwrite_a and not is_complex and not compute_uv
+    ref_out = fn(np.copy(val, order="F"))
 
     def check(layout_val, expect_mutation):
         snapshot = np.array(layout_val)
@@ -246,6 +247,9 @@ def test_SVD_inplace(full_matrices, compute_uv, overwrite_a, is_complex):
         np.testing.assert_allclose(s, ref_s, atol=1e-4, rtol=1e-4)
         if compute_uv:
             U, _, Vt = out
+            # Singular vector signs are arbitrary, but must not depend on layout.
+            np.testing.assert_allclose(U, ref_out[0])
+            np.testing.assert_allclose(Vt, ref_out[2])
             if full_matrices:
                 # Pad s into the rectangular shape so we can reconstruct.
                 k = s.shape[0]

@@ -473,7 +473,7 @@ def readonly(x):
         (cholesky, (np.asfortranarray(POSDEF),), "F"),
         (cholesky, (readonly(np.asfortranarray(POSDEF)),), "F"),
         (lu_factor, (GENERAL,), "FC"),
-        (svd, (GENERAL,), "CCC"),
+        (svd, (GENERAL,), "FCF"),
         (svd, (np.asfortranarray(GENERAL),), "FCF"),
         (expm, (GENERAL,), "C"),
         (expm, (np.asfortranarray(GENERAL),), "F"),
