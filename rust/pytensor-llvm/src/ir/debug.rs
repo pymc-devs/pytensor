@@ -20,6 +20,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Python frames past these (the functions that build an LLVM function) belong to
 /// other functions.
@@ -38,16 +39,16 @@ pub struct DebugInfo {
     /// the file the LLVM functions are in (the module)
     module_file: LLVMMetadataRef,
     subroutine_type: LLVMMetadataRef,
-    files: RefCell<HashMap<String, LLVMMetadataRef>>,
+    files: RefCell<HashMap<PathBuf, LLVMMetadataRef>>,
     /// (file, qualified name, first line) -> the subprogram of a Python function
-    python: RefCell<HashMap<(String, String, u32), LLVMMetadataRef>>,
+    python: RefCell<HashMap<(PathBuf, String, u32), LLVMMetadataRef>>,
     /// LLVM function -> its subprogram, and its name there
     functions: RefCell<HashMap<usize, (LLVMMetadataRef, String)>>,
     finalized: Cell<bool>,
 }
 
 /// One Python frame: (file, qualified name, first line, current line).
-type Frame = (String, String, u32, u32);
+type Frame = (PathBuf, String, u32, u32);
 
 impl DebugInfo {
     /// Debug information for `m` (a fresh module named `name`): the compile unit and
@@ -60,7 +61,7 @@ impl DebugInfo {
         // SAFETY: a DIBuilder of `m`, and metadata in its context.
         unsafe {
             let dib = di::LLVMCreateDIBuilder(m);
-            let module_file = file_of(dib, name, "");
+            let module_file = file_of(dib, name.as_bytes(), b"");
             let producer = "pytensor-llvm";
             let cu = di::LLVMDIBuilderCreateCompileUnit(
                 dib,
@@ -170,18 +171,23 @@ impl DebugInfo {
             .map(|(_, n)| n.clone())
     }
 
-    fn file(&self, path: &str) -> LLVMMetadataRef {
+    fn file(&self, path: &Path) -> LLVMMetadataRef {
         if let Some(&f) = self.files.borrow().get(path) {
             return f;
         }
-        let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
-        let f = file_of(self.dib, name, dir);
-        self.files.borrow_mut().insert(path.to_string(), f);
+        let name = path.file_name().unwrap_or(path.as_os_str());
+        let dir = path.parent().unwrap_or(Path::new(""));
+        let f = file_of(
+            self.dib,
+            name.as_encoded_bytes(),
+            dir.as_os_str().as_encoded_bytes(),
+        );
+        self.files.borrow_mut().insert(path.to_path_buf(), f);
         f
     }
 
-    fn python_function(&self, file: &str, name: &str, first: u32) -> LLVMMetadataRef {
-        let key = (file.to_string(), name.to_string(), first);
+    fn python_function(&self, file: &Path, name: &str, first: u32) -> LLVMMetadataRef {
+        let key = (file.to_path_buf(), name.to_string(), first);
         if let Some(&sp) = self.python.borrow().get(&key) {
             return sp;
         }
@@ -253,7 +259,9 @@ impl Drop for DebugInfo {
     }
 }
 
-fn file_of(dib: LLVMDIBuilderRef, name: &str, dir: &str) -> LLVMMetadataRef {
+/// A file of the DIBuilder's module: its name and directory, as the bytes of the paths
+/// (UTF-8, or what the OS uses where paths aren't).
+fn file_of(dib: LLVMDIBuilderRef, name: &[u8], dir: &[u8]) -> LLVMMetadataRef {
     // SAFETY: a file descriptor of the DIBuilder's module; LLVM copies the strings.
     unsafe {
         di::LLVMDIBuilderCreateFile(
@@ -266,18 +274,17 @@ fn file_of(dib: LLVMDIBuilderRef, name: &str, dir: &str) -> LLVMMetadataRef {
     }
 }
 
-/// The directory of the `pytensor` package (with a trailing slash).
-fn pytensor_root(py: Python<'_>) -> PyResult<String> {
-    let file: String = py.import("pytensor")?.getattr("__file__")?.extract()?;
-    let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
-    Ok(format!("{dir}/"))
+/// The directory of the `pytensor` package.
+fn pytensor_root(py: Python<'_>) -> PyResult<PathBuf> {
+    let file: PathBuf = py.import("pytensor")?.getattr("__file__")?.extract()?;
+    Ok(file.parent().map(Path::to_path_buf).unwrap_or_default())
 }
 
 /// The Python frames of pytensor emitting code now, innermost first, up to the one that
 /// builds the LLVM function (see `BOUNDARIES`). Others (functools' wrappers, tests)
 /// are left out.
 fn python_frames(py: Python<'_>) -> PyResult<Vec<Frame>> {
-    static ROOT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     let root = match ROOT.get() {
         Some(r) => r,
         None => {
@@ -292,8 +299,8 @@ fn python_frames(py: Python<'_>) -> PyResult<Vec<Frame>> {
             break;
         }
         let code = f.getattr("f_code")?;
-        let file: String = code.getattr("co_filename")?.extract()?;
-        if !file.starts_with(root.as_str()) {
+        let file: PathBuf = code.getattr("co_filename")?.extract()?;
+        if !file.starts_with(root) {
             f = f.getattr("f_back")?;
             continue;
         }

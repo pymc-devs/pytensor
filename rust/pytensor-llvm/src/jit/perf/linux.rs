@@ -2,7 +2,8 @@
 //!
 //! * every JIT-linked function is appended to `/tmp/perf-<pid>.map`, the file
 //!   `perf report` reads to name samples in anonymous executable memory;
-//! * and to a jitdump, `jit-<pid>.dump` in `PYTENSOR_LLVM_JITDUMP_DIR` (default `/tmp`):
+//! * and to a jitdump, `jit-<pid>.dump` in `PYTENSOR_LLVM_JITDUMP_DIR` (default: the
+//!   temporary directory, `$TMPDIR` or `/tmp`):
 //!   the function's name, address and machine code, and, for code compiled with debug
 //!   information (`debug_info`), the Python line each instruction comes from. With
 //!   `perf record -k 1` (the jitdump's clock), `perf inject --jit -i perf.data -o
@@ -139,8 +140,9 @@ struct JitDump {
 fn jitdump() -> Option<&'static Mutex<JitDump>> {
     static DUMP: OnceLock<Option<Mutex<JitDump>>> = OnceLock::new();
     DUMP.get_or_init(|| {
-        let dir = std::env::var("PYTENSOR_LLVM_JITDUMP_DIR").unwrap_or_else(|_| "/tmp".into());
-        let path = format!("{dir}/jit-{}.dump", std::process::id());
+        let dir = std::env::var_os("PYTENSOR_LLVM_JITDUMP_DIR")
+            .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+        let path = dir.join(format!("jit-{}.dump", std::process::id()));
         let file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -351,9 +353,10 @@ impl LineTables {
                 if line == 0 {
                     continue;
                 }
-                let helper = HELPER_FILES
-                    .iter()
-                    .any(|h| file.ends_with(&format!("/{h}")));
+                let helper = std::path::Path::new(file)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| HELPER_FILES.contains(&name));
                 if chosen.is_none() || !helper {
                     chosen = Some((line, file.to_string()));
                 }

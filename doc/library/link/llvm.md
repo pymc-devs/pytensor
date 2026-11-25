@@ -752,7 +752,8 @@ id>]`, e.g.
 `ptl:FusedElemwise{Exp, reduce[add@(0,)]}::kernel [42]`.
 
 The same functions, with their machine code, go to a jitdump, `jit-<pid>.dump` in
-`PYTENSOR_LLVM_JITDUMP_DIR` (default `/tmp`), for `perf annotate`. With debug
+`PYTENSOR_LLVM_JITDUMP_DIR` (default: the temporary directory, `$TMPDIR` or `/tmp`),
+for `perf annotate`. With debug
 information (section 10a) each function also gets its source lines: a jitdump holds one
 file:line per address, so of the Python call stack in the debug information, the line
 of the innermost frame outside the generic helpers (`array.py`, `context.py`, `interface.py`, `num.py`,

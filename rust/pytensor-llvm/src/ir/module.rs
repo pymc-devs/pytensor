@@ -981,6 +981,35 @@ fn collect_remarks(
     Ok(collected.iter().map(|r| located(r, &lines)).collect())
 }
 
+/// With `PYTENSOR_LLVM_DUMP_IR=<directory>`, write the optimized IR of `m` there, as
+/// `<n>-<module name>.opt.ll`: `n` counts the modules the process compiled, as module
+/// names repeat (every compiled unit is `node_OpFromGraph`).
+///
+/// # Safety
+/// `m` is a live module only this thread uses.
+unsafe fn dump_ir(m: LLVMModuleRef) {
+    static DUMPED: AtomicU64 = AtomicU64::new(0);
+    let Some(dir) = std::env::var_os("PYTENSOR_LLVM_DUMP_IR") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let _ = std::fs::create_dir_all(&dir);
+    // SAFETY: the module's identifier, copied before the module changes.
+    let name: String = unsafe { CStr::from_ptr(c::LLVMGetModuleIdentifier(m, &mut 0)) }
+        .to_string_lossy()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let n = DUMPED.fetch_add(1, Ordering::Relaxed);
+    let _ = std::fs::write(dir.join(format!("{n:04}-{name}.opt.ll")), print_module(m));
+}
+
 /// Optimize a module and generate an object file.
 fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
     let _shared = REMARKS.read().unwrap_or_else(|e| e.into_inner());
@@ -990,16 +1019,7 @@ fn codegen(m: LLVMModuleRef, opt_level: u32) -> Result<Vec<u8>, String> {
     // SAFETY: `m` is a finished module used only by this thread; `tmr` is a live target
     // machine; buffers and messages are freed.
     unsafe {
-        if let Ok(dir) = std::env::var("PYTENSOR_LLVM_DUMP_IR") {
-            let _ = std::fs::create_dir_all(&dir);
-            let name = CStr::from_ptr(c::LLVMGetModuleIdentifier(m, &mut 0))
-                .to_string_lossy()
-                .into_owned();
-            let _ = std::fs::write(
-                std::path::Path::new(&dir).join(format!("{name}.opt.ll")),
-                print_module(m),
-            );
-        }
+        dump_ir(m);
         let mut msg = std::ptr::null_mut();
         let mut buf = std::ptr::null_mut();
         let bad = tm::LLVMTargetMachineEmitToMemoryBuffer(

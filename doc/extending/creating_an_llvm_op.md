@@ -421,7 +421,8 @@ text = f.maker.linker.ir()
 ```
 
 Setting `PYTENSOR_LLVM_DUMP_IR=<directory>` instead writes the optimized IR of every
-module that is compiled there to files.
+module that is compiled there to files, one per module (`<n>-<module name>.opt.ll`,
+numbered in the order they are compiled).
 
 ### Errors
 
