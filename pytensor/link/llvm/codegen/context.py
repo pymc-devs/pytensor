@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -91,19 +91,22 @@ class Codegen:
     def module(self) -> ir.Module:
         return self.unit.module
 
-    def fail(self, message: str | None) -> None:
-        """Report `message` (unless a called kernel already did) and return 1."""
+    def fail(self, message: str | None, exc: type[BaseException] = ValueError) -> None:
+        """Report `message`, for the call to raise `exc` with (unless a called kernel
+        already reported an error: `message` None), and return 1."""
         if message is not None:
-            self.b.rt_fail(self.ctx, message)
+            self.b.rt_fail(self.ctx, message, self.unit.exceptions.code(exc))
         self.b.ret(1)
 
-    def check(self, ok: ir.Value, message: str | None) -> None:
-        """Fail with `message` unless `ok` (i1). Constant conditions fold."""
+    def check(
+        self, ok: ir.Value, message: str | None, exc: type[BaseException] = ValueError
+    ) -> None:
+        """Fail with `message` and `exc` unless `ok` (i1). Constant conditions fold."""
         c = ok.const_int
         if c == 1:
             return
         with self.b.if_(self.b.not_(ok)):
-            self.fail(message)
+            self.fail(message, exc)
 
     def graph_function(
         self,
@@ -226,7 +229,7 @@ class Codegen:
         self.scratch_scopes[-1].append((self.ctx, owner, True))
 
     @contextmanager
-    def scratch_scope(self, function: bool = False) -> Iterator[None]:
+    def scratch_scope(self, function: bool = False) -> Generator[None]:
         """The scratch memory taken inside is freed at its end (on the way out of the
         code emitted inside, unless that returned; on errors the caller's mark releases
         it). The code emitted inside must be one region of control flow: a function body
@@ -370,7 +373,7 @@ class Codegen:
             return i
         ok = b.ult(i, n)  # also catches what is still negative
         if not defer:
-            self.check(ok, message)
+            self.check(ok, message, IndexError)
             return i
         flag = self.deferred[-1].get(message) if self.deferred else None
         if flag is None:
@@ -401,7 +404,7 @@ class Codegen:
             self.deferred.pop()
         if not self.b.terminated:
             for message, flag in flags.items():
-                self.check(self.b.not_(self.b.load(ir.i1, flag)), message)
+                self.check(self.b.not_(self.b.load(ir.i1, flag)), message, IndexError)
 
     def _policy(
         self, n_elements: Callable[[], ir.Value], parallel_cost: float | None

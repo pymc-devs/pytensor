@@ -355,6 +355,7 @@ class Array:
         cg.check(
             b.or_(matches, empty),
             f"layout check: {what} doesn't have layout {layout}",
+            RuntimeError,
         )
 
     # ---- copying

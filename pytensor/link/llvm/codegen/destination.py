@@ -140,6 +140,7 @@ class ProvidedDestination(OutputDestination):
                     cg.b.eq(wanted, provided),
                     f"allocate: axis {axis} doesn't have the length of the provided "
                     "memory",
+                    RuntimeError,
                 )
         return self.array
 

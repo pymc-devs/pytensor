@@ -13,7 +13,7 @@
 //!     void  (*buffer_incref)(PtCtx *, PtBuffer *);
 //!     void  (*buffer_decref)(PtCtx *, PtBuffer *);
 //!     void *(*scratch)(PtCtx *, size_t bytes);    // 64-byte aligned, valid until the task ends
-//!     void  (*set_error)(PtCtx *, int32_t code, const char *msg);
+//!     void  (*set_error)(PtCtx *, int32_t code, const char *msg);  // code: ERR_VALUE etc.
 //!     int64_t (*scratch_mark)(PtCtx *);
 //!     void  (*scratch_release)(PtCtx *, int64_t mark);
 //!     ...                                          // see `runtime_functions!`
@@ -176,6 +176,26 @@ impl Runtime {
             .get_or_init(|| Mutex::new(crate::jit::Jit::new().expect("failed to create LLJIT")))
     }
 }
+
+// ------------------------------------------------------------------ error codes
+
+/// The error codes of failed calls, for the exception they raise in Python. 0 is
+/// success. Codes from `ERR_CUSTOM` on index the exception classes of the program
+/// (`codegen/errors.py`); the others are the fixed kinds below.
+///
+/// An internal error: a bug, or a broken contract (RuntimeError).
+pub const ERR_RUNTIME: i32 = 1;
+/// Invalid values or shapes of arguments (ValueError).
+pub const ERR_VALUE: i32 = 2;
+/// An index out of bounds (IndexError).
+pub const ERR_INDEX: i32 = 3;
+/// A linear algebra failure: a singular matrix, no convergence (LinAlgError).
+pub const ERR_LINALG: i32 = 4;
+/// A failed assertion (AssertionError).
+pub const ERR_ASSERTION: i32 = 5;
+/// The first code of a program's own exception classes: `ERR_CUSTOM + k` raises the
+/// k-th of them.
+pub const ERR_CUSTOM: i32 = 64;
 
 // ------------------------------------------------------------------ the call context
 

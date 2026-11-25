@@ -369,8 +369,10 @@ class Builder:
         """Nanoseconds on a monotonic clock (i64), for profiling."""
     def rt_counter_add(self, counter: Value, n: Operand) -> None:
         """Add `n` (i64) to the u64 at `counter`, atomically (profiling counters)."""
-    def rt_fail(self, ctx: Value, message: str) -> None:
-        """Report an error on `ctx` (the function should then return nonzero)."""
+    def rt_fail(self, ctx: Value, message: str, code: int = 1) -> None:
+        """Report an error on `ctx` (the function should then return nonzero):
+        `message`, with the error code `code` (`pytensor_llvm.runtime.ERR_VALUE` etc.),
+        which decides the exception the call raises."""
     def rt_scratch(self, ctx: Value, nbytes: Operand, at_entry: bool = False) -> Value:
         """Scratch memory: `nbytes` (i64), 64-byte aligned, valid until `rt_scratch_free`
         or the release of an earlier mark. Null on failure, with the error set.

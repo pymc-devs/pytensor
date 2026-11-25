@@ -225,6 +225,25 @@ def _(op, node, cg, inputs, outputs):
     k = len(idx_ops)
     dt = result.scalar_type
 
+    if op.ignore_duplicates and not op.set_instead_of_inc:
+        # as numpy's x[idx] += y: every x[idx] is read before any is written, so a
+        # duplicate index gets one sum (the last), not all of them
+        sums = cg.temporary(dt, vs)
+
+        def gather(p):
+            src = element(cg, result, pat, p[0], p[1 : 1 + k], "read")
+            v = cast(b, load(b, y.scalar_type, p[-2]), y.scalar_type, dt)
+            v = emit_scalar(ps.add, b, [(load(b, dt, src), dt), (v, dt)], [dt])[0]
+            store(b, dt, v, p[-1])
+
+        def scatter(p):
+            dst = element(cg, result, pat, p[0], p[1 : 1 + k], "write")
+            store(b, dt, load(b, dt, p[-1]), dst)
+
+        cg.for_each(vs, [base_op, *idx_ops, ys, sums], gather)
+        cg.for_each(vs, [base_op, *idx_ops, sums], scatter)
+        return
+
     def body(p):
         dst = element(cg, result, pat, p[0], p[1 : 1 + k], "write")
         v = cast(b, load(b, y.scalar_type, p[-1]), y.scalar_type, dt)

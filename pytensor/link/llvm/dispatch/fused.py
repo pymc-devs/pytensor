@@ -550,7 +550,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         for j, read in enumerate(reads):
             if read is not None and j in plain_in:
                 length = inputs[j].shape[read.axis]
-                cg.check(b.or_(b.ne(length, 0), b.eq(n, 0)), message)
+                cg.check(b.or_(b.ne(length, 0), b.eq(n, 0)), message, IndexError)
         with cg.deferred_checks([message]):
             loop()
 

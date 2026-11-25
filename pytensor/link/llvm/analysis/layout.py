@@ -484,7 +484,8 @@ def _is_tensor(var) -> bool:
 def _default_layout(var, inputs_c=False):
     if not _is_tensor(var):
         return None
-    if isinstance(var, Constant):
+    # (a sparse constant's data isn't an ndarray: the backend rejects it later)
+    if isinstance(var, Constant) and isinstance(var.data, np.ndarray):
         return Layout.of_const(var.data)
     if inputs_c:
         return Layout.c(var.type.ndim)

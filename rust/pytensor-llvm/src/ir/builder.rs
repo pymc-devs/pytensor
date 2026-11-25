@@ -1737,15 +1737,18 @@ impl Cx<'_> {
         Ok(r)
     }
 
-    fn rt_fail(&self, ctx: Value, message: &str) -> PyResult<()> {
+    fn rt_fail(&self, ctx: Value, message: &str, code: i32) -> PyResult<()> {
         self.open()?;
         if ctx.ty != Ty::Ptr {
             return err("ctx must be a ptr");
         }
+        if code <= 0 {
+            return err("an error code must be positive");
+        }
         let msg = self.cstr(message)?;
         // SAFETY: an integer constant of this module's context.
         let code = self.mk(
-            unsafe { c::LLVMConstInt(self.lt(&Ty::Int(32)), 1, 0) },
+            unsafe { c::LLVMConstInt(self.lt(&Ty::Int(32)), code as u64, 0) },
             Ty::Int(32),
         );
         let (f, fnty) = self.declare(
@@ -2368,9 +2371,12 @@ impl Builder {
 
     // ------------------------------------------------------------ runtime
 
-    /// Report an error on `ctx` (the function should then return nonzero).
-    fn rt_fail(&self, py: Python<'_>, ctx: Value, message: &str) -> PyResult<()> {
-        self.with(py, |cx| cx.rt_fail(ctx, message))
+    /// Report an error on `ctx` (the function should then return nonzero): `message`,
+    /// with the error code `code` (`ERR_RUNTIME` etc., or a code `codegen/errors.py`
+    /// added), which decides the exception the call raises.
+    #[pyo3(signature = (ctx, message, code = crate::runtime::ERR_RUNTIME))]
+    fn rt_fail(&self, py: Python<'_>, ctx: Value, message: &str, code: i32) -> PyResult<()> {
+        self.with(py, |cx| cx.rt_fail(ctx, message, code))
     }
 
     /// A new buffer of `nbytes` (i64), 64-byte aligned. Writes the owning reference to

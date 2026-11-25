@@ -19,9 +19,32 @@ use crate::abi::{KernelFn, OwnedBuf, PtArray, c_strides, checked_nbytes, overlap
 use crate::array::{OwnedArray, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
 use crate::runtime::parallel::CallerWaits;
-use crate::runtime::{PtCtx, runtime};
+use crate::runtime::{ERR_RUNTIME, ERR_VALUE, PtCtx, runtime};
 
 pub type R<T> = Result<T, String>;
+
+/// A failed call: the error code (`ERR_VALUE` etc.: the exception Python raises) and
+/// the message. From a `String`: invalid arguments (`ERR_VALUE`).
+#[derive(Debug)]
+pub struct CallError {
+    pub code: i32,
+    pub message: String,
+}
+
+impl From<String> for CallError {
+    fn from(message: String) -> Self {
+        CallError {
+            code: ERR_VALUE,
+            message,
+        }
+    }
+}
+
+impl From<&str> for CallError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
 
 /// The type of an argument: dtype and static lengths (None where only known at run
 /// time).
@@ -214,7 +237,7 @@ impl Function {
         session: &'s mut Session,
         inputs: impl IntoIterator<Item = R<PtArrayRef<'c>>>,
         outputs: impl IntoIterator<Item = R<Destination<'c>>>,
-    ) -> R<std::vec::Drain<'s, (usize, OwnedArray)>> {
+    ) -> Result<std::vec::Drain<'s, (usize, OwnedArray)>, CallError> {
         let s = session;
         s.args.clear();
         s.targets.clear();
@@ -224,7 +247,7 @@ impl Function {
         for a in inputs {
             let k = s.args.len();
             if k == self.n_inputs() {
-                return Err(format!("expected {} inputs", self.n_inputs()));
+                return Err(format!("expected {} inputs", self.n_inputs()).into());
             }
             let a = a?;
             self.check_input(k, &a)?;
@@ -238,7 +261,8 @@ impl Function {
                     "expected {} inputs and {} outputs",
                     self.n_inputs(),
                     self.n_outputs()
-                ));
+                )
+                .into());
             }
             let target = self.target(s, o, d?)?;
             s.targets.push(target);
@@ -250,7 +274,8 @@ impl Function {
                 self.n_outputs(),
                 s.args.len(),
                 s.targets.len()
-            ));
+            )
+            .into());
         }
         // SAFETY: the arguments of this call, checked above; the arrays they describe
         // are borrowed for `'c`, which lasts until we return.
@@ -307,7 +332,7 @@ impl Function {
     /// # Safety
     /// `s.args` holds the inputs and `s.targets` the outputs of a call (`call`), all of
     /// them checked, and the arrays they describe are borrowed until we return.
-    unsafe fn run(&self, s: &mut Session) -> R<()> {
+    unsafe fn run(&self, s: &mut Session) -> Result<(), CallError> {
         let (n_in, n_out) = (self.n_inputs(), self.n_outputs());
         s.headers.clear();
         s.headers.resize(self.returned_header_size, 0);
@@ -336,10 +361,10 @@ impl Function {
                     target.array.data
                 } else {
                     let n = self.provided_bytes[o];
-                    let buf = s
-                        .ctx
-                        .alloc(n)
-                        .ok_or_else(|| format!("could not allocate {n} bytes"))?;
+                    let buf = s.ctx.alloc(n).ok_or_else(|| CallError {
+                        code: ERR_RUNTIME,
+                        message: format!("could not allocate {n} bytes"),
+                    })?;
                     let data = buf.data();
                     staged = Some(buf);
                     data
@@ -382,8 +407,11 @@ impl Function {
             _ => Err(ctx
                 .error
                 .take()
-                .map(|(_, m)| m)
-                .unwrap_or_else(|| format!("error {rc}"))),
+                .map(|(code, message)| CallError { code, message })
+                .unwrap_or_else(|| CallError {
+                    code: ERR_RUNTIME,
+                    message: format!("error {rc}"),
+                })),
         };
         // every output: what it is in (also on failure, to release it)
         for (o, t) in self.outputs.iter().enumerate() {
@@ -429,7 +457,10 @@ impl Function {
                 }
                 into.copy_from(&array.as_ref())
             })()
-            .map_err(|e| format!("output {o}: {e}"));
+            .map_err(|e| CallError {
+                code: ERR_RUNTIME,
+                message: format!("output {o}: {e}"),
+            });
         }
         if result.is_err() {
             s.results.clear();

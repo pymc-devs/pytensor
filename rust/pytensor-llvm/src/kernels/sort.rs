@@ -1,7 +1,7 @@
 //! Sort along an axis, NaNs last.
 
 use crate::abi::OutputMode;
-use crate::kernels::{Args, Element, Kernel, zip_lanes};
+use crate::kernels::{Args, Element, Kernel, KernelResult, zip_lanes};
 use crate::layout::Layout;
 use crate::runtime::PtCtx;
 use std::cmp::Ordering;
@@ -68,7 +68,7 @@ impl<T: Sortable> Kernel for Sort<T> {
         &self.layouts
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> KernelResult {
         let source = args.inputs.array::<T>(0)?;
         let mut sorted = args.outputs.array::<T>(ctx, 0, self.mode, source.shape())?;
         let mut values = Vec::new();
@@ -80,7 +80,8 @@ impl<T: Sortable> Kernel for Sort<T> {
                 values.sort_unstable_by(T::compare);
             }
             target.write(&values);
-        })
+        })?;
+        Ok(())
     }
 }
 
@@ -147,7 +148,7 @@ mod tests {
                 &kernel as *const _ as *const u8,
             )
         };
-        assert_eq!(code, 1);
+        assert_eq!(code, crate::runtime::ERR_VALUE);
         assert!(ctx.error.take().unwrap().1.contains("expected [2, 3]"));
     }
 }

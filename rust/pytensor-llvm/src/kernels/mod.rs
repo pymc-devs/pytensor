@@ -10,7 +10,7 @@
 //! impl<T: Element + Neg<Output = T>> Kernel for Negate<T> {
 //!     fn arity(&self) -> (usize, usize) { (1, 1) }
 //!     fn output_layouts(&self) -> &[Layout] { &self.layouts }
-//!     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+//!     fn run(&self, ctx: &mut PtCtx, mut args: Args) -> KernelResult {
 //!         let x = args.inputs.array::<T>(0)?;
 //!         let mut out = args.outputs.array::<T>(ctx, 0, self.mode, x.shape())?;
 //!         zip_lanes(&x, &mut out, 0, |x, mut out| { ... })
@@ -43,7 +43,7 @@ use crate::abi::{OutputMode, PtArray};
 use crate::array::{OutSlot, PtArrayMut, PtArrayRef};
 use crate::dtype::DType;
 use crate::layout::Layout;
-use crate::runtime::PtCtx;
+use crate::runtime::{ERR_LINALG, ERR_RUNTIME, ERR_VALUE, PtCtx};
 use faer::{MatMut, MatRef};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -67,6 +67,51 @@ macro_rules! element {
 }
 element!(f64 => Float64, f32 => Float32, i64 => Int64, i32 => Int32, i16 => Int16, i8 => Int8, u8 => Uint8, u16 => Uint16, u32 => Uint32, u64 => Uint64);
 
+/// A failed kernel call: the error code (`ERR_VALUE` etc.: the exception Python
+/// raises) and the message. From a `String` or `&str`: invalid arguments (`ERR_VALUE`),
+/// so that `?` and `.into()` work on the errors of the array views.
+#[derive(Debug)]
+pub struct KernelError {
+    pub code: i32,
+    pub message: String,
+}
+
+impl KernelError {
+    /// A linear algebra failure (LinAlgError): a singular matrix, no convergence.
+    pub fn linalg(message: impl Into<String>) -> Self {
+        KernelError {
+            code: ERR_LINALG,
+            message: message.into(),
+        }
+    }
+
+    /// An internal error (RuntimeError): a bug, or a broken contract.
+    pub fn runtime(message: impl Into<String>) -> Self {
+        KernelError {
+            code: ERR_RUNTIME,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for KernelError {
+    fn from(message: String) -> Self {
+        KernelError {
+            code: ERR_VALUE,
+            message,
+        }
+    }
+}
+
+impl From<&str> for KernelError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
+/// What a kernel's `run` returns.
+pub type KernelResult = Result<(), KernelError>;
+
 /// A Rust kernel: its parameters, and what it computes.
 pub trait Kernel: Send + Sync + 'static {
     /// (number of inputs, number of outputs)
@@ -76,7 +121,7 @@ pub trait Kernel: Send + Sync + 'static {
     /// of its inputs. `Outputs` allocates the outputs in them.
     fn output_layouts(&self) -> &[Layout];
 
-    fn run(&self, ctx: &mut PtCtx, args: Args) -> Result<(), String>;
+    fn run(&self, ctx: &mut PtCtx, args: Args) -> KernelResult;
 
     /// May it run work on the runtime's thread pool? (A compiled function that calls
     /// such a kernel runs on the pool: `function::Function`.)
@@ -105,21 +150,19 @@ pub unsafe extern "C" fn entry<K: Kernel>(
     let (kernel, ctx) = unsafe { (&*(config as *const K), &mut *ctx) };
     let run = |ctx: &mut PtCtx| {
         // SAFETY: the function's contract.
-        unsafe { Args::from_raw(args, n_inputs, n_outputs, kernel.output_layouts()) }.and_then(
-            |args| {
-                let arity = (args.inputs.len(), args.outputs.len());
-                if arity != kernel.arity() {
-                    return Err(format!(
-                        "the kernel takes {} inputs and {} outputs, but was called with {} and {}",
-                        kernel.arity().0,
-                        kernel.arity().1,
-                        arity.0,
-                        arity.1
-                    ));
-                }
-                kernel.run(ctx, args)
-            },
-        )
+        let args = unsafe { Args::from_raw(args, n_inputs, n_outputs, kernel.output_layouts()) }
+            .map_err(KernelError::runtime)?;
+        let arity = (args.inputs.len(), args.outputs.len());
+        if arity != kernel.arity() {
+            return Err(KernelError::runtime(format!(
+                "the kernel takes {} inputs and {} outputs, but was called with {} and {}",
+                kernel.arity().0,
+                kernel.arity().1,
+                arity.0,
+                arity.1
+            )));
+        }
+        kernel.run(ctx, args)
     };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(ctx)))
         .unwrap_or_else(|p| {
@@ -127,14 +170,14 @@ pub unsafe extern "C" fn entry<K: Kernel>(
                 .downcast_ref::<String>()
                 .cloned()
                 .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
-            Err(format!(
+            Err(KernelError::runtime(format!(
                 "internal error (panic): {}",
                 msg.unwrap_or_default()
-            ))
+            )))
         });
     match result {
         Ok(()) => 0,
-        Err(message) => ctx.fail(1, &message),
+        Err(e) => ctx.fail(e.code, &e.message),
     }
 }
 
@@ -170,7 +213,7 @@ pub unsafe extern "C" fn numba_entry(
         0
     } else {
         ctx.fail(
-            1,
+            ERR_RUNTIME,
             "the numba implementation raised an exception (printed above as unraisable)",
         )
     }
@@ -763,7 +806,7 @@ mod tests {
             &self.1
         }
 
-        fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        fn run(&self, ctx: &mut PtCtx, mut args: Args) -> KernelResult {
             let x = args.inputs.array::<f64>(0)?;
             let values = x.as_slice().ok_or("a contiguous vector is expected")?;
             let mut out = args.outputs.array::<f64>(ctx, 0, self.0, x.shape())?;
@@ -927,7 +970,7 @@ mod tests {
             &self.1
         }
 
-        fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+        fn run(&self, ctx: &mut PtCtx, mut args: Args) -> KernelResult {
             let [first, second] = args.outputs.slots(self.0)?;
             let mut first = first.array::<f64>(ctx, OutputMode::Allocated, &[1])?;
             let mut second = second.array::<i32>(ctx, OutputMode::Provided, &[2])?;

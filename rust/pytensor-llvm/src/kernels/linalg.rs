@@ -6,7 +6,7 @@
 //! allocate.
 
 use crate::abi::OutputMode;
-use crate::kernels::{Args, Array, ArrayMut, Element, Kernel, scratch};
+use crate::kernels::{Args, Array, ArrayMut, Element, Kernel, KernelError, KernelResult, scratch};
 use crate::layout::Layout;
 use crate::runtime::parallel::CallerWaits;
 use crate::runtime::{PtCtx, runtime};
@@ -96,7 +96,7 @@ const PARALLEL_MIN_DOT: i64 = 64 * 64 * 64;
 /// A kernel computing with faer, with the parallelism `par`.
 trait FaerKernel: Send + Sync + 'static {
     fn arity(&self) -> (usize, usize);
-    fn run(&self, ctx: &mut PtCtx, args: Args, par: Par) -> Result<(), String>;
+    fn run(&self, ctx: &mut PtCtx, args: Args, par: Par) -> KernelResult;
 
     /// Is the call with `args` worth running in parallel? By default: if an input has
     /// at least `PARALLEL_MIN` elements.
@@ -123,7 +123,7 @@ macro_rules! faer_kernels {
                 &self.layouts
             }
 
-            fn run(&self, ctx: &mut PtCtx, args: Args) -> Result<(), String> {
+            fn run(&self, ctx: &mut PtCtx, args: Args) -> KernelResult {
                 run_faer(self, self.parallel, ctx, args)
             }
 
@@ -167,7 +167,7 @@ fn run_faer<K: FaerKernel>(
     parallel: bool,
     ctx: &mut PtCtx,
     args: Args,
-) -> Result<(), String> {
+) -> KernelResult {
     let rt = runtime();
     if !(parallel && ctx.parallel && rt.threads() > 1 && kernel.worth_parallel(&args)) {
         return kernel.run(ctx, args, Par::Seq);
@@ -195,18 +195,14 @@ impl<T: Float> FaerKernel for Dot<T> {
         (2, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let (a, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
         let (sa, sb) = (a.shape(), b.shape());
         if !matches!(sa.len(), 1 | 2) || !matches!(sb.len(), 1 | 2) {
-            return Err(format!(
-                "Dot: of arrays with {} and {} axes",
-                sa.len(),
-                sb.len()
-            ));
+            return Err(format!("Dot: of arrays with {} and {} axes", sa.len(), sb.len()).into());
         }
         if sa.last() != sb.first() {
-            return Err(format!("Dot: shapes {sa:?} and {sb:?} are not aligned"));
+            return Err(format!("Dot: shapes {sa:?} and {sb:?} are not aligned").into());
         }
         let mut shape = Vec::new();
         if sa.len() == 2 {
@@ -408,16 +404,13 @@ impl<T: Float> FaerKernel for Cholesky<T> {
         (1, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let &[n, columns] = a.shape() else {
-            return Err(format!(
-                "Cholesky: input must be a matrix, got {} axes",
-                a.ndim()
-            ));
+            return Err(format!("Cholesky: input must be a matrix, got {} axes", a.ndim()).into());
         };
         if n != columns {
-            return Err(format!("Cholesky: input must be square, got {n}x{columns}"));
+            return Err(format!("Cholesky: input must be square, got {n}x{columns}").into());
         }
         let n = n as usize;
         let mut out = args.outputs.array::<T>(ctx, 0, self.mode, a.shape())?;
@@ -474,24 +467,22 @@ impl<T: Float> FaerKernel for SolveTriangular<T> {
         (2, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let (a, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
         let &[n, columns] = a.shape() else {
-            return Err(format!(
-                "SolveTriangular: A must be a matrix, got {} axes",
-                a.ndim()
-            ));
+            return Err(
+                format!("SolveTriangular: A must be a matrix, got {} axes", a.ndim()).into(),
+            );
         };
         if n != columns {
-            return Err(format!(
-                "SolveTriangular: A must be square, got {n}x{columns}"
-            ));
+            return Err(format!("SolveTriangular: A must be square, got {n}x{columns}").into());
         }
         if !matches!(b.ndim(), 1 | 2) || b.shape()[0] != n {
             return Err(format!(
                 "SolveTriangular: shapes of A ({n}x{n}) and b ({:?}) are incompatible",
                 b.shape()
-            ));
+            )
+            .into());
         }
         let mut out = args.outputs.array::<T>(ctx, 0, self.mode, b.shape())?;
         let matrix = a.matrix(false);
@@ -522,7 +513,7 @@ fn stack_for(ctx: &mut PtCtx, req: StackReq) -> &mut MemStack {
 fn square<T: Element>(a: &Array<T>) -> Result<usize, String> {
     match *a.shape() {
         [n, m] if n == m => Ok(n as usize),
-        ref shape => Err(format!("expected a square matrix, got shape {shape:?}")),
+        ref shape => Err(format!("expected a square matrix, got shape {shape:?}").into()),
     }
 }
 
@@ -530,7 +521,7 @@ fn square<T: Element>(a: &Array<T>) -> Result<usize, String> {
 fn matrix_shape<T: Element>(a: &Array<T>) -> Result<(usize, usize), String> {
     match *a.shape() {
         [m, n] => Ok((m as usize, n as usize)),
-        ref shape => Err(format!("expected a matrix, got shape {shape:?}")),
+        ref shape => Err(format!("expected a matrix, got shape {shape:?}").into()),
     }
 }
 
@@ -540,7 +531,8 @@ fn check_rhs<T: Element>(n: usize, b: &Array<T>) -> Result<(), String> {
         return Err(format!(
             "shapes of A ({n}x{n}) and b ({:?}) are incompatible",
             b.shape()
-        ));
+        )
+        .into());
     }
     Ok(())
 }
@@ -609,7 +601,7 @@ impl<T: Float> FaerKernel for Solve<T> {
         (2, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let (a, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
         let n = square(&a)?;
         check_rhs(n, &b)?;
@@ -699,7 +691,7 @@ impl<T: Float> FaerKernel for CholeskySolve<T> {
         (2, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let (c, b) = (args.inputs.array::<T>(0)?, args.inputs.array::<T>(1)?);
         let n = square(&c)?;
         check_rhs(n, &b)?;
@@ -730,7 +722,7 @@ impl<T: Float> FaerKernel for MatrixInverse<T> {
         (1, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let n = square(&a)?;
         let mut out = args.outputs.array::<T>(ctx, 0, self.mode, a.shape())?;
@@ -744,7 +736,7 @@ impl<T: Float> FaerKernel for MatrixInverse<T> {
         factor.copy_from(a.matrix(false));
         let (perm, swaps, stack) = lu_in_place(factor.rb_mut(), stack, par);
         if swaps.is_none() {
-            return Err("singular matrix".into());
+            return Err(KernelError::linalg("singular matrix"));
         }
         lu_inverse::inverse(
             out.matrix_mut(false),
@@ -798,7 +790,7 @@ impl<T: Float> FaerKernel for Det<T> {
         (1, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let (det, _, _) = determinant(ctx, &a, par)?;
         args.outputs
@@ -821,7 +813,7 @@ impl<T: Float> FaerKernel for SLogDet<T> {
         (1, 2)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let (_, sign, log) = determinant(ctx, &a, par)?;
         let [s, l] = args.outputs.slots([0, 1])?;
@@ -848,7 +840,7 @@ impl<T: Float> FaerKernel for LUFactor<T> {
         (1, 2)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let n = square(&a)?;
         let [lu_out, piv_out] = args.outputs.slots([0, 1])?;
@@ -903,7 +895,7 @@ impl<T: Float> FaerKernel for LU<T> {
         (1, self.modes.len())
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let n = square(&a)?;
         let shape = a.shape();
@@ -986,7 +978,7 @@ impl<I: Element + TryInto<usize>> Kernel for PivotToPermutations<I> {
         &self.layouts
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args) -> KernelResult {
         let pivots = args.inputs.array::<I>(0)?;
         let &[n] = pivots.shape() else {
             return Err("expected a vector".into());
@@ -1038,7 +1030,7 @@ impl<T: Float> FaerKernel for Eigh<T> {
         (1, if self.vectors { 2 } else { 1 })
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let n = square(&a)?;
         let source = if self.lower {
@@ -1082,7 +1074,7 @@ impl<T: Float> FaerKernel for Eigh<T> {
                 Default::default(),
             )
         };
-        result.map_err(|_| "the eigenvalue algorithm did not converge".into())
+        result.map_err(|_| KernelError::linalg("the eigenvalue algorithm did not converge"))
     }
 }
 
@@ -1104,11 +1096,11 @@ impl<T: Float> FaerKernel for Svd<T> {
         (1, if self.compute_uv { 3 } else { 1 })
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let (m, n) = matrix_shape(&a)?;
         let k = m.min(n);
-        let failed = |_| "the algorithm did not converge".to_string();
+        let failed = |_| KernelError::linalg("the algorithm did not converge");
         if !self.compute_uv {
             let mut s = args
                 .outputs
@@ -1187,7 +1179,7 @@ impl<T: Float> FaerKernel for Qr<T> {
         (1, if self.mode == QrMode::R { 1 } else { 2 })
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let (m, n) = matrix_shape(&a)?;
         let k = m.min(n);
@@ -1284,7 +1276,7 @@ impl<T: Float> FaerKernel for MatrixPinv<T> {
         (1, 1)
     }
 
-    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> Result<(), String> {
+    fn run(&self, ctx: &mut PtCtx, mut args: Args, par: Par) -> KernelResult {
         let a = args.inputs.array::<T>(0)?;
         let (m, n) = if self.hermitian {
             let n = square(&a)?;
@@ -1334,7 +1326,7 @@ impl<T: Float> FaerKernel for MatrixPinv<T> {
                 stack,
                 Default::default(),
             )
-            .map_err(|_| "the algorithm did not converge")?;
+            .map_err(|_| KernelError::linalg("the algorithm did not converge"))?;
             v.copy_from(u.rb());
         } else {
             svd::svd(
@@ -1346,7 +1338,7 @@ impl<T: Float> FaerKernel for MatrixPinv<T> {
                 stack,
                 Default::default(),
             )
-            .map_err(|_| "the algorithm did not converge")?;
+            .map_err(|_| KernelError::linalg("the algorithm did not converge"))?;
         }
         let largest = (0..k)
             .map(|j| s[(j, 0)].abs())

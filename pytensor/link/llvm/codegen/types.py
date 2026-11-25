@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 import pytensor.scalar as ps
-from pytensor.graph.type import Type
+from pytensor.graph.type import HasDataType, Type
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.scalar.basic import ScalarType
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import DenseTensorType
 
 
 class _IR:
@@ -51,18 +51,19 @@ SUPPORTED_TYPES: tuple[ScalarType, ...] = (
 )
 
 
-def element_type(t: TensorType | ScalarType | str) -> ScalarType:
-    """Return the type of the elements of `t`: a TensorType, a ScalarType, or a dtype
-    string (where one comes from outside the backend: numpy, a kernel's spec).
+def element_type(t: HasDataType | ScalarType | str) -> ScalarType:
+    """Return the type of the elements of `t`: a ScalarType, a type with a dtype
+    (TensorType, XTensorType), or a dtype string (where one comes from outside the
+    backend: numpy, a kernel's spec).
 
     Raises NotImplementedError for types the backend doesn't support."""
     scalar_type: ScalarType
-    if isinstance(t, TensorType):
-        scalar_type = t.to_scalar_type()
+    if isinstance(t, ScalarType):
+        scalar_type = t
     elif isinstance(t, str):
         scalar_type = ps.get_scalar_type(t)
     else:
-        scalar_type = t
+        scalar_type = ps.get_scalar_type(t.dtype)
     if scalar_type not in SUPPORTED_TYPES:
         raise NotImplementedError(
             f"LLVM backend: dtype {scalar_type.dtype} is not supported"
@@ -209,14 +210,19 @@ def repr_of(t: Type, layout: Layout | None = None) -> Representation:
         return NoneRepr()
     if isinstance(t, ScalarType):
         return ScalarRepr(element_type(t))
-    if isinstance(t, TensorType):
-        shape = tuple(None if s is None else int(s) for s in t.shape)
-        if layout is None:
-            layout = Layout.unknown(shape)
-        else:
-            layout = layout.for_shape(shape)
-        return TensorRepr(element_type(t), shape, layout)
-    raise NotImplementedError(f"LLVM backend: no representation for {t}")
+    # (not a SparseTensorType: a TensorType subclass whose values aren't ndarrays)
+    if not isinstance(t, DenseTensorType):
+        from pytensor.xtensor.type import XTensorType
+
+        if not isinstance(t, XTensorType):
+            raise NotImplementedError(f"LLVM backend: no representation for {t}")
+        # an XTensorType value is an ndarray, like the TensorType with its dtype and shape
+    shape = tuple(None if s is None else int(s) for s in t.shape)
+    if layout is None:
+        layout = Layout.unknown(shape)
+    else:
+        layout = layout.for_shape(shape)
+    return TensorRepr(element_type(t), shape, layout)
 
 
 class PtArray:

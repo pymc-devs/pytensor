@@ -6,6 +6,16 @@ from typing import Any
 
 import numpy as np
 
+#: Error codes of failed calls (`set_error`, `IRBuilder.rt_fail`): the exception the
+#: call raises. Codes from `ERR_CUSTOM` on are those of the program's own exception
+#: classes (`Function`'s `exceptions`).
+ERR_RUNTIME: int  # RuntimeError: an internal error
+ERR_VALUE: int  # ValueError
+ERR_INDEX: int  # IndexError
+ERR_LINALG: int  # numpy.linalg.LinAlgError
+ERR_ASSERTION: int  # AssertionError
+ERR_CUSTOM: int
+
 class Function:
     """A compiled program's function, callable from Python and (`c_function`) from C."""
 
@@ -17,13 +27,16 @@ class Function:
         outputs: Sequence[tuple[np.dtype, Sequence[int | None], bool]],
         keepalive: Sequence[Any],
         uses_pool: bool,
+        exceptions: Sequence[type[BaseException]],
     ) -> None:
         """`inputs`: `(dtype, shape, contiguous)` per graph input (shape: None where
         only known at run time; contiguous: the generated code assumes C-contiguous
         memory); `outputs`: `(dtype, shape, provided)` per graph output (provided:
         written into memory the caller provides, else returned in a buffer).
         `keepalive` is kept as long as the function: what `address` and `config` belong
-        to. `uses_pool`: may the function run work on the runtime's thread pool?"""
+        to. `uses_pool`: may the function run work on the runtime's thread pool?
+        `exceptions`: the program's own exception classes, those of the error codes
+        from `ERR_CUSTOM` on."""
     def __call__(self, *args: Any) -> list[Any]: ...
     def seed(self, seed: int) -> None:
         """Restart the random state of Python calls from `seed`."""

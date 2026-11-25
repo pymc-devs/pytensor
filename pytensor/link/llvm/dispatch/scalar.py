@@ -210,7 +210,8 @@ def _(b, args, out):
 @register(ps.Clip)
 def _(b, args, out):
     x, lo, hi = nums(b, args, out)
-    return x.maximum(lo).minimum(hi)
+    # as `ps.Clip`: `lo` wins when lo > hi (unlike min(max(x, lo), hi))
+    return (x < lo).select(lo, (x > hi).select(hi, x))
 
 
 @register(ps.Neg)

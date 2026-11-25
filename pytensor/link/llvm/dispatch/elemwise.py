@@ -20,6 +20,7 @@ from pytensor.link.llvm.codegen.signature import overwritten_layout
 from pytensor.link.llvm.codegen.types import element_type, memory_type
 from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
 from pytensor.tensor.elemwise import CAReduce, Elemwise
+from pytensor.tensor.math import NonZeroDimsCAReduce
 
 
 def broadcast_shape(cg, node, inputs):
@@ -146,6 +147,9 @@ def identity_value(scalar_op, ident, acc_type):
         )
     ident = np.asarray(ident).item()
     dt = np.dtype(acc_type.dtype)
+    if dt.kind == "b":
+        # -inf (maximum): False, inf (minimum): True; else as a bool (and: -1, True)
+        return bool(ident) if np.isfinite(ident) else ident > 0
     if dt.kind in "iu" and not np.isfinite(ident):
         info = np.iinfo(dt)
         ident = info.min if ident < 0 else info.max
@@ -182,8 +186,11 @@ def _(op, node, cg, inputs, outputs):
         )[0]
 
     out_shape = [x.shape[a] for a in range(nd) if not reduced[a]]
-    if isinstance(op.scalar_op, NO_EMPTY_REDUCTION):
-        # like numpy: maximum/minimum have no identity for empty reductions
+    if isinstance(op.scalar_op, NO_EMPTY_REDUCTION) and not (
+        isinstance(op, NonZeroDimsCAReduce) and op.initial
+    ):
+        # like numpy: maximum/minimum have no identity for empty reductions (unless
+        # given an `initial` one)
         empty = b.eq(size(b, [x.shape[a] for a in axes]), 0)
         some_out = b.ne(size(b, out_shape), 0)
         cg.check(

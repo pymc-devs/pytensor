@@ -163,7 +163,7 @@ def llvm_work(op, node) -> Work:
 
 
 def _register():
-    from pytensor.compile.ops import DeepCopyOp, ViewOp
+    from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
     from pytensor.scan.op import Scan
     from pytensor.tensor.basic import Nonzero
     from pytensor.tensor.blockwise import Blockwise
@@ -189,7 +189,10 @@ def _register():
             default=None,
         )
         elements = lengths(biggest) if biggest is not None else lengths(node.outputs[0])
-        return Work(scalar_cost(op.scalar_op) + 1, elements)
+        (elemwise,) = (
+            n.op for n in op.fgraph.apply_nodes if isinstance(n.op, Elemwise)
+        )
+        return Work(scalar_cost(elemwise.scalar_op) + 1, elements)
 
     @llvm_work.register(CAReduce)
     def _(op, node):
@@ -205,7 +208,7 @@ def _register():
 
     @llvm_work.register(DimShuffle)
     @llvm_work.register(Subtensor)
-    @llvm_work.register(ViewOp)
+    @llvm_work.register(TypeCastingOp)
     @llvm_work.register(SpecifyShape)
     @llvm_work.register(Shape)
     @llvm_work.register(Shape_i)

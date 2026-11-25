@@ -3,12 +3,13 @@
 use super::{descr, dtype_of, err};
 use crate::array::{OwnedArray, PtArrayRef};
 use crate::dtype::DType;
-use crate::function::{ArgType, Destination, Function as RFunction, Session};
+use crate::function::{ArgType, CallError, Destination, Function as RFunction, Session};
+use crate::runtime::{ERR_ASSERTION, ERR_CUSTOM, ERR_INDEX, ERR_LINALG, ERR_VALUE};
 use numpy::npyffi::{NPY_ARRAY_WRITEABLE, NpyTypes, PY_ARRAY_API, npy_intp};
 use numpy::{PyArrayDescr, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
-use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyAssertionError, PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyCapsule, PyList, PyTuple};
+use pyo3::types::{PyCapsule, PyList, PyTuple, PyType};
 use std::sync::Arc;
 
 /// A numpy array of `array` (not copied: the numpy array holds its buffer).
@@ -45,20 +46,14 @@ fn wrap_output<'py>(py: Python<'py>, array: OwnedArray) -> PyResult<Bound<'py, P
     }
 }
 
-fn runtime_error(msg: String) -> PyErr {
-    if msg.contains("out of bounds") {
-        PyIndexError::new_err(msg)
-    } else {
-        PyRuntimeError::new_err(msg)
-    }
-}
-
 /// A compiled function: the generated kernel of a graph (`driver.py`), callable with
 /// arrays, and from C (`c_function`).
 #[pyclass(module = "pytensor_llvm.runtime", frozen)]
 pub struct Function {
     f: Arc<RFunction>,
     keepalive: Vec<Py<PyAny>>,
+    /// the program's own exception classes: those of the codes from `ERR_CUSTOM` on
+    exceptions: Vec<Py<PyType>>,
     /// the session of Python calls: one per function (one random state); concurrent
     /// calls from several threads take turns
     session: std::sync::Mutex<Option<Session>>,
@@ -71,7 +66,8 @@ impl Function {
     /// `outputs`: `(dtype, shape, provided)` per graph output (provided: written into
     /// memory the caller provides, else returned in a buffer). `keepalive` is kept as
     /// long as the function: what `address` and `config` belong to. `uses_pool`: may
-    /// the function run work on the runtime's thread pool?
+    /// the function run work on the runtime's thread pool? `exceptions`: the program's
+    /// own exception classes, those of the error codes from `ERR_CUSTOM` on.
     #[new]
     fn new(
         address: usize,
@@ -80,6 +76,7 @@ impl Function {
         outputs: Vec<(Bound<'_, PyArrayDescr>, Vec<Option<u64>>, bool)>,
         keepalive: Vec<Py<PyAny>>,
         uses_pool: bool,
+        exceptions: Vec<Py<PyType>>,
     ) -> PyResult<Self> {
         let mut in_types = vec![];
         let mut contiguous = vec![];
@@ -111,6 +108,7 @@ impl Function {
         Ok(Function {
             f: Arc::new(f),
             keepalive,
+            exceptions,
             session: std::sync::Mutex::new(None),
         })
     }
@@ -176,7 +174,7 @@ impl Function {
                 headers.extend(arr.strides().iter().map(|&s| s as i64));
                 keep.push(a);
             }
-            let run = move |session: &mut Session| -> Result<Vec<OwnedArray>, String> {
+            let run = move |session: &mut Session| -> Result<Vec<OwnedArray>, CallError> {
                 let ins = parts.iter().enumerate().map(|(k, &(data, start, ndim))| {
                     let (shape, strides) = headers[start..start + 2 * ndim].split_at(ndim);
                     // SAFETY: the memory of a numpy array of the input's dtype
@@ -193,7 +191,8 @@ impl Function {
             };
             // without the GIL: other Python threads run meanwhile, and what the call
             // runs on other threads may need it (numba kernels in object mode)
-            py.detach(move || run(session)).map_err(runtime_error)
+            py.detach(move || run(session))
+                .map_err(|e| self.call_error(py, e))
         })();
         drop(keep);
         drop(guard);
@@ -238,6 +237,31 @@ impl Function {
 }
 
 impl Function {
+    /// The exception of a failed call, for its error code (RuntimeError for a code
+    /// that is neither a fixed kind nor one of the program's).
+    fn call_error(&self, py: Python<'_>, e: CallError) -> PyErr {
+        let custom = usize::try_from(e.code - ERR_CUSTOM)
+            .ok()
+            .and_then(|k| self.exceptions.get(k));
+        match e.code {
+            ERR_VALUE => PyValueError::new_err(e.message),
+            ERR_INDEX => PyIndexError::new_err(e.message),
+            ERR_ASSERTION => PyAssertionError::new_err(e.message),
+            ERR_LINALG => match py
+                .import("numpy.linalg")
+                .and_then(|m| m.getattr("LinAlgError"))
+                .and_then(|c| Ok(c.cast_into::<PyType>()?))
+            {
+                Ok(class) => PyErr::from_type(class, e.message),
+                Err(err) => err,
+            },
+            _ => match custom {
+                Some(class) => PyErr::from_type(class.bind(py).clone(), e.message),
+                None => PyRuntimeError::new_err(e.message),
+            },
+        }
+    }
+
     /// The session, waiting without the GIL if another thread has it.
     fn lock_session(&self, py: Python<'_>) -> std::sync::MutexGuard<'_, Option<Session>> {
         loop {

@@ -42,6 +42,7 @@ from pytensor.link.llvm.codegen.plan import PlannedGraph, ValueId
 from pytensor.link.llvm.codegen.signature import Output, Passing
 from pytensor.link.llvm.codegen.types import TensorRepr, is_absent, repr_of
 from pytensor.link.llvm.planner import Planner
+from pytensor.scalar.basic import ScalarType
 
 
 if TYPE_CHECKING:
@@ -303,6 +304,7 @@ class Program:
             ],
             [unit.compiled, unit.links.keepalive],
             uses_pool,
+            unit.exceptions.classes,  # (complete: everything is generated)
         )
         self._dump = _dump(
             types, node_function, steps, in_ids, contiguous, out_ids, modes
@@ -461,9 +463,10 @@ def build_program(fgraph, options: Options | None = None):
 def compile_program(fgraph, options: Options | None = None):
     """Plan and compile `fgraph`; returns (program, callable, stats). The callable is
     the program's function, or, when the graph has random generator inputs or outputs
-    (values without data, see `is_absent`), a wrapper that leaves them out of the call
-    and returns each generator output as the generator it came from (draws come from
-    the program's own random state)."""
+    (values without data, see `is_absent`) or scalar outputs, a wrapper that leaves the
+    generators out of the call and returns each generator output as the generator it
+    came from (draws come from the program's own random state), and each scalar output
+    as a numpy scalar; also, for a graph without outputs, a wrapper returning None."""
     opts = options or Options()
     stats = Stats()
     planner = Planner(opts, stats)
@@ -479,8 +482,13 @@ def compile_program(fgraph, options: Options | None = None):
     ]
     prog = _build(planner, planned, ins, contiguous, outs)
     fn = prog.function
-    if ins == list(range(len(fgraph.inputs))) and outs == list(
-        range(len(fgraph.outputs))
+    # a scalar output comes back as the 0-d array it leaves in
+    scalars = {pos for pos in outs if isinstance(fgraph.outputs[pos].type, ScalarType)}
+    if (
+        not scalars
+        and fgraph.outputs
+        and ins == list(range(len(fgraph.inputs)))
+        and outs == list(range(len(fgraph.outputs)))
     ):
         return prog, fn, stats
     sources = {
@@ -493,10 +501,11 @@ def compile_program(fgraph, options: Options | None = None):
         res = fn(*[args[k] for k in ins])
         full = [None] * len(fgraph.outputs)
         for k, result in zip(outs, res, strict=True):
-            full[k] = result
+            full[k] = result[()] if k in scalars else result
         for pos, src in sources.items():
             full[pos] = None if src is None else args[src]
-        return full
+        # (a function without outputs returns None, as the JIT linker expects)
+        return full or None
 
     return prog, call, stats
 
@@ -513,7 +522,7 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
     out_ids = [planned.out_ids[pos] for pos in outs]
     modes = _output_modes(steps, out_ids, types)
     t0 = time.perf_counter()
-    unit = KernelModule.new("program", opts.codegen, planner.graph)
+    unit = KernelModule.new("program", opts.codegen, planner.graph, planner.exceptions)
     profile = np.zeros(PROFILE_ITEMS + len(steps), dtype=np.uint64)
     # (returned outputs are handed over in any layout)
     outputs = []

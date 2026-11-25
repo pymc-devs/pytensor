@@ -8,7 +8,7 @@ see codegen/interface.py). Importing this package registers them all.
 * `advanced`: gathers and scatters with integer index arrays;
 * `basic`: Shape, Shape_i, MakeVector, Alloc, AllocEmpty, ARange, Reshape, Join,
   CheckAndRaise;
-* `shape`: views (DimShuffle, ViewOp, SpecifyShape) and DeepCopyOp;
+* `shape`: views (DimShuffle, type casts like ViewOp, SpecifyShape) and DeepCopyOp;
 * `extra`: CumOp, ExtractDiag, Split;
 * `random`: random variables (draws from the call context's random state);
 * `scan`: Scan as a generated loop;

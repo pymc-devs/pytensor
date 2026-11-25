@@ -554,7 +554,7 @@ def emit_scan(op, node, cg, inputs, outputs):
         counters.add(b, nit.row_key(), nit.stored_rows, 0)
     # carried through the loop: (the steps taken, for a while-loop), the rows
     n_counts = 1 if info.as_while else 0
-    cond_type = element_type(fgraph.outputs[-1].type)
+    cond_type = element_type(fgraph.outputs[-1].type) if info.as_while else None
 
     def step(i, *carried):
         rows = carried[n_counts:]

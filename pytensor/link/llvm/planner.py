@@ -45,6 +45,7 @@ from pytensor.link.llvm.analysis.layout import (
     shape_of,
 )
 from pytensor.link.llvm.codegen.call import Kernel
+from pytensor.link.llvm.codegen.errors import ExceptionTable
 from pytensor.link.llvm.codegen.implementation import (
     GENERATED,
     Implementation,
@@ -82,6 +83,7 @@ from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
 from pytensor.tensor.basic import TensorFromScalar
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.rewriting.units import unboxed_output
 from pytensor.tensor.type import TensorType
 
 
@@ -238,6 +240,8 @@ class Planner:
         #: modules generated for steps of the program, to link with the program's
         #: function (`kernel_module.link`)
         self.modules: list[KernelModule] = []
+        #: the exception classes of the program's error codes (every module's)
+        self.exceptions = ExceptionTable()
         #: (inputs, outputs, layouts) -> PlannedGraph (`graph`)
         self._graphs: dict[tuple, PlannedGraph] = {}
         #: the memory views the DestroyHandler doesn't see may lie in (never
@@ -254,7 +258,8 @@ class Planner:
 
         The layouts of the graph's variables are what its `LayoutFeature` says. A scalar
         input arrives as a 0-d array (scalars don't cross the kernel ABI): its value id
-        in `PlannedGraph.in_ids` is that array's."""
+        in `PlannedGraph.in_ids` is that array's. A scalar output (`ScalarFromTensor`
+        of a 0-d array, from the units rewrite) leaves as that array."""
         values = self.values
         layout_feature(fgraph).set_input_layout(self.opts.input_layout)
         scope: dict = {}
@@ -271,9 +276,12 @@ class Planner:
                 k = scope[v] = values.new(v.type)
             in_ids.append(k)
         nodes = []
+        unboxed = {}  # scalar output -> the 0-d array returned for it
         for node in fgraph.toposort():
             if isinstance(node.op, TensorFromScalar) and node.inputs[0] in boxed:
                 scope[node.outputs[0]] = boxed[node.inputs[0]]
+            elif unboxed_output(fgraph, node.outputs[0]):
+                unboxed[node.outputs[0]] = node.inputs[0]
             else:
                 nodes.append(node)
         # (the order of a graph with a DestroyHandler respects what its ops destroy)
@@ -282,7 +290,7 @@ class Planner:
         if self.allow_inplace:
             self.hidden = self.views.undeclared_view_roots(fgraph)
         flat_nodes = flatten(values, nodes, scope, of_the_graph=True)
-        out_ids = [values.of(var, scope) for var in fgraph.outputs]
+        out_ids = [values.of(unboxed.get(var, var), scope) for var in fgraph.outputs]
         layouts: dict = {k: Layout.c(0) for k in boxed.values()}
         for v, k in scope.items():
             layout = fgraph.llvm_layout(v)
@@ -486,7 +494,10 @@ class Planner:
         (`_writable_inputs`)."""
         node = flat.node
         unit = KernelModule.new(
-            f"node_{type(node.op).__name__}", self.opts.codegen, self.graph
+            f"node_{type(node.op).__name__}",
+            self.opts.codegen,
+            self.graph,
+            self.exceptions,
         )
         signature = node_signature(node, in_layouts, folded=folded, writable=writable)
         function = node_function(unit, "node", node, GENERATED, signature)

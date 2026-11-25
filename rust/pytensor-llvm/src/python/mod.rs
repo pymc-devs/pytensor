@@ -40,6 +40,15 @@ pub(crate) fn descr<'py>(py: Python<'py>, dt: DType) -> Bound<'py, PyArrayDescr>
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    use crate::runtime::{
+        ERR_ASSERTION, ERR_CUSTOM, ERR_INDEX, ERR_LINALG, ERR_RUNTIME, ERR_VALUE,
+    };
+    m.add("ERR_RUNTIME", ERR_RUNTIME)?;
+    m.add("ERR_VALUE", ERR_VALUE)?;
+    m.add("ERR_INDEX", ERR_INDEX)?;
+    m.add("ERR_LINALG", ERR_LINALG)?;
+    m.add("ERR_ASSERTION", ERR_ASSERTION)?;
+    m.add("ERR_CUSTOM", ERR_CUSTOM)?;
     m.add_class::<OutputMode>()?;
     m.add_class::<RustKernel>()?;
     m.add_class::<Dot>()?;

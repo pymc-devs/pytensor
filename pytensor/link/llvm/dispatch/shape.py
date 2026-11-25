@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytensor.scalar as ps
-from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.link.llvm.analysis.layout import dimshuffle_layout, same_layout
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
@@ -19,10 +19,12 @@ def _(op, node, input_layouts):
     return [dimshuffle_layout(op, node, input_layouts[0])]
 
 
-@llvm_layout.register(ViewOp)
+@llvm_layout.register(TypeCastingOp)
 @llvm_layout.register(SpecifyShape)
 def _(op, node, input_layouts):
-    return [same_layout(node, input_layouts[0])]
+    x = input_layouts[0]
+    # (no layout: a cast of a value without data, like the xtensor rng casts)
+    return [None if x is None else same_layout(node, x)]
 
 
 @llvm_emit.register(DimShuffle)
@@ -47,9 +49,10 @@ def _(op, node, cg, inputs, outputs):
     outputs[0].set_view(source.view(source.data, shape, strides))
 
 
-@llvm_emit.register(ViewOp)
+@llvm_emit.register(TypeCastingOp)
 def _(op, node, cg, inputs, outputs):
-    outputs[0].set_view(inputs[0])
+    if outputs[0] is not None:
+        outputs[0].set_view(inputs[0])
 
 
 @llvm_emit.register(SpecifyShape)
@@ -65,6 +68,7 @@ def _(op, node, cg, inputs, outputs):
         cg.check(
             b.eq(source.shape[axis], expected),
             f"SpecifyShape: axis {axis} has the wrong length",
+            AssertionError,  # as `SpecifyShape.perform`
         )
     # The output's type may know lengths the input's doesn't.
     shape = [

@@ -9,7 +9,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.compile.mode import get_mode
-from pytensor.raise_op import Assert
+from pytensor.raise_op import Assert, CheckAndRaise
 from pytensor.tensor.basic import ExtractDiag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.extra_ops import CumOp
@@ -217,14 +217,21 @@ def test_join_and_reshape_errors():
         g(np.ones((2, 3)))
 
 
-def test_assert():
-    from pytensor.raise_op import Assert
+class SmallError(ValueError):
+    pass
 
+
+def test_assert_raises_its_exception_type():
+    # AssertionError is a fixed kind; SmallError one of the program's own classes (a
+    # ValueError, which must not be raised as such)
     x = pt.vector("x")
-    out = Assert("x must be positive")(x, pt.all(x > 0)) * 2
-    f = compare([x], out, [np.ones(3)])
-    with pytest.raises(Exception, match="x must be positive"):
+    positive = Assert("x must be positive")(x, pt.all(x > 0))
+    small = CheckAndRaise(SmallError, "x must be small")(x, pt.all(x < 10))
+    f = compare([x], [positive * 2, small * 2], [np.ones(3)])
+    with pytest.raises(AssertionError, match="x must be positive"):
         f(-np.ones(3))
+    with pytest.raises(SmallError, match="x must be small"):
+        f(np.full(3, 20.0))
 
 
 def test_constants_keep_their_memory_order():
@@ -627,7 +634,7 @@ def test_dimshuffle_checks_dropped_axes(unit):
     if unit:
         out = OpFromGraph([x], [out * 2], execution=Execution.COMPILED)(x)
     f = compare([x], out, [rng.random((1, 3))])
-    with pytest.raises(RuntimeError, match="cannot drop axis 0"):
+    with pytest.raises(ValueError, match="cannot drop axis 0"):
         f(np.ones((2, 3)))
 
 
@@ -635,5 +642,5 @@ def test_specify_shape_of_length_one():
     # the output's type knows a length (1: always packed) its input's doesn't
     x = pt.vector("x")
     f = compare([x], pt.specify_shape(x, 1) * 2, [rng.random(1)])
-    with pytest.raises(RuntimeError, match="wrong length"):
+    with pytest.raises(AssertionError, match="wrong length"):
         f(np.ones(2))

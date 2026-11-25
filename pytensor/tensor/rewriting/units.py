@@ -10,7 +10,8 @@ Groups are convex: no path leaves a group and comes back into it.
 ScalarType values only exist inside compiled units (they don't cross the backend's
 kernel ABI): nodes connected by scalars are always one unit, with whatever lies on a
 path between them. A scalar argument of the function enters as ``TensorFromScalar`` of
-it, which the backend passes as the 0-d array the argument arrives in.
+it, which the backend passes as the 0-d array the argument arrives in; a scalar output
+leaves as ``ScalarFromTensor`` of a 0-d array, which the backend returns.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from pytensor.compile import optdb
 from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant
+from pytensor.graph.fg import Output
 from pytensor.graph.rewriting.basic import GraphRewriter
 from pytensor.graph.traversal import toposort_with_orderings
 from pytensor.link.llvm.analysis.layout import AttachLayoutFeature
@@ -26,6 +28,7 @@ from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.basic import (
     Alloc,
     Join,
+    ScalarFromTensor,
     Split,
     TensorFromScalar,
     scalar_from_tensor,
@@ -77,6 +80,14 @@ def _boxed_argument(node):
     return isinstance(node.op, TensorFromScalar) and node.inputs[0].owner is None
 
 
+def unboxed_output(fgraph, v):
+    """Is `v` a `ScalarFromTensor` only the function's outputs read? The planner
+    returns its 0-d array instead (see `GroupIntoUnits.box_scalar_outputs`)."""
+    return isinstance(v.owner_op, ScalarFromTensor) and all(
+        isinstance(c.op, Output) for c, _ in fgraph.clients[v]
+    )
+
+
 def _unit_views(fgraph, group, inputs, outs):
     """The `view_map` of a unit of the nodes `group`: the outputs that may be views of
     an input, from the `view_map`s of its nodes. With it the destroy handler keeps
@@ -112,8 +123,19 @@ def _unit_views(fgraph, group, inputs, outs):
     return view_map
 
 
-def _has_scalars(group):
-    return any(_scalar(i) for n in group if not _boxed_argument(n) for i in n.inputs)
+def _touches_scalars(fgraph, node):
+    """Does `node` read or make ScalarType values (which only exist inside units)?
+    Not the boxing of a scalar argument, nor the unboxing of a scalar output."""
+    if _boxed_argument(node):
+        return False
+    return any(_scalar(i) for i in node.inputs) or any(
+        isinstance(o.type, ScalarType) and not unboxed_output(fgraph, o)
+        for o in node.outputs
+    )
+
+
+def _has_scalars(fgraph, group):
+    return any(_touches_scalars(fgraph, n) for n in group)
 
 
 class GroupIntoUnits(GraphRewriter):
@@ -231,9 +253,7 @@ class GroupIntoUnits(GraphRewriter):
         in_group = set()  # items in the current group
         tainted = set()  # items that depend on the current group through other items
         for it in ordered:
-            cluster = len(it) > 1 or (
-                any(_scalar(i) for i in it[0].inputs) and not _boxed_argument(it[0])
-            )
+            cluster = len(it) > 1 or _touches_scalars(fgraph, it[0])
             if cluster or self.eligible(it[0]):
                 if deps[it] & tainted:
                     # would make the group non-convex: start a new one
@@ -246,10 +266,11 @@ class GroupIntoUnits(GraphRewriter):
         groups.append(current)
 
         # a group with scalars is a unit even on its own
-        return [g for g in groups if len(g) > 1 or _has_scalars(g)]
+        return [g for g in groups if len(g) > 1 or _has_scalars(fgraph, g)]
 
     def apply(self, fgraph):
         self.box_scalar_arguments(fgraph)
+        self.box_scalar_outputs(fgraph)
         clients = fgraph.clients
         for group in self.groups(fgraph):
             members = set(group)
@@ -274,7 +295,7 @@ class GroupIntoUnits(GraphRewriter):
                 continue
             view_map = _unit_views(fgraph, group, inputs, outs)
             if view_map is None:
-                if _has_scalars(group):
+                if _has_scalars(fgraph, group):
                     raise NotImplementedError(
                         "LLVM backend: a unit output may view several inputs that "
                         "are overwritten"
@@ -304,10 +325,24 @@ class GroupIntoUnits(GraphRewriter):
             box = tensor_from_scalar(s)
             back = scalar_from_tensor(box)
             for c, k in uses:
-                if c != "output" and isinstance(c.op, TensorFromScalar):
+                if isinstance(c.op, TensorFromScalar):
                     fgraph.replace(c.outputs[0], box, reason="llvm_units")
                 else:
                     fgraph.change_node_input(c, k, back, reason="llvm_units")
+
+    @staticmethod
+    def box_scalar_outputs(fgraph):
+        """Scalar outputs of the function leave as `ScalarFromTensor` of a 0-d array:
+        the `TensorFromScalar` joins the unit making the scalar, and the planner
+        returns the array."""
+        for i, o in enumerate(fgraph.outputs):
+            if isinstance(o.type, ScalarType) and not unboxed_output(fgraph, o):
+                fgraph.change_node_input(
+                    fgraph.get_output_client(i)[0],
+                    0,
+                    scalar_from_tensor(tensor_from_scalar(o)),
+                    reason="llvm_units",
+                )
 
 
 # opt-in by name (the LLVM linker requires them)

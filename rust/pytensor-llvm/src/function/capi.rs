@@ -246,7 +246,9 @@ fn run(s: &mut PtSession, inputs: *const PtArray, outputs: *mut PtArray) -> Resu
             .map(Destination::Into)
             .map_err(|e| format!("provided output {o}: {e}"))
     });
-    let results = prog.call(&mut s.session, ins, outs)?;
+    let results = prog
+        .call(&mut s.session, ins, outs)
+        .map_err(|e| e.message)?;
     // outputs we hand over, taken back if a later one fails
     let mut taken: Vec<usize> = vec![];
     let mut r = Ok(());

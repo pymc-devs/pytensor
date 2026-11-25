@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from pytensor.graph.basic import Variable
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.call import LinkTable
+from pytensor.link.llvm.codegen.errors import ExceptionTable
 from pytensor.link.llvm.codegen.types import ir
 
 
@@ -64,6 +65,9 @@ class KernelModule:
     #: may its code run work on the runtime's thread pool (a parallel loop, a kernel
     #: that does)?
     uses_pool: bool = False
+    #: the exception classes of its error codes beyond the fixed kinds: one table for
+    #: every module of a program (`Planner.exceptions`)
+    exceptions: ExceptionTable = field(default_factory=ExceptionTable)
 
     @classmethod
     def new(
@@ -71,13 +75,21 @@ class KernelModule:
         name: str,
         options: CodegenOptions | None = None,
         plan_graph: PlanGraph | None = None,
+        exceptions: ExceptionTable | None = None,
     ) -> KernelModule:
-        """A new, empty module named `name`."""
+        """A new, empty module named `name`; its error codes in `exceptions` (default:
+        a table of its own)."""
         options = CodegenOptions() if options is None else options
         module = ir.Module(
             name, fastmath=options.fastmath, debug_info=options.debug_info
         )
-        return cls(module, options, plan_graph, description=name)
+        return cls(
+            module,
+            options,
+            plan_graph,
+            description=name,
+            exceptions=ExceptionTable() if exceptions is None else exceptions,
+        )
 
     @property
     def address(self) -> int:

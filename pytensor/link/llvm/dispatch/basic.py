@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytensor.scalar as ps
 from pytensor.link.llvm.analysis.layout import Layout, same_layout
 from pytensor.link.llvm.codegen.array import Array, c_strides, size
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import ScalarOutput, llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.codegen.types import element_type, ir
 from pytensor.raise_op import CheckAndRaise
@@ -264,5 +264,8 @@ def _(op, node, cg, inputs, outputs):
         value = _scalar(b, condition)
         scalar_type = element_type(var.type)
         ok = value if scalar_type == ps.bool else cast(b, value, scalar_type, ps.bool)
-        cg.check(ok, op.msg or "Assertion failed")
-    outputs[0].set_view(inputs[0])
+        cg.check(ok, op.msg or "Assertion failed", op.exc_type)
+    if isinstance(outputs[0], ScalarOutput):
+        outputs[0].set(inputs[0])
+    else:
+        outputs[0].set_view(inputs[0])
