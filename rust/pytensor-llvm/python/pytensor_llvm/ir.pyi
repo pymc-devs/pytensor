@@ -1,5 +1,6 @@
 """Types of `pytensor_llvm.ir`, the IR builder (generated from the extension's signatures)."""
 
+import builtins
 from collections.abc import Callable, Sequence
 from enum import Enum
 from typing import Any
@@ -110,7 +111,7 @@ class Type:
     @staticmethod
     def int(bits: int) -> Type: ...
     @staticmethod
-    def array(elem: Type, n: int) -> Type: ...
+    def array(elem: Type, n: builtins.int) -> Type: ...
     @staticmethod
     def struct_(fields: Sequence[Type]) -> Type: ...
 
@@ -350,7 +351,7 @@ class Builder:
         Chunks must not write memory another chunk reads or writes. Captured values must
         be scalars or pointers.
         """
-    def ret(self, value: Operand = None) -> None:
+    def ret(self, value: Operand | None = None) -> None:
         """Return from the function. Ends the current block."""
     def rng(self, which: Rng, ctx: Value, args: Sequence[Value] = ...) -> Value | None:
         """Draw from the call context's random state: `b.rng(ir.Rng.Normal, ctx)`,

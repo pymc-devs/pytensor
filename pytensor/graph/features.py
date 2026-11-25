@@ -11,7 +11,7 @@ import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Variable
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.traversal import toposort
 from pytensor.graph.utils import InconsistencyError
 
@@ -1000,12 +1000,13 @@ class ViewFeature(Feature):
         "undeclared_view_roots",
     )
 
+    parents_of_node: dict[Apply, list[tuple[Variable, ...]]]
+    #: var -> (sources, roots)
     closure: dict[Variable, tuple[frozenset, frozenset]]
 
     def __init__(self):
-        self.parents_of_node: dict = {}
-        #: var -> (sources, roots)
-        self.closure: dict = {}
+        self.parents_of_node = {}
+        self.closure = {}
 
     def clone(self):
         return type(self)()
@@ -1036,7 +1037,7 @@ class ViewFeature(Feature):
                 todo.extend(client.outputs)
 
     def view_parents(self, fgraph, var) -> tuple[Variable, ...]:
-        node = var.owner
+        node: Apply | None = var.owner
         if node is None:
             return ()
         parents = self.parents_of_node.get(node)
@@ -1086,7 +1087,9 @@ class ViewFeature(Feature):
         return closure[var]
 
 
-_frozen_view_features: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_frozen_view_features: weakref.WeakKeyDictionary[Any, ViewFeature] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def view_feature(fgraph) -> ViewFeature:
@@ -1095,7 +1098,7 @@ def view_feature(fgraph) -> ViewFeature:
     graphs share theirs."""
     methods = getattr(fgraph, "_feature_methods", None)
     if methods is not None:
-        feature = methods.get("view_roots")
+        feature: ViewFeature | None = methods.get("view_roots")
         return feature if feature is not None else ViewFeature()
     feature = _frozen_view_features.get(fgraph)
     if feature is None:

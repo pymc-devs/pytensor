@@ -102,13 +102,12 @@ impl Function {
         // SAFETY: what Python promises: `address` and `config` are those of a compiled
         // driver for these types (`driver.py`), and `keepalive` holds what they belong
         // to.
-        let f =
-            unsafe {
-                RFunction::new(
-                    address, config, in_types, contiguous, out_types, provided, uses_pool,
-                )
-            }
-                .map_err(PyValueError::new_err)?;
+        let f = unsafe {
+            RFunction::new(
+                address, config, in_types, contiguous, out_types, provided, uses_pool,
+            )
+        }
+        .map_err(PyValueError::new_err)?;
         Ok(Function {
             f: Arc::new(f),
             keepalive,

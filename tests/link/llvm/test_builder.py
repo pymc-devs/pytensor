@@ -205,13 +205,7 @@ def test_stubs_list_the_builders_methods():
 
     import pytensor_llvm
 
-    stub = (
-        pathlib.Path(pytensor_llvm.__file__).parent.parent
-        / "pytensor_llvm-stubs"
-        / "ir.pyi"
-    )
-    if not stub.exists():
-        pytest.skip("pytensor_llvm is installed without its stubs")
+    stub = pathlib.Path(pytensor_llvm.__file__).parent / "ir.pyi"
     classes = {
         n.name: n
         for n in ast.parse(stub.read_text()).body

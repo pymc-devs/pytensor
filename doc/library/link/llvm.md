@@ -26,7 +26,7 @@ rewrite groups small nodes into units.
 
 * **graph, node, variable**: PyTensor's.
 * **planner** (`planner.py`): decides how every node of a graph runs. It names values by
-  **value ids** (vids), flattens the graph into **flat nodes** (`FlatNode`; among them
+  **value ids** (`ValueId`), flattens the graph into **flat nodes** (`FlatNode`; among them
   **units**: compiled OpFromGraphs, several nodes generated as one kernel), and turns
   each into a **step** (`Step`: the node, its **implementation** and the signature that
   follows from it). The result is a **planned graph** (`PlannedGraph`, in
@@ -602,8 +602,8 @@ A small LLVM wrapper (`rust/pytensor-llvm/src/ir`) on top of `llvm-sys`:
 * Things that need care are Rust methods: libm calls with vector variants,
   intrinsics, runtime calls.
 * `Module.compile()` verifies, optimizes, generates machine code and adds it to the JIT.
-* The wheel ships type stubs (`pytensor_llvm-stubs`), so editors and type checkers know
-  the builder.
+* The package ships type stubs (`ir.pyi`, ... next to its `__init__.py`, with
+  `py.typed`), so editors and type checkers know the builder.
 
 On top of it, in Python (`codegen/`):
 

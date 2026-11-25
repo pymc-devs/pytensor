@@ -32,13 +32,19 @@ planner makes whatever runs a node give its outputs those layouts.
 from __future__ import annotations
 
 import enum
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.rewriting.basic import GraphRewriter
+
+
+if TYPE_CHECKING:
+    from pytensor.tensor.type import TensorType
 
 
 class StrideKind(enum.Enum):
@@ -154,7 +160,9 @@ class Layout:
         """Axes whose stride is passed at run time."""
         return tuple(a for a in range(self.ndim) if self.strides[a] is DYNAMIC)
 
-    def static_stride(self, a, shape, itemsize) -> int | None:
+    def static_stride(
+        self, a: int, shape: Sequence[int | None], itemsize: int
+    ) -> int | None:
         """Axis `a`'s stride if it is known statically."""
         s = self.strides[a]
         if isinstance(s, int):
@@ -165,9 +173,10 @@ class Layout:
         for b in self.packed_block(shape):
             if b == a:
                 return n
-            if shape[b] is None:
+            length = shape[b]
+            if length is None:
                 return None
-            n *= int(shape[b])
+            n *= int(length)
         return n  # length-1 axis
 
     def stride_values(self, b, itemsize: int, shape_vals, passed: dict):
@@ -235,7 +244,7 @@ class Layout:
             if x != y:
                 break
             common.append(x)
-        strides = []
+        strides: list[Stride] = []
         for a in range(self.ndim):
             if a in common or _is_one(shape[a]):
                 strides.append(PACKED)
@@ -311,10 +320,11 @@ def shape_of(var) -> tuple:
 
 
 def itemsize_of(var) -> int:
-    return np.dtype(var.type.dtype).itemsize
+    dtype: np.dtype = np.dtype(var.type.dtype)
+    return dtype.itemsize
 
 
-def demote(layout: Layout, axes, shape, itemsize) -> list:
+def demote(layout: Layout, axes, shape, itemsize) -> list[Stride]:
     """Strides with packed `axes` turned into their static value or DYNAMIC."""
     strides = list(layout.strides)
     for a in axes:
@@ -353,7 +363,7 @@ def same_layout(node, x: Layout) -> Layout:
 
 def dimshuffle_layout(op, node, x: Layout) -> Layout:
     out_of = {}  # input axis -> output axis
-    strides = []
+    strides: list[Stride] = []
     for j, entry in enumerate(op.new_order):
         if entry == "x":
             strides.append(PACKED)
@@ -383,7 +393,8 @@ def subtensor_layout(op, node, x: Layout) -> Layout:
     shape, isz = shape_of(xv), itemsize_of(xv)
     out_shape = shape_of(node.outputs[0])
     entries = unflatten_index_variables(node.inputs[1:], op.idx_list)
-    demoted, removed, stepped = set(), [], {}
+    demoted, removed = set(), []
+    stepped: dict[int, Stride] = {}
     for a, e in enumerate(entries):
         if not isinstance(e, slice):
             # the axis disappears: packed axes outside it now skip its length
@@ -401,8 +412,8 @@ def subtensor_layout(op, node, x: Layout) -> Layout:
             stepped[a] = DYNAMIC if step == "dynamic" or st is None else st * step
             demoted.update(outer_in_block(x, a, shape))
     strides = demote(x, demoted, shape, isz)
-    for a, st in stepped.items():
-        strides[a] = st
+    for a, stride in stepped.items():
+        strides[a] = stride
     keep = [a for a in range(x.ndim) if a not in removed]
     renumber = {a: k for k, a in enumerate(keep)}
     order = [renumber[a] for a in x.order if a in renumber]
@@ -450,7 +461,7 @@ def common_order(layouts, shape) -> list[int] | None:
 # ------------------------------------------------------------------ graph analysis
 
 
-def new_memory_layout(declared, t) -> Layout:
+def new_memory_layout(declared: Layout | None, t: TensorType) -> Layout:
     """`declared` if new memory can have it: packed (allocated in it), or implied by
     C-contiguous memory; else DYNAMIC. The layout of a value that may be new memory or
     not (an output of a compiled unit, an output that may overwrite an input)."""
@@ -538,9 +549,11 @@ class LayoutFeature(Feature):
 
     provides = ("llvm_layout",)
 
+    cache: dict[Variable, Layout | None]
+
     def __init__(self, input_layout="any"):
         self.input_layout = input_layout
-        self.cache: dict = {}
+        self.cache = {}
 
     def clone(self):
         return type(self)(self.input_layout)
@@ -604,7 +617,7 @@ class LayoutFeature(Feature):
 
 def layout_feature(fgraph) -> LayoutFeature:
     """The `LayoutFeature` of `fgraph`, attached if it has none."""
-    feature = fgraph._feature_methods.get("llvm_layout")
+    feature: LayoutFeature | None = fgraph._feature_methods.get("llvm_layout")
     if feature is None:
         feature = LayoutFeature()
         fgraph.attach_feature(feature)

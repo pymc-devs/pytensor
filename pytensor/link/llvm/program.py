@@ -38,7 +38,7 @@ from pytensor.link.llvm.codegen.kernel_module import (
     KernelModule,
     link,
 )
-from pytensor.link.llvm.codegen.plan import PlannedGraph
+from pytensor.link.llvm.codegen.plan import PlannedGraph, ValueId
 from pytensor.link.llvm.codegen.signature import Output, Passing
 from pytensor.link.llvm.codegen.types import TensorRepr, is_absent, repr_of
 from pytensor.link.llvm.planner import Planner
@@ -46,6 +46,7 @@ from pytensor.link.llvm.planner import Planner
 
 if TYPE_CHECKING:
     from pytensor_llvm.ir import CompiledModule
+    from pytensor_llvm.runtime import Function
 
 
 def _runtime():
@@ -251,6 +252,21 @@ class Program:
     """A planned and compiled program: its function, callable from Python
     (`function`, or the program itself) and from C (`c_function`)."""
 
+    #: what each step runs
+    descriptions: list[str]
+    #: the size in bytes of the arena, the scratch memory of the temporary values
+    arena_bytes: int
+    #: the profiling cells: on/off, calls, then nanoseconds per step (`PROFILE_*`)
+    profile_cells: np.ndarray
+    #: the address and config of the program's kernel
+    address: int
+    config: int
+    #: may it run work on the runtime's thread pool? (Calls then run on the pool.)
+    uses_pool: bool
+    #: the compiled function, callable from Python
+    function: Function
+    _dump: str
+
     def __init__(
         self,
         types,
@@ -268,7 +284,6 @@ class Program:
         self.arena_bytes = node_function.arena[1]
         self.profile_cells = profile
         self.address = unit.address
-        #: may it run work on the runtime's thread pool? (Calls then run on the pool.)
         self.uses_pool = uses_pool
         self.config = unit.config
 
@@ -328,7 +343,9 @@ class Program:
 
     @staticmethod
     def c_api_table() -> int:
-        return _runtime().c_api_table()
+        from pytensor_llvm import runtime
+
+        return runtime.c_api_table()
 
     # ------------------------------------------------------------ profiling
 
@@ -365,7 +382,7 @@ class Program:
 
 def _dump(types, node_function, steps, in_ids, contiguous, out_ids, modes) -> str:
     """`Program.dump`'s text."""
-    ids = {}  # vid -> its number in the dump
+    ids: dict[ValueId, int] = {}  # value id -> its number in the dump
     for k in [*in_ids, *node_function.constants]:
         ids.setdefault(k, len(ids))
     for step in steps:
@@ -374,7 +391,7 @@ def _dump(types, node_function, steps, in_ids, contiguous, out_ids, modes) -> st
     for k in out_ids:
         ids.setdefault(k, len(ids))
     offsets = node_function.arena[0]
-    produced = {}  # vid -> (step, its Output)
+    produced = {}  # value id -> (step, its Output)
     for step in steps:
         for k, output in zip(step.outputs, step.signature.outputs, strict=True):
             produced[k] = (step, output)
@@ -388,7 +405,7 @@ def _dump(types, node_function, steps, in_ids, contiguous, out_ids, modes) -> st
         f"steps, arena {node_function.arena[1]} bytes",
         "values:",
     ]
-    for k in sorted(ids, key=ids.get):
+    for k in ids:  # (in the order of their numbers)
         if is_absent(types[k]):
             continue
         if k in in_ids:

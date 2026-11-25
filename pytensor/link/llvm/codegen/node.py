@@ -42,6 +42,7 @@ from pytensor.link.llvm.codegen.types import (
 if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.call import LinkTable
     from pytensor.link.llvm.codegen.kernel_module import KernelModule
+    from pytensor.link.llvm.codegen.plan import ValueId
 
 
 @dataclass
@@ -50,15 +51,15 @@ class NodeFunction:
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
     links: LinkTable | None = None
-    #: of a graph's function: the arena ({vid: offset} of the temporary values in it,
-    #: its size in bytes)
-    arena: tuple[dict[int, int], int] = ({}, 0)
-    #: of a graph's function: the vids of all its temporary values (in the arena or
-    #: on the stack)
-    temporaries: frozenset[int] = frozenset()
+    #: of a graph's function: the arena ({value id: offset} of the temporary values in
+    #: it, its size in bytes)
+    arena: tuple[dict[ValueId, int], int] = ({}, 0)
+    #: of a graph's function: the value ids of all its temporary values (in the arena
+    #: or on the stack)
+    temporaries: frozenset[ValueId] = frozenset()
     #: of a graph's function: where its array constants are in the link table
-    #: ({vid: entry})
-    constants: dict[int, int] = field(default_factory=dict)
+    #: ({value id: entry})
+    constants: dict[ValueId, int] = field(default_factory=dict)
     #: of a node's function: the outputs it puts into scratch memory of the code around
     #: it (the rest of its new outputs are runtime buffers)
     in_scratch: frozenset[int] = frozenset()

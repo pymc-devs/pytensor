@@ -186,6 +186,8 @@ warn_unused_ignores = true
 warn_return_any = true
 warn_unreachable = true
 files = ["pytensor", "tests"]
+# the LLVM backend's extension: its package source, with its type stubs
+mypy_path = "rust/pytensor-llvm/python"
 
 [[tool.mypy.overrides]]
 # the LLVM backend's code generation is fully annotated: keep it that way
@@ -194,8 +196,8 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
 [tool.ty.environment]
-# the type stubs of the LLVM backend's extension (not in its editable install)
-extra-paths = ["rust/pytensor-llvm"]
+# the LLVM backend's extension: its package source, with its type stubs
+extra-paths = ["rust/pytensor-llvm/python"]
 
 [tool.cibuildwheel]
 build = "*"

@@ -269,7 +269,8 @@ def node_outputs(
             for k in destroyed
             if k in writable
             and k not in viewed
-            and input_layouts[k].implies(layout, shape, itemsize)
+            and (overwritten := input_layouts[k]) is not None
+            and overwritten.implies(layout, shape, itemsize)
         )
         if aliased or not representation.static or not declaration.writes_provided:
             passing = Passing.CALLEE_SLOT

@@ -42,7 +42,7 @@ def first_fit(intervals) -> tuple[dict, int]:
     inclusive) at 64-byte aligned offsets, reusing space that is free again. Returns
     ({key: offset}, total bytes)."""
     offsets, total = {}, 0
-    active = []  # (offset, size, stop)
+    active: list[tuple[int, int, int]] = []  # (offset, size, stop)
     for start, stop, nbytes, key in sorted(intervals, key=lambda x: (x[0], x[1])):
         size = max(64, -(-nbytes // 64) * 64)
         active = [a for a in active if a[2] >= start]
@@ -57,18 +57,19 @@ def first_fit(intervals) -> tuple[dict, int]:
     return offsets, total
 
 
-def temporary_lives(steps, vids, kept) -> dict:
-    """When each value in `vids` is needed, as {vid: (first, last)}: from the step that
-    produces it to the last step that needs it (`lifetimes`), positions in `steps`.
+def temporary_lives(steps, value_ids, kept) -> dict:
+    """When each value in `value_ids` is needed, as {value id: (first, last)}: from the
+    step that produces it to the last step that needs it (`lifetimes`), positions in
+    `steps`.
 
     `kept`: values still needed after the last step (the function's outputs)."""
     defined, end = lifetimes(steps, kept)
-    return {k: (defined[k], end[k]) for k in vids}
+    return {k: (defined[k], end[k]) for k in value_ids}
 
 
 def place_temporaries(steps, sizes: dict, kept) -> tuple[dict, int]:
-    """Arena offsets for the temporaries `sizes` ({vid: nbytes}) of the steps
+    """Arena offsets for the temporaries `sizes` ({value id: nbytes}) of the steps
     `steps`; `kept`: values needed after the last step (the function's outputs).
-    Returns ({vid: offset}, arena bytes)."""
+    Returns ({value id: offset}, arena bytes)."""
     lives = temporary_lives(steps, sizes, kept)
     return first_fit([(*lives[k], n, k) for k, n in sizes.items()])

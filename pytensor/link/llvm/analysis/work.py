@@ -24,13 +24,16 @@ class Work:
     #: cost of one element
     per_element: float
     #: the number of elements as a product of factors; None where only known at run time
-    elements: tuple = ()
+    elements: tuple[int | None, ...] = ()
 
     @property
     def n_elements(self) -> int | None:
-        if any(f is None for f in self.elements):
-            return None
-        return math.prod(self.elements)
+        n = 1
+        for f in self.elements:
+            if f is None:
+                return None
+            n *= f
+        return n
 
     @property
     def total(self) -> float | None:
@@ -52,10 +55,10 @@ def lengths(var) -> tuple:
 # ------------------------------------------------------------------ scalar operations
 
 #: cost of one call, by scalar op class
-SCALAR_COSTS = {}
+SCALAR_COSTS: dict[type, float] = {}
 
 
-def _set(cost, *classes):
+def _set(cost: float, *classes: type) -> None:
     for c in classes:
         SCALAR_COSTS[c] = cost
 

@@ -1,8 +1,15 @@
+from __future__ import annotations
+
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytensor
 from pytensor.link.basic import JITLinker
+
+
+if TYPE_CHECKING:
+    from pytensor.link.llvm.program import Program, Stats
 
 
 EXPERIMENTAL_WARNING = (
@@ -48,6 +55,10 @@ class LLVMLinker(JITLinker):
         "linalg_parallel",
         "debug_info",
     )
+
+    #: the program compiled last, and its statistics (None before compiling)
+    program: Program | None
+    stats: Stats | None
 
     def __init__(
         self,

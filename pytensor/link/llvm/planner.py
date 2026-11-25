@@ -6,9 +6,9 @@ generated code runs (a Scan's loop body, a Blockwise's core, a compiled unit), a
 are the layouts of all values. Code generation then follows these decisions and makes
 none of its own.
 
-* `Values`: the values of a graph being planned, named by value ids (vids), and the
-  data of its constants;
-* `flatten`: a graph as a list of `FlatNode`s over vids. OpFromGraphs are inlined,
+* `Values`: the values of a graph being planned, named by value ids (`ValueId`), and
+  the data of its constants;
+* `flatten`: a graph as a list of `FlatNode`s over value ids. OpFromGraphs are inlined,
   except compiled units outside generated code, which stay one node;
 * `Planner`: how each node runs, and what that means for its outputs (how they come
   to be, and their layouts). The result is a `PlannedGraph`: the graph's `Step`s, in
@@ -29,12 +29,13 @@ The program's graph (`Planner.program`) and graphs inside generated code
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from pytensor.compile.builders import Execution, OpFromGraph
-from pytensor.graph.basic import Apply, Constant
-from pytensor.graph.features import view_feature
+from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.features import ViewFeature, view_feature
 from pytensor.graph.traversal import io_toposort
 from pytensor.link.llvm.analysis.layout import (
     Layout,
@@ -56,7 +57,7 @@ from pytensor.link.llvm.codegen.interface import can_generate, has_emitter
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.kernel_module import KernelModule
 from pytensor.link.llvm.codegen.node import node_function
-from pytensor.link.llvm.codegen.plan import PlannedGraph, Step
+from pytensor.link.llvm.codegen.plan import PlannedGraph, Step, ValueId
 from pytensor.link.llvm.codegen.signature import (
     known_layouts,
     node_outputs,
@@ -84,18 +85,23 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import TensorType
 
 
+if TYPE_CHECKING:
+    from pytensor.graph.fg import FunctionGraph
+    from pytensor.graph.type import Type
+
+
 # ------------------------------------------------------------------ values
 
 
 @dataclass
 class FlatNode:
-    """A node of a flattened graph (`flatten`): the node, with the value ids (vids: the
+    """A node of a flattened graph (`flatten`): the node, with the value ids (the
     planner's names for values) of what it reads and writes. The same PyTensor node can
-    appear several times with different vids (inlined OpFromGraphs)."""
+    appear several times with different value ids (inlined OpFromGraphs)."""
 
     node: Apply
-    inputs: list[int]
-    outputs: list[int]
+    inputs: list[ValueId]
+    outputs: list[ValueId]
     #: a node of the graph being planned itself (not of an inlined inner graph): what
     #: its op may destroy was validated there (the graph's DestroyHandler)
     of_the_graph: bool = False
@@ -104,24 +110,30 @@ class FlatNode:
 class Values:
     """The values of a program: a type per value id, and the data of constants."""
 
+    #: value id -> PyTensor type
+    types: dict[ValueId, Type]
+    #: value id -> numpy data
+    consts: dict[ValueId, np.ndarray]
+    _next: int
+
     def __init__(self):
-        self.types = {}  # vid -> PyTensor type
-        self.consts = {}  # vid -> numpy data
+        self.types = {}
+        self.consts = {}
         self._next = 0
 
-    def new(self, t) -> int:
+    def new(self, t) -> ValueId:
         """A new value of type `t`."""
-        k = self._next
+        k = ValueId(self._next)
         self._next += 1
         self.types[k] = t
         return k
 
-    def of(self, var, scope) -> int:
+    def of(self, var: Variable, scope: dict[Variable, ValueId]) -> ValueId:
         """The value of `var`: what `scope` says, or a new value for a constant."""
         if var in scope:
             return scope[var]
         if is_absent(var.type):
-            # None inputs have no value; nothing ever reads this vid
+            # None inputs have no value; nothing ever reads this value
             k = self.new(var.type)
             scope[var] = k
             return k
@@ -137,14 +149,16 @@ class Values:
         return k in self.consts and self.consts[k].ndim == 0
 
     def constants_of(self, readers, extra=()) -> dict:
-        """{vid: (type, data)} of the constants `readers` (flat nodes or steps) read,
-        and of the vids `extra`."""
-        vids = [
+        """{value id: (type, data)} of the constants `readers` (flat nodes or steps)
+        read, and of the value ids `extra`."""
+        value_ids = [
             k
             for reader in readers
             for k in (reader.arguments if isinstance(reader, Step) else reader.inputs)
         ] + list(extra)
-        return {k: (self.types[k], self.consts[k]) for k in vids if k in self.consts}
+        return {
+            k: (self.types[k], self.consts[k]) for k in value_ids if k in self.consts
+        }
 
 
 # ------------------------------------------------------------------ flattening
@@ -213,6 +227,10 @@ class Planner:
     * inside generated code, generated code is preferred: it is inlined, while a kernel
       is a call."""
 
+    #: the program's graph (`program`), and what views of its values there may be
+    fgraph: FunctionGraph
+    views: ViewFeature
+
     def __init__(self, options, stats):
         self.opts = options
         self.stats = stats
@@ -222,11 +240,8 @@ class Planner:
         self.modules: list[KernelModule] = []
         #: (inputs, outputs, layouts) -> PlannedGraph (`graph`)
         self._graphs: dict[tuple, PlannedGraph] = {}
-        #: the program's graph (`program`), what views of its values there may be, and
         #: the memory views the DestroyHandler doesn't see may lie in (never
         #: overwritten in place)
-        self.fgraph = None
-        self.views = None
         self.hidden: frozenset = frozenset()
         #: may nodes of the program overwrite inputs? Only for a graph whose
         #: DestroyHandler has validated the order of its nodes
@@ -238,8 +253,8 @@ class Planner:
         """Decide how every node of the program's graph `fgraph` runs.
 
         The layouts of the graph's variables are what its `LayoutFeature` says. A scalar
-        input arrives as a 0-d array (scalars don't cross the kernel ABI): its vid in
-        `PlannedGraph.in_ids` is that array's."""
+        input arrives as a 0-d array (scalars don't cross the kernel ABI): its value id
+        in `PlannedGraph.in_ids` is that array's."""
         values = self.values
         layout_feature(fgraph).set_input_layout(self.opts.input_layout)
         scope: dict = {}
@@ -319,7 +334,7 @@ class Planner:
 
     def layout(self, k, layouts):
         """The layout of value `k` (None for values that aren't tensors): a constant's
-        own memory order, else what `layouts` (vid -> Layout) says."""
+        own memory order, else what `layouts` (value id -> Layout) says."""
         t = self.values.types[k]
         if not hasattr(t, "ndim") or is_absent(t):
             return None
@@ -327,14 +342,14 @@ class Planner:
             return Layout.of_const(self.values.consts[k])
         return layouts.get(k)
 
-    def _binding(self, node, vids, in_layouts, layouts) -> list:
-        """The layouts the values `vids` must have: the outputs of a flat node running
-        `node` with inputs in `in_layouts`. Those not in `layouts` yet are what
+    def _binding(self, node, value_ids, in_layouts, layouts) -> list:
+        """The layouts the values `value_ids` must have: the outputs of a flat node
+        running `node` with inputs in `in_layouts`. Those not in `layouts` yet are what
         `node_outputs` gives them, and are added to it."""
-        for k, output in zip(vids, node_outputs(node, in_layouts), strict=True):
+        for k, output in zip(value_ids, node_outputs(node, in_layouts), strict=True):
             if output.layout is not None:
                 layouts.setdefault(k, output.layout)
-        return [self.layout(k, layouts) for k in vids]
+        return [self.layout(k, layouts) for k in value_ids]
 
     # ------------------------------------------------------------ deciding, per node
 
@@ -645,7 +660,7 @@ def _layouts_note(reprs):
     )
 
 
-def _allocated_layout(op, var, layout) -> Layout:
+def _allocated_layout(op, var, layout: Layout) -> Layout:
     """The layout a kernel allocates `var` in to give it the layout `lay`: `lay` if it
     is packed, else C-contiguous (which must imply it)."""
     shape, size = shape_of(var), itemsize_of(var)

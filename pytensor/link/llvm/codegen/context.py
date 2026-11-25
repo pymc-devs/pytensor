@@ -176,9 +176,9 @@ class Codegen:
         self.stack_bytes += rounded
         return self.b.alloca(ir.Type.array(ir.i8, max(n, 1)))
 
-    def temporaries(
-        self, sizes: dict[int, int], lives: dict[int, tuple[int, int]]
-    ) -> tuple[dict[int, ir.Value], tuple[dict[int, int], int]]:
+    def temporaries[K](
+        self, sizes: dict[K, int], lives: dict[K, tuple[int, int]]
+    ) -> tuple[dict[K, ir.Value], tuple[dict[K, int], int]]:
         """Memory for several temporary values of a known size.
 
         * `sizes`: the size in bytes of each value ({key: bytes});
@@ -194,8 +194,8 @@ class Codegen:
         ({key: offset in the arena}, size of the arena in bytes)."""
         from pytensor.link.llvm.analysis.liveness import first_fit
 
-        memory: dict[int, ir.Value] = {}
-        shared: list[tuple[int, int, int, int]] = []
+        memory: dict[K, ir.Value] = {}
+        shared: list[tuple[int, int, int, K]] = []
         for key in sorted(sizes, key=lambda k: lives[k]):
             p = self._stack_memory(sizes[key])
             if p is None:
