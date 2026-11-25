@@ -28,6 +28,7 @@ from pytensor.link.llvm.codegen.array import Array, Slot
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
     ProvidedDestination,
+    ScalarDestination,
     SlotDestination,
 )
 from pytensor.link.llvm.codegen.interface import (
@@ -202,7 +203,12 @@ class GraphFunction:
                 continue  # produced directly in the output
             value = values[value_id]
             if not isinstance(value, Array):
-                out.set(value)
+                if isinstance(out, ScalarDestination):
+                    out.set(value)
+                else:
+                    # a ScalarType result into a 0-d array (a Blockwise core's, whose
+                    # op makes a ScalarType where the Blockwise makes a tensor)
+                    out.allocate([]).store(b, value)
             elif k in given:
                 given[k].copy_from(cg, value)
             else:

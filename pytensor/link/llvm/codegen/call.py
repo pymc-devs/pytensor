@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.context import Codegen
     from pytensor.link.llvm.codegen.destination import (
         OutputDestination,
+        ScalarDestination,
         SlotDestination,
     )
     from pytensor.link.llvm.codegen.kernel_module import KernelModule
@@ -149,7 +150,8 @@ def linked(cg: Codegen, index: int) -> ir.Value:
 
 class _Argument(NamedTuple):
     """One `PtArray` of a kernel call: what goes into its fields, and the slot to copy
-    an output back into (None for inputs and provided memory)."""
+    an output back into, or the ScalarType output to load it into (None for inputs and
+    provided memory)."""
 
     data: ir.Value
     shape: ir.Value
@@ -157,6 +159,7 @@ class _Argument(NamedTuple):
     ndim: int
     scalar_type: ScalarType
     slot_destination: SlotDestination | None = None
+    scalar_destination: ScalarDestination | None = None
 
 
 def call_kernel(
@@ -167,7 +170,9 @@ def call_kernel(
 ) -> None:
     """Call `kernel` (linked into the module's link table, `LinkTable.link_kernel`)
     with `inputs` ((Array, scalar value or None for absent ones, `ScalarType`) pairs) and
-    `outputs` (`ProvidedDestination`, `SlotDestination`, or None).
+    `outputs` (`ProvidedDestination`, `SlotDestination`, `ScalarDestination`, or None).
+    A ScalarType output is a 0-d array the kernel allocates (as numba kernels do): its
+    value is loaded into the destination, and the array given up.
 
     Allocated and view outputs land in their output slots, owner included, also when the
     call fails (the caller releases them); a failure returns its code (the kernel set
@@ -175,9 +180,10 @@ def call_kernel(
     from pytensor.link.llvm.codegen.array import Array, Slot
     from pytensor.link.llvm.codegen.destination import (
         ProvidedDestination,
+        ScalarDestination,
         SlotDestination,
     )
-    from pytensor.link.llvm.codegen.num import store
+    from pytensor.link.llvm.codegen.num import load, store
 
     b = cg.b
     ptarray = ptarray_type()
@@ -234,6 +240,17 @@ def call_kernel(
                     destination,
                 )
             )
+        elif isinstance(destination, ScalarDestination):
+            args_of.append(
+                _Argument(
+                    b.null(),
+                    storage([]),
+                    storage([]),
+                    0,
+                    destination.scalar_type,
+                    scalar_destination=destination,
+                )
+            )
         else:
             raise NotImplementedError(
                 f"{_name(kernel)}: a {type(destination).__name__} output"
@@ -241,7 +258,7 @@ def call_kernel(
 
     args = b.alloca(ir.Type.array(ptarray, max(len(args_of), 1)))
     ptrs: list[ir.Value] = []
-    for k, (data, shape, strides, nd, scalar_type, _) in enumerate(args_of):
+    for k, (data, shape, strides, nd, scalar_type, *_) in enumerate(args_of):
         p = b.gep_bytes(args, k * PTARRAY_SIZE)
         b.store(data, b.field_ptr(ptarray, p, PtArray.DATA))
         b.store(shape, b.field_ptr(ptarray, p, PtArray.SHAPE))
@@ -262,7 +279,16 @@ def call_kernel(
     assert rc is not None  # (it returns an i32)
     b.rt_scratch_release(cg.ctx, mark)
 
+    scalars = []  # (destination, data, owner) of the ScalarType outputs
     for p, argument in zip(ptrs, args_of, strict=True):
+        if argument.scalar_destination is not None:
+            scalars.append(
+                (
+                    argument.scalar_destination,
+                    b.load(ir.ptr, b.field_ptr(ptarray, p, PtArray.DATA)),
+                    b.load(ir.ptr, b.field_ptr(ptarray, p, PtArray.OWNER)),
+                )
+            )
         destination = argument.slot_destination
         if destination is None:
             continue
@@ -276,7 +302,12 @@ def call_kernel(
         )
         destination.done = True
     with b.if_(b.ne(rc, 0)):
+        for _, _, owner in scalars:
+            b.rt_decref(cg.ctx, owner)
         b.ret(rc)
+    for destination, data, owner in scalars:
+        destination.set(load(b, destination.scalar_type, data))
+        b.rt_decref(cg.ctx, owner)
 
 
 def _name(callee: Callee) -> str:

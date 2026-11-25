@@ -110,11 +110,15 @@ def test_shared_generator_updates_pass_through():
 def test_generator_as_explicit_input():
     rng = pt.random.type.random_generator_type("rng")
     next_rng, x = rb.uniform(0, 1, size=(4,), rng=rng).owner.outputs
-    f = pytensor.function([rng], [next_rng, x], mode=MODE)
+    # a constant generator comes back as a copy (`DeepCopyOp`)
+    const = rng.type.make_constant(np.random.default_rng(5))
+    f = pytensor.function([rng], [next_rng, x, const], mode=MODE)
     gen = np.random.default_rng(3)
-    out_rng, draws = f(gen)
+    out_rng, draws, out_const = f(gen)
     assert out_rng is gen
     assert draws.shape == (4,) and np.all((draws >= 0) & (draws < 1))
+    assert rng.type.values_eq(out_const, np.random.default_rng(5))
+    assert out_const is not const.data and out_const is not f(gen)[2]
 
 
 def test_unit_draws_from_the_callers_state():

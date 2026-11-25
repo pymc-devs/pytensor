@@ -10,10 +10,12 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.compile.mode import get_mode
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.tensor.blockwise import Blockwise
 
 
 pytensor_llvm = pytest.importorskip("pytensor_llvm")
@@ -54,14 +56,34 @@ def test_numba_ops_mixed_with_rust_kernels():
     np.testing.assert_allclose(f(vt, sv)[1], np.repeat(vt[0], sv).sum())
 
 
+class _Total(Op):
+    """The sum of a vector as a ScalarType (no LLVM implementation)."""
+
+    def make_node(self, x):
+        return Apply(self, [x], [ps.float64()])
+
+    def perform(self, node, inputs, outputs):
+        outputs[0][0] = np.float64(inputs[0].sum())
+
+
 def test_numba_scalar_inputs_and_outputs():
     x = pt.vector("x")
     k = pt.lscalar("k")
-    f = pytensor.function([x, k], [x[k], x[k:] * x[k]], mode=LLVM)
-    v = rng.normal(size=6)
-    a, b = f(v, 2)
+    m = pt.matrix("m")
+    outs = [
+        x[k],
+        x[k:] * x[k],
+        # a ScalarType output, inside a unit and as a Blockwise core's
+        pt.tensor_from_scalar(_Total()(x) * 2),
+        Blockwise(_Total(), signature="(n)->()")(m) * 2,
+    ]
+    f = pytensor.function([x, k, m], outs, mode=LLVM)
+    v, w = rng.normal(size=6), rng.normal(size=(2, 3))
+    a, b, total, totals = f(v, 2, w)
     assert a == pytest.approx(v[2])
     np.testing.assert_allclose(b, v[2:] * v[2])
+    assert total == pytest.approx(2 * v.sum())
+    np.testing.assert_allclose(totals, 2 * w.sum(axis=1))
 
 
 def test_numba_outputs_have_the_layout_of_their_value():

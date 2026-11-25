@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 import time
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from pytensor.graph.basic import Constant
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.graph import (
     PROFILE_CALLS,
@@ -465,7 +467,8 @@ def compile_program(fgraph, options: Options | None = None):
     the program's function, or, when the graph has random generator inputs or outputs
     (values without data, see `is_absent`) or scalar outputs, a wrapper that leaves the
     generators out of the call and returns each generator output as the generator it
-    came from (draws come from the program's own random state), and each scalar output
+    came from (a copy of a constant one; draws come from the program's own random
+    state), and each scalar output
     as a numpy scalar; also, for a graph without outputs, a wrapper returning None."""
     opts = options or Options()
     stats = Stats()
@@ -503,7 +506,8 @@ def compile_program(fgraph, options: Options | None = None):
         for k, result in zip(outs, res, strict=True):
             full[k] = result[()] if k in scalars else result
         for pos, src in sources.items():
-            full[pos] = None if src is None else args[src]
+            # (a constant generator: a copy each call, as `DeepCopyOp` makes)
+            full[pos] = args[src] if isinstance(src, int) else copy.deepcopy(src)
         # (a function without outputs returns None, as the JIT linker expects)
         return full or None
 
@@ -574,8 +578,9 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
 
 
 def _generator_source(fgraph, var):
-    """The position of the graph input a generator output passes on (through random
-    variables and copies), or None."""
+    """What a generator output passes on (through random variables and copies): the
+    position of the graph input it comes from (an int), else the generator of the
+    constant it comes from, else None."""
     seen = set()
     while var.owner is not None and var not in seen:
         seen.add(var)
@@ -586,7 +591,9 @@ def _generator_source(fgraph, var):
         if not rng_inputs:
             return None
         var = rng_inputs[0]
-    return fgraph.inputs.index(var) if var in fgraph.inputs else None
+    if var in fgraph.inputs:
+        return fgraph.inputs.index(var)
+    return var.data if isinstance(var, Constant) else None
 
 
 def _is_none_type(t):

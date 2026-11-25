@@ -80,8 +80,11 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_emit.register(DeepCopyOp)
 def _(op, node, cg, inputs, outputs):
-    source = inputs[0]
-    outputs[0].allocate(source.shape).copy_from(cg, source)
+    # (nothing to copy of a value without data, like a generator: `compile_program`
+    # returns a copy of it)
+    if outputs[0] is not None:
+        source = inputs[0]
+        outputs[0].allocate(source.shape).copy_from(cg, source)
 
 
 @llvm_emit.register(ScalarFromTensor)
