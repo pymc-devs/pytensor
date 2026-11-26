@@ -3,6 +3,8 @@ from typing import Literal, cast
 
 import numpy as np
 
+from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Constant
 from pytensor.scalar.basic import resolve_weak_dtypes
 from pytensor.tensor import TensorLike
@@ -20,6 +22,7 @@ from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.subtensor import flip, set_subtensor, slice_at_axis, take
 from pytensor.tensor.symbolic import TensorSymbolicOp
+from pytensor.tensor.type import discrete_dtypes
 
 
 PadMode = Literal[
@@ -94,7 +97,7 @@ def _get_edges(
 
 
 def _symbolic_pad(
-    x: TensorVariable, pad_width: TensorVariable
+    x: TensorVariable, pad_width: TensorVariable, dtype: str | None = None
 ) -> tuple[TensorVariable, tuple[slice, ...], TensorVariable]:
     pad_width = broadcast_to(pad_width, as_tensor((x.ndim, 2)))
     new_shape = as_tensor(
@@ -103,7 +106,9 @@ def _symbolic_pad(
     original_area_slice = tuple(
         slice(pad_width[i][0], pad_width[i][0] + size) for i, size in enumerate(x.shape)
     )
-    padded: TensorVariable = set_subtensor(zeros(new_shape)[original_area_slice], x)
+    padded: TensorVariable = set_subtensor(
+        zeros(new_shape, dtype=dtype)[original_area_slice], x
+    )
     return padded, original_area_slice, pad_width
 
 
@@ -121,7 +126,7 @@ def _get_padding_slices(
 def _constant_pad(
     x: TensorVariable, pad_width: TensorVariable, constant_values: TensorVariable
 ) -> TensorVariable:
-    padded, _area_slice, pad_width = _symbolic_pad(x, pad_width)
+    padded, _area_slice, pad_width = _symbolic_pad(x, pad_width, dtype=x.dtype)
     values = broadcast_to(constant_values, as_tensor((padded.ndim, 2)))
 
     for axis in range(padded.ndim):
@@ -137,7 +142,7 @@ def _constant_pad(
 
 
 def _edge_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
-    padded, _area_slice, pad_width = _symbolic_pad(x, pad_width)
+    padded, _area_slice, pad_width = _symbolic_pad(x, pad_width, dtype=x.dtype)
     for axis in range(padded.ndim):
         width_pair = pad_width[axis]
         dim_shape = padded.shape[axis]
@@ -408,6 +413,26 @@ class Pad(TensorSymbolicOp):
             return [_stat_pad(x, pad_width, stat_funcs[mode], stat_length)]
         return [_gather_pad(x, pad_width, mode)]
 
+    def pullback(self, inputs, outputs, output_grads):
+        if (
+            self.pad_mode in ("constant", "edge")
+            and outputs[0].dtype in discrete_dtypes
+        ):
+            # Discrete outputs stop gradients, which must still have continuous dtypes.
+            if isinstance(output_grads[0].type, DisconnectedType):
+                return [disconnected_type() for _ in inputs]
+            return [
+                inp.zeros_like(
+                    dtype=config.floatX if inp.dtype in discrete_dtypes else inp.dtype
+                )
+                if connected[0]
+                else disconnected_type()
+                for inp, connected in zip(
+                    inputs, self.connection_pattern(None), strict=True
+                )
+            ]
+        return super().pullback(inputs, outputs, output_grads)
+
 
 def pad(
     x: TensorLike,
@@ -544,7 +569,7 @@ def pad(
 
     .. testoutput::
 
-        [4. 4. 1. 2. 3. 4. 5. 6. 6. 6.]
+        [4 4 1 2 3 4 5 6 6 6]
 
     .. testcode::
 
@@ -552,7 +577,7 @@ def pad(
 
     .. testoutput::
 
-         [1. 1. 1. 2. 3. 4. 5. 5. 5. 5.]
+        [1 1 1 2 3 4 5 5 5 5]
 
     .. testcode::
 
