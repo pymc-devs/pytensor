@@ -40,6 +40,7 @@ from pytensor.scalar.basic import (
     upcast,
 )
 from pytensor.scalar.basic import abs as scalar_abs
+from pytensor.scalar.cython_special import SciPyScalarOp
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.utils import lazy_scipy_module
 
@@ -667,7 +668,7 @@ class PolyGamma(BinaryScalarOp):
 polygamma = PolyGamma()
 
 
-class GammaInc(BinaryScalarOp):
+class GammaInc(SciPyScalarOp, BinaryScalarOp):
     """
     Compute the regularized lower gamma function (P).
     """
@@ -689,36 +690,17 @@ class GammaInc(BinaryScalarOp):
             gz * exp(-x + (k - 1) * log(x) - gammaln(k)),
         ]
 
-    def c_support_code(self, **kwargs):
-        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
-
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
-        if node.inputs[0].type in float_types:
-            dtype = "npy_" + node.outputs[0].dtype
-            return f"""{z} =
-                ({dtype}) GammaP({k}, {x});"""
-        raise NotImplementedError("only floatingpoint is implemented")
-
     def __eq__(self, other):
         return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
 
-    def c_code_cache_version(self):
-        v = super().c_code_cache_version()
-        if v:
-            return (2, *v)
-        else:
-            return v
-
 
 gammainc = GammaInc()
 
 
-class GammaIncC(BinaryScalarOp):
+class GammaIncC(SciPyScalarOp, BinaryScalarOp):
     """
     Compute the regularized upper gamma function (Q).
     """
@@ -740,36 +722,17 @@ class GammaIncC(BinaryScalarOp):
             gz * -exp(-x + (k - 1) * log(x) - gammaln(k)),
         ]
 
-    def c_support_code(self, **kwargs):
-        return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
-
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
-        if node.inputs[0].type in float_types:
-            dtype = "npy_" + node.outputs[0].dtype
-            return f"""{z} =
-                ({dtype}) GammaQ({k}, {x});"""
-        raise NotImplementedError("only floatingpoint is implemented")
-
     def __eq__(self, other):
         return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
 
-    def c_code_cache_version(self):
-        v = super().c_code_cache_version()
-        if v:
-            return (2, *v)
-        else:
-            return v
-
 
 gammaincc = GammaIncC()
 
 
-class GammaIncInv(BinaryScalarOp):
+class GammaIncInv(SciPyScalarOp, BinaryScalarOp):
     """
     Inverse to the regularized lower incomplete gamma function.
     """
@@ -791,14 +754,11 @@ class GammaIncInv(BinaryScalarOp):
             gz * exp(gammaincinv(k, x)) * gamma(k) * (gammaincinv(k, x) ** (1 - k)),
         ]
 
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
 
 gammaincinv = GammaIncInv()
 
 
-class GammaIncCInv(BinaryScalarOp):
+class GammaIncCInv(SciPyScalarOp, BinaryScalarOp):
     """
     Inverse to the regularized upper incomplete gamma function.
     """
@@ -819,9 +779,6 @@ class GammaIncCInv(BinaryScalarOp):
             grad_not_implemented(self, 0, k),
             gz * -exp(gammainccinv(k, x)) * gamma(k) * (gammainccinv(k, x) ** (1 - k)),
         ]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
 
 
 gammainccinv = GammaIncCInv()
@@ -1141,7 +1098,7 @@ class I0(UnaryScalarOp):
 i0 = I0()
 
 
-class Ive(BinaryScalarOp):
+class Ive(SciPyScalarOp, BinaryScalarOp):
     """
     Exponentially scaled modified Bessel function of the first kind of order v (real).
     """
@@ -1165,14 +1122,11 @@ class Ive(BinaryScalarOp):
             / 2.0,
         ]
 
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
 
 ive = Ive()
 
 
-class Kve(BinaryScalarOp):
+class Kve(SciPyScalarOp, BinaryScalarOp):
     """Exponentially scaled modified Bessel function of the second kind of real order v."""
 
     name = "kve"
@@ -1196,9 +1150,6 @@ class Kve(BinaryScalarOp):
             grad_not_implemented(self, 0, v),
             g_out * dx,
         ]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
 
 
 kve = Kve()
