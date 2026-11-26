@@ -68,11 +68,29 @@ since it computes only one variable out of the two.
    time spent evaluating both values 0.6700 sec
    time spent evaluating one value 0.3500 sec
 
-Unless ``linker='vm'`` or ``linker='cvm'`` are used, ``ifelse`` will compute both
-variables and take the same computation time as ``switch``. Although the linker
-is not currently set by default to ``cvm``, it will be in the near future.
+``ifelse`` is lazy in the default mode (Numba) and in the ``CVM``, ``FAST_COMPILE``
+and ``JAX`` modes, as well as with ``linker='vm'`` as above. In the ``PYTORCH`` and
+``MLX`` modes, ``ifelse`` computes both variables and takes as long as ``switch``.
 
 There is no automatic rewrite replacing a ``switch`` with a
 broadcasted scalar to an ``ifelse``, as this is not always faster. See
 this `ticket <http://www.assembla.com/spaces/theano/tickets/764>`_.
 
+How the backends evaluate ``ifelse``
+====================================
+
+These are implementation details and may change.
+
+- C and Python virtual machines (``CVM``, ``FAST_COMPILE``, ``linker='vm'``): the
+  ``IfElse`` thunk is lazy. The virtual machine computes the condition first and then
+  only the nodes needed by the branch that is taken.
+- Numba and JAX: these backends compile the whole graph into a single function, so
+  there is no virtual machine to skip nodes. Instead, the ``introduce_lazy_ifelse``
+  rewrite moves the computations used only by the branches into two compiled inner
+  graphs and replaces the ``IfElse`` with a ``LazyIfElse``. Numba calls one of them in
+  an ``if``/``else``, and JAX passes both to ``jax.lax.cond``. Computations needed by
+  both branches, by the condition or by other outputs stay outside and run before
+  the condition is checked.
+- PyTorch and MLX: ``ifelse`` is not lazy. PyTorch computes both branches and
+  returns one of them. MLX has no conditional operation and selects between the
+  branches with ``mx.where``.
