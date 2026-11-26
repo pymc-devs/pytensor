@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -32,6 +39,19 @@ STACK_BUDGET_BYTES = 16 * 1024
 #: The loop body of `Codegen.for_each` and `loop_nest`: called with the element
 #: pointers of the arrays, once per element (the loop index is in the generated code).
 type ElementBody = Callable[[list[ir.Value]], None]
+
+#: The loop index at an element: the index along each axis that is looped over.
+type LoopIndex = Mapping[int, ir.Value]
+
+#: What the `at` function of an `InnerLoop` returns for an iteration of the innermost
+#: loop: the element pointers of the arrays, and the loop index.
+type Element = tuple[list[ir.Value], LoopIndex]
+
+#: A caller-generated innermost loop of `Codegen.for_each`, called as
+#: `inner(axes, n, at)`. See `for_each`.
+type InnerLoop = Callable[
+    [frozenset[int], ir.Value, Callable[[ir.Value], Element]], None
+]
 
 #: What is known about the values of an index: (minimum, maximum), None where unknown.
 type IndexBounds = tuple[int | None, int | None]
@@ -271,36 +291,69 @@ class Codegen:
         self,
         shape: Sequence[ir.Value],
         arrays: Sequence[Array],
-        body: ElementBody,
+        body: ElementBody | None = None,
+        *,
+        inner: InnerLoop | None = None,
+        flat: bool = True,
         parallel_cost: float | None = None,
     ) -> None:
-        """For every index of `shape`: `body(ptrs)` with the element pointers of `arrays`.
+        """Loop over all elements of `shape`, moving a pointer through each of `arrays`.
 
-        `arrays` have strides over `shape` (0 where broadcast). The loops follow memory
-        order (`loop_order`). When every array is packed in that order this is one flat
-        loop over element indices (what the vectorizer likes). The layouts decide that
-        when they can; only arrays whose layout leaves it open are checked at run time,
-        and then both the flat loop and the nest are generated.
+        The arrays have strides over `shape`, 0 along axes where they are broadcast.
+        The loops follow the order the arrays are laid out in memory (`loop_order`).
+        If every array is packed in that order, there is only one flat loop over all
+        elements, which the vectorizer likes. The layouts usually tell whether they
+        are packed. If they don't, it is checked at run time, and both the flat loop
+        and the nest of loops are generated. Arrays with stride 0 along every axis
+        don't move, so they never prevent the flat loop. `flat=False` always uses the
+        nest, for callers that need the loop index along each axis.
+
+        Normally you pass `body`, and it is called once per element with the pointers
+        to that element.
+
+        Pass `inner` instead when one call per element isn't enough because you need
+        to generate the innermost loop yourself. For example, a sum can then load its
+        running total before the innermost loop, keep it in a register while the loop
+        runs, and store it afterwards. for_each still chooses the loop order and
+        generates the outer loops, but where it would generate the innermost loop it
+        calls `inner(axes, n, at)` instead. `n` is the innermost loop's length, and
+        `at(i)` returns the pointers and the loop index at its i-th element. `axes`
+        are the axes the innermost loop moves along.
+
+        For a shape (n0, n1) where axis 1 is innermost in memory, this generates:
+
+            for i0 in range(n0):
+                inner({1}, n1, at)    # at(i) gives the pointers and index at [i0, i]
+
+        In the flat loop, `inner` is called once, with axes {0, 1} and n0 * n1, and
+        the loop index from `at` is empty.
 
         With `parallel_cost`, the cost of one element (analysis/work.py), the loop (the
-        flat one, or the nest's outermost) runs in chunks that may run in parallel when
-        there's enough work. Iterations must not depend on each other."""
+        flat one, or the outermost loop of the nest) runs in chunks that may run in
+        parallel when there's enough work. Iterations must not depend on each other.
+        If the parallel loop is also the innermost one, `inner` is called once per
+        chunk."""
         b = self.b
-        order = loop_order(shape, arrays)
+        if inner is None:
+            inner = self._per_element(body)
+        moving = [a for a in arrays if not _stationary(a)]
+        order = loop_order(shape, moving)
         policy = self._policy(lambda: size(self.b, shape), parallel_cost)
-        contig = b.const_bool(True)
-        for a in arrays:
+        contig = b.const_bool(flat)
+        for a in moving:
+            if contig.const_int == 0:
+                break
             contig = b.and_(contig, a.is_contiguous(b, shape, order))
         c = contig.const_int
         if c == 1:
-            self._flat_loop(shape, arrays, body, policy)
+            self._flat_loop(shape, arrays, inner, policy)
         elif c == 0:
-            self._loop_nest(shape, arrays, body, order, policy=policy)
+            self._loop_nest(shape, arrays, inner, order, policy=policy)
         else:
             b.if_else(
                 contig,
-                lambda: self._flat_loop(shape, arrays, body, policy),
-                lambda: self._loop_nest(shape, arrays, body, order, policy=policy),
+                lambda: self._flat_loop(shape, arrays, inner, policy),
+                lambda: self._loop_nest(shape, arrays, inner, order, policy=policy),
             )
 
     def loop_nest(
@@ -316,7 +369,7 @@ class Codegen:
         one. Unlike `for_each`, this never uses a flat loop. With `parallel_cost`, the
         outermost loop runs in chunks that may run in parallel."""
         policy = self._policy(lambda: size(self.b, shape), parallel_cost)
-        self._loop_nest(shape, arrays, body, order, policy=policy)
+        self._loop_nest(shape, arrays, self._per_element(body), order, policy=policy)
 
     def for_range(
         self,
@@ -417,57 +470,112 @@ class Codegen:
         policy = _ParallelPolicy(self, parallel_cost)
         return policy if policy.worth_it(n_elements()) else None
 
+    def _per_element(self, body: ElementBody | None) -> InnerLoop:
+        """The innermost loop `for_each` generates when the caller passes `body`: it
+        calls `body` with the pointers at each element."""
+        if body is None:
+            raise TypeError("for_each needs a body or an inner loop")
+        b = self.b
+
+        def inner(
+            axes: frozenset[int], n: ir.Value, at: Callable[[ir.Value], Element]
+        ) -> None:
+            if n.const_int == 1:
+                body(at(b.i64(0))[0])
+                return
+            with b.loop(n) as i:
+                body(at(i)[0])
+
+        return inner
+
     def _flat_loop(
         self,
         shape: Sequence[ir.Value],
         arrays: Sequence[Array],
-        body: ElementBody,
+        inner: InnerLoop,
         policy: _ParallelPolicy | None = None,
     ) -> None:
         b = self.b
-        n = size(b, shape)
+        axes = frozenset(range(len(shape)))
 
-        def at(i: ir.Value) -> None:
-            body([b.gep(memory_type(a.scalar_type), a.data, i) for a in arrays])
+        def at(i: ir.Value) -> Element:
+            ptrs = [
+                a.data
+                if _stationary(a)
+                else b.gep(memory_type(a.scalar_type), a.data, i)
+                for a in arrays
+            ]
+            return ptrs, {}
 
-        if policy is not None:
-            policy.range(b, n, b.i64(1), at)
+        if policy is None:
+            inner(axes, size(b, shape), at)
             return
-        with b.loop(n) as i:
-            at(i)
+        policy.chunks(
+            b,
+            size(b, shape),
+            b.i64(1),
+            lambda start, n: inner(axes, n, lambda j: at(b.add(start, j))),
+        )
 
     def _loop_nest(
         self,
         shape: Sequence[ir.Value],
         arrays: Sequence[Array],
-        body: ElementBody,
+        inner: InnerLoop,
         order: Sequence[int],
         level: int = 0,
         base: list[ir.Value] | None = None,
+        outer: LoopIndex | None = None,
         policy: _ParallelPolicy | None = None,
     ) -> None:
         b = self.b
         if base is None:
             base = [a.data for a in arrays]
-        if level == len(order):
-            body(base)
+        if outer is None:
+            outer = {}
+        if not order:
+            inner(frozenset(), b.i64(1), lambda i: (base, outer))
             return
         axis = order[level]
-        pointers = base
+        pointers, index = base, outer
 
-        def at(i: ir.Value) -> None:
+        def at(i: ir.Value) -> Element:
             ptrs = [
                 advance(b, p, i, a.strides[axis], a.scalar_type)
                 for p, a in zip(pointers, arrays, strict=True)
             ]
-            self._loop_nest(shape, arrays, body, order, level + 1, ptrs)
+            return ptrs, {**index, axis: i}
 
-        if policy is not None and level == 0:
-            inner = size(b, [shape[a] for a in order[1:]])
-            policy.range(b, shape[axis], inner, at)
+        if level == len(order) - 1:
+            if policy is not None:
+                policy.chunks(
+                    b,
+                    shape[axis],
+                    b.i64(1),
+                    lambda start, n: inner(
+                        frozenset({axis}), n, lambda j: at(b.add(start, j))
+                    ),
+                )
+            else:
+                inner(frozenset({axis}), shape[axis], at)
+            return
+
+        def step(i: ir.Value) -> None:
+            ptrs, deeper = at(i)
+            self._loop_nest(shape, arrays, inner, order, level + 1, ptrs, deeper)
+
+        if policy is not None:
+            rest = size(b, [shape[a] for a in order[1:]])
+            policy.range(b, shape[axis], rest, step)
             return
         with b.loop(shape[axis]) as i:
-            at(i)
+            step(i)
+
+
+def _stationary(a: Array) -> bool:
+    """Does `a` have stride 0 along every axis of the loop, so that its pointer never
+    moves? A sum over all axes, for example."""
+    return all(st.const_int == 0 for st in a.strides)
 
 
 # ------------------------------------------------------------------ loops
@@ -542,18 +650,35 @@ class _ParallelPolicy:
     ) -> None:
         """`body(i)` for i in 0..n, in chunks that may run in parallel; failures in a
         chunk fail the function."""
+
+        def chunk(start: ir.Value, count: ir.Value) -> None:
+            with b.loop(count) as j:
+                body(b.add(start, j))
+
+        self.chunks(b, n, elements_per_iteration, chunk)
+
+    def chunks(
+        self,
+        b: ir.Builder,
+        n: ir.Value,
+        elements_per_iteration: ir.Value,
+        body: Callable[[ir.Value, ir.Value], None],
+    ) -> None:
+        """Split the iterations 0..n into chunks that may run in parallel, and call
+        `body(start, count)` to generate the code of a chunk: the iterations
+        start..start + count. Use it instead of `range` to generate the loop over a
+        chunk yourself. Failures in a chunk fail the function."""
         self.cg.unit.uses_pool = True
         with b.parallel(self.cg.ctx, n, self.grain(b, elements_per_iteration)) as chunk:
-            # (a parallel body is a function of its own)
+            # A parallel body is a function of its own, with its own scratch scope and
+            # its own flags for the deferred checks of the loop around it.
             with (
                 self.cg.scratch_scope(function=True),
-                # (the deferred checks of the loop around, in the body's function)
                 self.cg.deferred_checks(
                     self.cg.deferred[-1] if self.cg.deferred else ()
                 ),
-                b.loop(b.sub(chunk.end, chunk.start)) as j,
             ):
-                body(b.add(chunk.start, j))
+                body(chunk.start, b.sub(chunk.end, chunk.start))
         self.cg.check(b.eq(chunk.result, 0), None)
 
 

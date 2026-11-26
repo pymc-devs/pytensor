@@ -568,6 +568,21 @@ def test_fused_elemwise_indexed_writes():
     assert any(s.startswith("FusedElemwise") for s in steps(f))
 
 
+def test_fused_elemwise_with_scalar_io_is_not_fused():
+    # Only the numba-only scalarize rewrite gives a FusedElemwise scalar inputs or
+    # outputs. Such a node must run its inner graph instead of crashing.
+    from pytensor.link.llvm.dispatch.fused import fused_supported
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    x = pt.vector("x")
+    f = pytensor.function([x], pt.exp(x).sum(), mode=LLVM)
+    (node,) = [n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, FusedElemwise)]
+    assert fused_supported(node.op, node)
+    op = node.op.with_scalar_io(set(), {0})
+    scalar_node = op.make_node(*node.inputs)
+    assert not fused_supported(op, scalar_node)
+
+
 def test_scan_sit_sot_mit_sot_nit_sot():
     x0 = pt.dscalar("x0")
     seq = pt.vector("seq")

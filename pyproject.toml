@@ -191,7 +191,7 @@ mypy_path = "rust/pytensor-llvm/python"
 
 [[tool.mypy.overrides]]
 # the LLVM backend's code generation is fully annotated: keep it that way
-module = ["pytensor.link.llvm.codegen.*"]
+module = ["pytensor.link.llvm.codegen.*", "pytensor.link.llvm.dispatch.fused"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
