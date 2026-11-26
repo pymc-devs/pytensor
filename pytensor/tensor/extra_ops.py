@@ -388,6 +388,21 @@ class CumOp(COp):
         return f"{self.__class__.__name__}{{{self.axis}, {self.mode}}}"
 
 
+def _upcast_cum_input(x):
+    # Like NumPy, accumulate bool and small integers in a 64-bit integer.
+    x = ptb.as_tensor_variable(x)
+    dtype = {
+        "bool": "int64",
+        "int8": "int64",
+        "int16": "int64",
+        "int32": "int64",
+        "uint8": "uint64",
+        "uint16": "uint64",
+        "uint32": "uint64",
+    }.get(x.dtype)
+    return x if dtype is None else x.astype(dtype)
+
+
 def cumsum(x, axis=None):
     """Return the cumulative sum of the elements along a given `axis`.
 
@@ -405,7 +420,7 @@ def cumsum(x, axis=None):
     .. versionadded:: 0.7
 
     """
-    x = ptb.as_tensor_variable(x)
+    x = _upcast_cum_input(x)
     if axis is None:
         x = x.ravel()
         axis = 0
@@ -431,7 +446,7 @@ def cumprod(x, axis=None):
     .. versionadded:: 0.7
 
     """
-    x = ptb.as_tensor_variable(x)
+    x = _upcast_cum_input(x)
     if axis is None:
         x = x.ravel()
         axis = 0

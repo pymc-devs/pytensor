@@ -223,6 +223,20 @@ class TestCumOp(utt.InferShapeTester):
             assert np.allclose(np.cumsum(a, axis=axis), s)
             assert np.allclose(np.cumprod(a, axis=axis), p)
 
+    @pytest.mark.parametrize("dtype", ["bool", "int8", "uint8", "int32"])
+    def test_discrete_input_dtype(self, dtype):
+        # NumPy accumulates these in 64 bits; 100 + 100 overflows int8.
+        x = matrix("x", dtype=dtype)
+        a = np.array([[1, 1, 0, 1], [1, 0, 1, 1]], dtype=dtype)
+        if dtype != "bool":
+            a *= 100
+
+        outs = [cumsum(x), cumsum(x, axis=1), cumprod(x), cumprod(x, axis=1)]
+        expected = [np.cumsum(a), np.cumsum(a, 1), np.cumprod(a), np.cumprod(a, 1)]
+        assert [out.dtype for out in outs] == [e.dtype for e in expected]
+        for res, exp in zip(pytensor.function([x], outs)(a), expected, strict=True):
+            np.testing.assert_array_equal(res, exp, strict=True)
+
     def test_infer_shape(self):
         x = tensor3("x")
         a = np.random.random((3, 5, 2)).astype(config.floatX)
