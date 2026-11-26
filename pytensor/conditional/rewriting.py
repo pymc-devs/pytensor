@@ -21,6 +21,11 @@ from pytensor.tensor.basic import Alloc
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Argmax, Dot, Max
+from pytensor.tensor.rewriting.basic import (
+    register_canonicalize,
+    register_specialize,
+    register_useless,
+)
 from pytensor.tensor.shape import Reshape, Shape, SpecifyShape
 from pytensor.tensor.subtensor import IncSubtensor, Subtensor
 
@@ -508,6 +513,21 @@ def merge_sibling_ifelse(fgraph, node):
             copy_stack_trace(node.outputs, new_outputs)
             return new_outputs
     return False
+
+
+@register_useless("shape_unsafe")
+@register_canonicalize("fast_compile", "shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([IfElse])
+def local_useless_ifelse(fgraph, node):
+    """ifelse(True, xs, ys) -> xs and ifelse(False, xs, ys) -> ys"""
+    condition = node.inputs[0]
+    if not isinstance(condition, Constant):
+        return False
+
+    n_outs = node.op.n_outs
+    taken = node.inputs[1 : 1 + n_outs] if condition.data else node.inputs[1 + n_outs :]
+    return list(taken)
 
 
 ifelse_simplify_db = EquilibriumDB()
