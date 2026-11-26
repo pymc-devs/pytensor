@@ -61,6 +61,12 @@ macro_rules! runtime_functions {
             pub fn symbols(&self) -> Vec<(&'static str, usize)> {
                 vec![$((concat!("ptl_rt_", stringify!($name)), self.$name as *const () as usize),)*]
             }
+
+            /// `(name, offset)` of every function in the table, for code that reaches
+            /// them through `ctx->rt` (numba kernels).
+            pub fn offsets() -> Vec<(&'static str, usize)> {
+                vec![$((stringify!($name), std::mem::offset_of!(PtRuntime, $name)),)*]
+            }
         }
     };
 }
@@ -102,6 +108,9 @@ runtime_functions! {
     clock_ns: fn() -> u64 = rt_clock_ns;
     /// Add to a counter, atomically (profiling: calls may run concurrently).
     counter_add: fn(*mut u64, u64) = rt_counter_add;
+    /// 32 random bits (with `rng_u64` and `rng_uniform`, numpy's `bitgen_t`
+    /// interface: numba kernels draw through it).
+    rng_u32: fn(*mut PtCtx) -> u32 = crate::runtime::random::rng_u32;
 }
 
 /// The process-wide runtime: the function table every context points to, and the

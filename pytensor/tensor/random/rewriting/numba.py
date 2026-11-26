@@ -35,7 +35,8 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     after inplacing without conflicting with the destroyers in the surrounding
     graph.
 
-    This rewrite is required for the numba backend implementation of RandomVariable.
+    This rewrite is required for the numba and LLVM backend implementations of
+    RandomVariable.
 
     Example
     -------
@@ -118,6 +119,7 @@ optdb.register(
     introduce_explicit_core_shape_rv.__name__,
     dfs_rewriter(introduce_explicit_core_shape_rv),
     "numba",
+    "llvm",
     position=100,
 )
 

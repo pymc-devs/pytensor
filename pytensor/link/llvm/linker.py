@@ -32,8 +32,15 @@ class LLVMLinker(JITLinker):
 
     # llvm_layouts attaches the LayoutFeature (the layouts the planner gives the
     # values); llvm_units keeps ScalarType values inside compiled units: they don't
-    # cross the kernel ABI
-    required_rewrites = ("minimum_compile", "llvm_layouts", "llvm_units")
+    # cross the kernel ABI; Blockwise and RandomVariable run with their core shapes
+    # computed by the graph (`BlockwiseWithCoreShape`, `RandomVariableWithCoreShape`)
+    required_rewrites = (
+        "minimum_compile",
+        "llvm_layouts",
+        "llvm_units",
+        "introduce_explicit_core_shape_blockwise",
+        "introduce_explicit_core_shape_rv",
+    )
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",

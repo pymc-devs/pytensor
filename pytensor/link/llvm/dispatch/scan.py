@@ -32,6 +32,7 @@ iteration to the next (`_RowCounters`).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -41,6 +42,8 @@ from pytensor.link.llvm.codegen.array import Array, advance
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import Captured, OutputDestination
 from pytensor.link.llvm.codegen.interface import (
+    EmitterInput,
+    EmitterOutput,
     TensorOutput,
     llvm_emit,
     llvm_layout,
@@ -50,6 +53,11 @@ from pytensor.link.llvm.codegen.interface import (
 from pytensor.link.llvm.codegen.num import cast, constant, load, store
 from pytensor.link.llvm.codegen.signature import overwritten_layout
 from pytensor.link.llvm.codegen.types import element_type, ir, is_absent
+
+
+if TYPE_CHECKING:
+    from pytensor.graph.basic import Apply
+    from pytensor.scan.op import Scan
 
 
 def register():
@@ -484,7 +492,13 @@ def _row_layout(a: Array) -> Layout:
     )
 
 
-def emit_scan(op, node, cg, inputs, outputs):
+def emit_scan(
+    op: Scan,
+    node: Apply,
+    cg: Codegen,
+    inputs: list[EmitterInput],
+    outputs: list[EmitterOutput | None],
+) -> None:
     b = cg.b
     info = op.info
     fgraph = op.fgraph
@@ -556,7 +570,7 @@ def emit_scan(op, node, cg, inputs, outputs):
     n_counts = 1 if info.as_while else 0
     cond_type = element_type(fgraph.outputs[-1].type) if info.as_while else None
 
-    def step(i, *carried):
+    def step(i: ir.Value, *carried: ir.Value) -> list[ir.Value]:
         rows = carried[n_counts:]
         # the body's scratch memory and buffers are given up after every iteration
         with cg.scratch_scope():
@@ -582,13 +596,14 @@ def emit_scan(op, node, cg, inputs, outputs):
                 if out is not None:
                     args[k_in] = out.current()
                     results[k_out] = _UntracedState(cg, out)
-            if info.as_while:
+            # cond_type is only set for while-loops.
+            if cond_type is not None:
                 cond = Captured(cg, cond_type)
                 results[-1] = cond
 
             body.emit_call(cg, args, results)
 
-            if info.as_while:
+            if cond_type is not None:
                 value = cond.scalar()
                 stop = b.ne(cast(b, value, cond_type, ps.int8), 0)
         next_rows = counters.advance(b, rows)

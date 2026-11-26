@@ -16,6 +16,9 @@ ERR_LINALG: int  # numpy.linalg.LinAlgError
 ERR_ASSERTION: int  # AssertionError
 ERR_CUSTOM: int
 
+#: The offset of each function in the runtime table (`ctx->rt`), by name.
+RUNTIME_OFFSETS: dict[str, int]
+
 class Function:
     """A compiled program's function, callable from Python and (`c_function`) from C."""
 

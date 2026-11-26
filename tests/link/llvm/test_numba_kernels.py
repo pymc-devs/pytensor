@@ -15,7 +15,12 @@ import pytensor.tensor as pt
 from pytensor.compile.mode import get_mode
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.link.numba.dispatch.random import (
+    numba_core_rv_default,
+    numba_core_rv_funcify,
+)
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.random.op import RandomVariable
 
 
 pytensor_llvm = pytest.importorskip("pytensor_llvm")
@@ -84,6 +89,80 @@ def test_numba_scalar_inputs_and_outputs():
     np.testing.assert_allclose(b, v[2:] * v[2])
     assert total == pytest.approx(2 * v.sum())
     np.testing.assert_allclose(totals, 2 * w.sum(axis=1))
+
+
+def test_numba_generator_model():
+    # Random variables without a sampler draw through numba with a Generator built
+    # from the call context (`ctx_generator`), which fills numba's own struct for it:
+    # if numba changes that, this says so before the draws go wrong
+    from numba import types
+    from numba.core.datamodel import default_manager
+
+    from pytensor.link.llvm.kernels.numba import BIT_GENERATOR_MEMBERS
+
+    generator = default_manager[types.npy_rng]
+    assert generator._fields == ("bit_generator", "meminfo", "parent")
+    bit_generator = default_manager[generator.get_member_fe_type("bit_generator")]
+    assert bit_generator._fields == BIT_GENERATOR_MEMBERS
+    assert bit_generator.get_member_fe_type("parent") == types.pyobject
+    for member in BIT_GENERATOR_MEMBERS[1:]:
+        assert bit_generator.get_member_fe_type(member) == types.uintp
+
+
+class _NumbaUniformRV(RandomVariable):
+    """A uniform random variable the backend has no sampler for: numba draws it, as
+    `low + (high - low) * next_double`."""
+
+    name = "uniform"
+    signature = "(),()->()"
+    dtype = "float64"
+
+    def rng_fn(self, rng, low, high, size):
+        return rng.uniform(low, high, size=size)
+
+
+numba_core_rv_funcify.register(_NumbaUniformRV)(numba_core_rv_default)
+
+
+def test_numba_random_variables_draw_from_the_call_state():
+    # no sampler: numba's core function draws (one per element of the batch loop),
+    # through the session's state, the same numbers as the native uniform sampler
+    # (`rng_uniform`) from the same seed
+    raw = pytensor.function([], _NumbaUniformRV()(0.0, 1.0, size=(5,)), mode=LLVM)
+    native = pytensor.function([], pt.random.uniform(0.0, 1.0, size=(5,)), mode=LLVM)
+    assert raw.maker.linker.stats.numba and not native.maker.linker.stats.numba
+    compiled(raw).seed(7)
+    compiled(native).seed(7)
+    first = raw()
+    np.testing.assert_array_equal(first, native())
+    assert not np.array_equal(first, raw())
+    # bounded integers (`next_uint64`, `next_uint32`)
+    permutation = pytensor.function([], pt.random.permutation(20), mode=LLVM)
+    assert permutation.maker.linker.stats.numba
+    p, q = permutation(), permutation()
+    assert sorted(p) == list(range(20)) and not np.array_equal(p, q)
+
+
+class _PythonUniformRV(RandomVariable):
+    """A uniform random variable numba has no core function for: its `perform` runs."""
+
+    name = "uniform"
+    signature = "(),()->()"
+    dtype = "float64"
+
+    def rng_fn(self, rng, low, high, size):
+        return rng.uniform(low, high, size=size)
+
+
+def test_random_variables_without_numba_core_draw_from_a_seeded_generator():
+    x = _PythonUniformRV()(2.0, 3.0, size=(4,))
+    with pytest.warns(UserWarning, match="Generator seeded from the call's random"):
+        f = pytensor.function([], x, mode=LLVM)
+    compiled(f).seed(7)
+    first, second = f(), f()
+    assert np.all((first >= 2) & (first < 3)) and not np.array_equal(first, second)
+    compiled(f).seed(7)
+    np.testing.assert_array_equal(f(), first)
 
 
 def test_numba_outputs_have_the_layout_of_their_value():

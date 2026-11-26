@@ -505,11 +505,13 @@ def graph_layouts(inputs, outputs, input_layouts=None, inlined=False) -> dict:
     With `inlined`, every OpFromGraph is treated as inlined, which is what generated
     code does with them: its outputs get the layouts its inner graph gives them, even
     if its `execution` says it is compiled on its own. (Except a FusedElemwise
-    generated as one loop, a node of its own: `fusable`.)"""
+    generated as one loop, and a Blockwise or random variable with its core shapes,
+    nodes of their own.)"""
     from pytensor.compile.builders import OpFromGraph
     from pytensor.graph.traversal import io_toposort
     from pytensor.link.llvm.codegen.signature import node_outputs
     from pytensor.link.llvm.dispatch.fused import fusable
+    from pytensor.tensor.blockwise import OpWithCoreShape
 
     layouts = {}
     for k, v in enumerate(inputs):
@@ -517,7 +519,12 @@ def graph_layouts(inputs, outputs, input_layouts=None, inlined=False) -> dict:
         layouts[v] = layout if layout is not None else _default_layout(v)
     for node in io_toposort(inputs, outputs):
         ins = [layouts[i] if i in layouts else _default_layout(i) for i in node.inputs]
-        if inlined and isinstance(node.op, OpFromGraph) and not fusable(node.op, node):
+        if (
+            inlined
+            and isinstance(node.op, OpFromGraph)
+            and not isinstance(node.op, OpWithCoreShape)
+            and not fusable(node.op, node)
+        ):
             inner = node.op.fgraph
             inner_lays = graph_layouts(inner.inputs, inner.outputs, ins, inlined=True)
             layouts.update(

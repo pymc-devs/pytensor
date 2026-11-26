@@ -25,7 +25,12 @@ pub unsafe extern "C" fn rng_u64(ctx: *mut PtCtx) -> u64 {
     unsafe { rng(ctx) }.next_u64()
 }
 
-/// Uniform on [0, 1).
+pub unsafe extern "C" fn rng_u32(ctx: *mut PtCtx) -> u32 {
+    // SAFETY: see the contract above.
+    unsafe { rng(ctx) }.next_u32()
+}
+
+/// Uniform on [0, 1): 53 random bits (as numpy's `next_double`).
 pub unsafe extern "C" fn rng_uniform(ctx: *mut PtCtx) -> f64 {
     // SAFETY: see the contract above.
     StandardUniform.sample(unsafe { rng(ctx) })

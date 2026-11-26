@@ -22,7 +22,7 @@ import copy
 import re
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -50,6 +50,8 @@ from pytensor.scalar.basic import ScalarType
 if TYPE_CHECKING:
     from pytensor_llvm.ir import CompiledModule
     from pytensor_llvm.runtime import Function
+
+    from pytensor.tensor.type import TensorType
 
 
 def _runtime():
@@ -531,7 +533,9 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
     # (returned outputs are handed over in any layout)
     outputs = []
     for k, passing in zip(out_ids, modes, strict=True):
-        ndim = types[k].ndim
+        # Outputs with data are always tensors: scalar outputs are returned as
+        # 0-d arrays.
+        ndim = cast("TensorType", types[k]).ndim
         if passing is Passing.CALLER_BUFFER:
             layout = Layout.c(ndim)
         else:

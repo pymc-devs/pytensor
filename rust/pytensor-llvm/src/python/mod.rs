@@ -49,6 +49,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ERR_LINALG", ERR_LINALG)?;
     m.add("ERR_ASSERTION", ERR_ASSERTION)?;
     m.add("ERR_CUSTOM", ERR_CUSTOM)?;
+    let offsets = pyo3::types::PyDict::new(m.py());
+    for (name, offset) in crate::runtime::PtRuntime::offsets() {
+        offsets.set_item(name, offset)?;
+    }
+    m.add("RUNTIME_OFFSETS", offsets)?;
     m.add_class::<OutputMode>()?;
     m.add_class::<RustKernel>()?;
     m.add_class::<Dot>()?;

@@ -4,18 +4,29 @@ Random numbers come from the call context's random state: the graph's random gen
 values are tokens without data, so a RandomVariable node has
 no generator argument and its next-generator output has no value.
 
-The draws follow the output's shape: `size` when given, else the parameters' broadcast
-batch shape (by the static types, like Elemwise). Distributions that are transforms of
-uniform or standard normal numbers draw those in one call into scratch memory and then
-apply the parameters in a loop the vectorizer can handle; the others call a sampler per
-element.
+A random variable reaches the backend wrapped with its core shape
+(`RandomVariableWithCoreShape`, from `introduce_explicit_core_shape_rv`). Its batch
+shape is `size` when given, else the parameters' broadcast batch shape (by the static
+types, like Blockwise).
+
+* A distribution we have a sampler for (`SAMPLERS`, all without core axes) is drawn
+  here. Those that are transforms of uniform or standard normal numbers draw those in
+  one call into scratch memory and then apply the parameters in a loop the vectorizer
+  can handle; the others call a sampler per element.
+* Any other is a loop over the batch (`batch_loop`, as a Blockwise's) whose core is
+  one draw of the random variable without batch axes: numba's core function for it
+  (`numba_core_rv_funcify`), drawing from the call's state (kernels/numba.py). The loop
+  is serial: the draws come in the order numba makes them.
 """
 
 from __future__ import annotations
 
+import weakref
+
 import numpy as np
 
 import pytensor.scalar as ps
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, c_strides, size
 from pytensor.link.llvm.codegen.interface import (
@@ -25,19 +36,36 @@ from pytensor.link.llvm.codegen.interface import (
 )
 from pytensor.link.llvm.codegen.num import cast, load, store
 from pytensor.link.llvm.codegen.types import ir, is_absent
+from pytensor.link.llvm.dispatch.blockwise import (
+    Batched,
+    batch_loop,
+    batch_shape,
+    core_layout,
+    core_lengths,
+    unwrapped,
+    wrapped_positions,
+)
+from pytensor.tensor.basic import constant
+from pytensor.tensor.type import tensor
 
 
 def _register():
     import pytensor.tensor.random.basic as rb
-    from pytensor.tensor.random.op import RandomVariable
+    from pytensor.tensor.random.op import RandomVariableWithCoreShape
 
-    @llvm_supports.register(RandomVariable)
+    @llvm_supports.register(RandomVariableWithCoreShape)
     def _(op, node) -> bool:
-        return supported_types(node) and type(op) in SAMPLERS and op.ndim_supp == 0
+        return supported_types(node)
 
-    @llvm_emit.register(RandomVariable)
+    @llvm_emit.register(RandomVariableWithCoreShape)
     def _(op, node, cg, inputs, outputs):
-        emit_random(op, node, cg, inputs, outputs, SAMPLERS[type(op)])
+        rv = unwrapped(node)
+        args = [inputs[k] for k in wrapped_positions(node)]
+        sampler = SAMPLERS.get(type(rv.op))
+        if sampler is not None and rv.op.ndim_supp == 0:
+            emit_random(rv.op, rv, cg, args, outputs, sampler)
+        else:
+            emit_core_draws(rv, cg, args, outputs, core_shape=inputs[0])
 
     # per distribution: the base draws ("normal", "uniform": filled in one call; None:
     # the per-element function draws), the per-element function (b, cg, base value,
@@ -180,51 +208,101 @@ class Sampler:
 SAMPLERS: dict = {}
 
 
+def draw_batch(cg, node, size_x, params) -> tuple[list, list[Batched]]:
+    """The batch shape of the random variable `node` (i64 lengths): `size` when given
+    (`size_x`, None if not), else the parameters' broadcast batch shape; and the
+    parameters (`params`) as operands of a loop over it."""
+    b = cg.b
+    op = node.op
+    batch_ndim = op.batch_ndim(node)
+    operands = []
+    for var, x, core_ndim in zip(
+        op.dist_params(node), params, op.ndims_params, strict=True
+    ):
+        param_batch = var.type.ndim - core_ndim
+        operands.append(
+            Batched(x, var.type.broadcastable[:param_batch], batch_ndim - param_batch)
+        )
+    given = None
+    if size_x is not None:
+        static = node.outputs[1].type.shape
+        given = []
+        for a in range(batch_ndim):
+            n = size_x.load(b, a).astype(ps.int64).value
+            if static[a] is not None:
+                cg.check(
+                    b.eq(n, static[a]), f"{op}: size differs from the static shape"
+                )
+                n = b.i64(static[a])
+            given.append(n)
+    return batch_shape(cg, operands, batch_ndim, given, str(op)), operands
+
+
+#: node -> the graph of its core draw (`_core_draw`)
+_core_draws: weakref.WeakKeyDictionary[Apply, tuple[list, list]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _core_draw(node) -> tuple[list, list]:
+    """The graph of one draw of the random variable `node` without batch axes (and
+    without size), as (inputs, outputs): the generator, then the parameters' core
+    parts (a constant one that isn't batched stays a constant)."""
+    if node not in _core_draws:
+        op = node.op
+        rng = op.rng_param(node).type()
+        params: list[Variable] = []
+        for var, core_ndim in zip(op.dist_params(node), op.ndims_params, strict=True):
+            param_batch = var.type.ndim - core_ndim
+            if isinstance(var, Constant) and all(var.type.broadcastable[:param_batch]):
+                data = var.data.reshape(var.data.shape[param_batch:])
+                params.append(constant(data, dtype=var.type.dtype))
+            else:
+                params.append(
+                    tensor(dtype=var.type.dtype, shape=var.type.shape[param_batch:])
+                )
+        outputs = op.make_node(rng, None, *params).outputs
+        _core_draws[node] = ([rng, *params], outputs)
+    return _core_draws[node]
+
+
+def emit_core_draws(node, cg, inputs, outputs, core_shape: Array) -> None:
+    """The random variable `node`: a serial loop over its batch, drawing one core draw
+    per element (`_core_draw`)."""
+    op = node.op
+    _, size_x, *params = inputs
+    size_x = None if is_absent(op.size_param(node).type) else size_x
+    batch, operands = draw_batch(cg, node, size_x, params)
+    graph_inputs, graph_outputs = _core_draw(node)
+    layouts = [None] + [
+        core_layout(var, x.array.layout, len(x.broadcastable))
+        for var, x in zip(op.dist_params(node), operands, strict=True)
+    ]
+    core = cg.graph_function(graph_inputs, graph_outputs, layouts, name="draw")
+    batch_ndim = op.batch_ndim(node)
+    shapes = [[], core_lengths(cg, node.outputs[1], batch_ndim, core_shape)]
+    batch_loop(cg, core, [None, *operands], outputs, batch, shapes, what=str(op))
+
+
 def emit_random(op, node, cg, inputs, outputs, spec: Sampler):
     b = cg.b
     size_var, params_vars = node.inputs[1], node.inputs[2:]
     size_arr, params = inputs[1], inputs[2:]
-    outvar = node.outputs[1]
-    nd = outvar.type.ndim
-    static = outvar.type.shape
-
-    # ---- the shape of the draws
-    shape = []
-    for a in range(nd):
-        if static[a] is not None:
-            shape.append(b.i64(static[a]))
-        elif not is_absent(size_var.type):
-            shape.append(size_arr.load(b, a).astype(ps.int64).value)
-        else:
-            n = None
-            for var, x in zip(params_vars, params, strict=True):
-                param_axis = a - (nd - var.type.ndim)
-                if param_axis >= 0 and var.type.shape[param_axis] != 1:
-                    n = x.shape[param_axis]
-                    break
-            shape.append(n if n is not None else b.i64(1))
-    if not is_absent(size_var.type):
-        for a in range(nd):
-            if static[a] is not None:
-                n = size_arr.load(b, a).astype(ps.int64).value
-                cg.check(b.eq(n, shape[a]), f"{op}: size differs from the static shape")
+    nd = node.outputs[1].type.ndim
+    shape, _ = draw_batch(
+        cg, node, None if is_absent(size_var.type) else size_arr, params
+    )
 
     # ---- the parameters over the loop (right-aligned, broadcast by their types)
     views = []
-    for k, (var, x) in enumerate(zip(params_vars, params, strict=True)):
-        strides = []
+    for var, x in zip(params_vars, params, strict=True):
         off = nd - var.type.ndim
-        for a in range(nd):
-            param_axis = a - off
-            if param_axis < 0 or var.type.shape[param_axis] == 1:
-                strides.append(b.i64(0))
-            else:
-                if x.shape[param_axis].const_int is None or shape[a].const_int is None:
-                    cg.check(
-                        b.eq(x.shape[param_axis], shape[a]),
-                        f"{op}: parameter {k} has a different length on axis {a}",
-                    )
-                strides.append(x.strides[param_axis])
+        strides = [
+            b.i64(0)
+            if a < off or var.type.broadcastable[a - off]
+            else x.strides[a - off]
+            for a in range(nd)
+        ]
         same_ndim = var.type.ndim == nd and all(s != 1 for s in var.type.shape)
         views.append(
             Array(

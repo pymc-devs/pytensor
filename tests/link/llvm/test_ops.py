@@ -394,8 +394,9 @@ def test_linalg(dtype):
 
 def test_blockwise():
     """Batch loops around a generated core, a Rust kernel and a core returning a view
-    whose length only the core knows; broadcast batch axes, strided inputs, a constant
-    core and a core whose make_node adds a node (Assert's ScalarFromTensor)."""
+    whose length the signature doesn't give (its core shape does); broadcast batch
+    axes, strided inputs, a constant core, a core whose make_node adds a node (Assert's
+    ScalarFromTensor) and empty batches."""
     cum = Blockwise(CumOp(axis=0, mode="add"), signature="(n)->(n)")
     diag = Blockwise(ExtractDiag(), signature="(m,n)->(k)")
     solve = Blockwise(
@@ -426,11 +427,10 @@ def test_blockwise():
     with pytest.raises(Exception, match="not ok"):
         f(*values[:3], np.array([1, 1, 0, 1], dtype=bool))
     empty = pytensor.function([x], [cum(x), diag(x)], mode=NO_FALLBACK)
-    with pytest.raises(Exception, match="isn't known for an empty batch"):
-        empty(np.zeros((0, 4, 5)))
+    shapes = [r.shape for r in empty(np.zeros((0, 4, 5)))]
+    assert shapes == [(0, 4, 5), (0, 4)]
 
-    # in a compiled unit (outputs the first iteration allocates are temporaries), with
-    # static shapes and checked layouts
+    # in a compiled unit, with static shapes and checked layouts
     s = pt.tensor("s", shape=(3, 4, 5), dtype="float32")
     i, j = s.type(), x.type()
     unit = OpFromGraph([i, j], [cum(i), diag(j) * 2], execution=Execution.COMPILED)
@@ -439,6 +439,26 @@ def test_blockwise():
     )
     values = [rng.random((3, 4, 5)).astype("float32"), xv]
     compare([s, x], unit(s, x), values, checked, rtol=1e-6)
+
+
+class _NoInferShape(ExtractDiag):
+    """ExtractDiag without `infer_shape`: the core shape of a Blockwise of it can't be
+    computed by the graph."""
+
+    def infer_shape(self, *args, **kwargs):
+        raise NotImplementedError()
+
+
+def test_blockwise_without_core_shapes_runs_in_numba():
+    x = pt.tensor3("x")
+    out = Blockwise(_NoInferShape(), signature="(m,n)->(k)")(x) * 2
+    with pytest.warns(UserWarning, match="object mode"):
+        f = pytensor.function([x], out, mode=LLVM)
+    assert f.maker.linker.stats.numba == [str(out.owner.inputs[0].owner.op)]
+    xv = rng.random((3, 4, 5))
+    np.testing.assert_allclose(f(xv), 2 * np.diagonal(xv, axis1=1, axis2=2))
+    with pytest.raises(NotImplementedError, match="numba fallback is off"):
+        pytensor.function([x], out, mode=NO_FALLBACK)
 
 
 def test_fused_elemwise_patterns():

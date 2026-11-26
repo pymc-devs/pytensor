@@ -166,12 +166,12 @@ def _register():
     from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
     from pytensor.scan.op import Scan
     from pytensor.tensor.basic import Nonzero
-    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.tensor.blockwise import BlockwiseWithCoreShape
     from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
     from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
     from pytensor.tensor.linalg.solvers.triangular import SolveTriangular
     from pytensor.tensor.math import Argmax, Dot
-    from pytensor.tensor.random.op import RandomVariable
+    from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
     from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
     from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
     from pytensor.tensor.sort import SortOp
@@ -261,14 +261,22 @@ def _register():
         )
         return Work(60.0 if heavy else 20.0, lengths(node.outputs[1]))
 
-    @llvm_work.register(Blockwise)
+    @llvm_work.register(RandomVariableWithCoreShape)
+    def _(op, node):
+        from pytensor.link.llvm.dispatch.blockwise import unwrapped
+
+        inner = unwrapped(node)
+        return llvm_work(inner.op, inner)
+
+    @llvm_work.register(BlockwiseWithCoreShape)
     def _(op, node):
         # the core's work times the batch
-        from pytensor.link.llvm.dispatch.blockwise import blockwise_core
+        from pytensor.link.llvm.dispatch.blockwise import blockwise_core, unwrapped
 
-        core = blockwise_core(node)[1][0].owner
+        inner = unwrapped(node)
+        core = blockwise_core(inner)[1][0].owner
         w = llvm_work(core.op, core)
-        batch = lengths(node.outputs[0])[: op.batch_ndim(node)]
+        batch = lengths(node.outputs[0])[: inner.op.batch_ndim(inner)]
         return Work(w.per_element, (*batch, *w.elements))
 
     @llvm_work.register(Scan)

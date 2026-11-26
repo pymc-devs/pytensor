@@ -70,10 +70,6 @@ from pytensor.link.llvm.codegen.types import (
     is_absent,
     repr_of,
 )
-from pytensor.link.llvm.dispatch.blockwise import (
-    blockwise_core,
-    blockwise_core_layouts,
-)
 from pytensor.link.llvm.dispatch.fused import fusable
 from pytensor.link.llvm.kernels.rust import (
     runtime,
@@ -82,7 +78,7 @@ from pytensor.link.llvm.kernels.rust import (
 from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
 from pytensor.tensor.basic import TensorFromScalar
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import OpWithCoreShape
 from pytensor.tensor.rewriting.units import unboxed_output
 from pytensor.tensor.type import TensorType
 
@@ -90,6 +86,7 @@ from pytensor.tensor.type import TensorType
 if TYPE_CHECKING:
     from pytensor.graph.fg import FunctionGraph
     from pytensor.graph.type import Type
+    from pytensor.link.llvm.program import Options, Stats
 
 
 # ------------------------------------------------------------------ values
@@ -172,7 +169,8 @@ def flatten(
     """The flat nodes running `nodes` (in order). `scope` maps variables to values and
     is filled with the nodes' outputs. OpFromGraphs are inlined, except those with
     `Execution.COMPILED`, which are nodes of their own (units, generated as one
-    function) outside generated code (`inside_unit`). `of_the_graph`: `nodes` are the
+    function) outside generated code (`inside_unit`), and a Blockwise or random
+    variable with its core shapes (`OpWithCoreShape`), a loop of its own. `of_the_graph`: `nodes` are the
     graph being planned itself (marks the flat nodes, see `FlatNode`)."""
     flat_nodes: list[FlatNode] = []
     for node in nodes:
@@ -186,8 +184,13 @@ def flatten(
             outs = [values.new(var.type) for var in node.outputs]
             scope.update(zip(node.outputs, outs, strict=True))
             flat_nodes.append(FlatNode(node, ins, outs))
-        elif isinstance(op, OpFromGraph) and (execution is None or inside_unit):
-            # (inside generated code every OpFromGraph is inlined)
+        elif (
+            isinstance(op, OpFromGraph)
+            and not isinstance(op, OpWithCoreShape)
+            and (execution is None or inside_unit)
+        ):
+            # (inside generated code every OpFromGraph is inlined, but a Blockwise or
+            # random variable with its core shapes: it is a loop of its own)
             inner = op.fgraph
             sub = {
                 iv: values.of(ov, scope)
@@ -229,26 +232,35 @@ class Planner:
     * inside generated code, generated code is preferred: it is inlined, while a kernel
       is a call."""
 
+    opts: Options
+    stats: Stats
+    #: the values of the graphs planned, by value id
+    values: Values
     #: the program's graph (`program`), and what views of its values there may be
     fgraph: FunctionGraph
     views: ViewFeature
+    #: modules generated for steps of the program, to link with the program's
+    #: function (`kernel_module.link`)
+    modules: list[KernelModule]
+    #: the exception classes of the program's error codes (every module's)
+    exceptions: ExceptionTable
+    #: (inputs, outputs, layouts) -> PlannedGraph (`graph`)
+    _graphs: dict[tuple, PlannedGraph]
+    #: the memory views the DestroyHandler doesn't see may lie in (never overwritten
+    #: in place)
+    hidden: frozenset
+    #: may nodes of the program overwrite inputs? Only for a graph whose
+    #: DestroyHandler has validated the order of its nodes
+    allow_inplace: bool
 
-    def __init__(self, options, stats):
+    def __init__(self, options: Options, stats: Stats) -> None:
         self.opts = options
         self.stats = stats
         self.values = Values()
-        #: modules generated for steps of the program, to link with the program's
-        #: function (`kernel_module.link`)
-        self.modules: list[KernelModule] = []
-        #: the exception classes of the program's error codes (every module's)
+        self.modules = []
         self.exceptions = ExceptionTable()
-        #: (inputs, outputs, layouts) -> PlannedGraph (`graph`)
-        self._graphs: dict[tuple, PlannedGraph] = {}
-        #: the memory views the DestroyHandler doesn't see may lie in (never
-        #: overwritten in place)
-        self.hidden: frozenset = frozenset()
-        #: may nodes of the program overwrite inputs? Only for a graph whose
-        #: DestroyHandler has validated the order of its nodes
+        self._graphs = {}
+        self.hidden = frozenset()
         self.allow_inplace = False
 
     # ------------------------------------------------------------ graphs
@@ -308,8 +320,8 @@ class Planner:
         `in_layouts` gives the layout of each input (None for inputs that aren't
         tensors). Inputs that are constants stay constants of the graph.
 
-        The layouts of the graph's variables come from `graph_layouts`, with every
-        OpFromGraph inlined (that is what generated code does with them).
+        The layouts of the graph's variables come from `graph_layouts`, with
+        OpFromGraphs inlined (that is what generated code does with them).
 
         The result is cached: the same graph with the same input layouts is planned
         only once."""
@@ -400,15 +412,6 @@ class Planner:
         else a call of its kernel."""
         if isinstance(node.op, Scan):
             return GENERATED
-        if isinstance(node.op, Blockwise):
-            # generated if its core graph can be planned (the emitter does it again,
-            # from the cache)
-            core_layouts = blockwise_core_layouts(node, in_layouts)
-            try:
-                self.graph(*blockwise_core(node), core_layouts)
-                return GENERATED
-            except NotImplementedError:
-                return self._kernel(node, in_layouts, binding)
         if can_generate(node):
             return GENERATED
         return self._kernel(node, in_layouts, binding)
@@ -440,7 +443,7 @@ class Planner:
         # A Rust kernel first: there is nothing to compile. Not for a Scan or Blockwise
         # (its inner graph is inlined into the generated loop), and not with folded
         # constants (a kernel would need them as arguments).
-        nested = isinstance(node.op, Scan | Blockwise)
+        nested = isinstance(node.op, Scan | OpWithCoreShape)
         writable = self._writable_inputs(flat, folded)
         if not folded and not nested and not writable:
             rust = self._rust(node, in_layouts, binding)
@@ -594,12 +597,7 @@ class Planner:
         in the `binding` layouts (C-contiguous where they aren't packed: they must be
         implied by it)."""
         from pytensor.link.llvm.kernels.numba import numba_kernel
-        from pytensor.tensor.random.type import RandomType
 
-        if any(isinstance(v.type, RandomType) for v in (*node.inputs, *node.outputs)):
-            raise NotImplementedError(
-                f"LLVM backend: no implementation of the random variable {node.op}"
-            )
         layouts = [
             None if layout is None else _allocated_layout(node.op, var, layout)
             for var, layout in zip(node.outputs, binding, strict=True)

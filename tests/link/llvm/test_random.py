@@ -83,6 +83,24 @@ def test_broadcast_parameters_and_size():
     np.testing.assert_allclose(ry.mean(axis=0), mv, atol=0.1)
 
 
+def test_core_draws_loop_over_the_batch():
+    # no sampler (core axes): numba's core function draws once per batch element
+    mu = pt.dmatrix("mu")
+    n = pt.lscalar("n")
+    rng = pytensor.shared(np.random.default_rng(0))
+    x = rb.multivariate_normal(mu, np.diag([1.0, 4.0]), size=(n, 3), rng=rng)
+    f = pytensor.function([mu, n], x, mode=get_mode("LLVM"))
+    assert f.maker.linker.stats.numba
+    mv = np.array([[0.0, 1.0], [10.0, 11.0], [-10.0, -11.0]])
+    r = f(mv, 20_000)
+    assert r.shape == (20_000, 3, 2)
+    np.testing.assert_allclose(r.mean(axis=0), mv, atol=0.1)
+    np.testing.assert_allclose(r.var(axis=0), [[1.0, 4.0]] * 3, rtol=0.05)
+    assert f(mv, 0).shape == (0, 3, 2)
+    with pytest.raises(Exception, match="batch axes of the inputs"):
+        f(mv[:2], 5)
+
+
 def test_parameter_checks():
     sigma = pt.dscalar("sigma")
     rng = pytensor.shared(np.random.default_rng(0))
