@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, TypeVar, Union, overload
 import numpy as np
 
 import pytensor
-from pytensor.compile.ops import ViewOp
+from pytensor.compile.ops import ViewOp, view_op
 from pytensor.configdefaults import config
 from pytensor.graph import utils, vectorize_graph
 from pytensor.graph.basic import Apply, Variable
@@ -504,7 +504,10 @@ def pullback(
     _wrt = [x if isinstance(x, Variable) else as_tensor_variable(x) for x in wrt]
 
     assert len(_f) == len(grads)
-    known = dict(zip(_f, grads, strict=True))
+    # Seed each output through its own view, so a repeated output, or one that is
+    # an input of another output or in `wrt`, adds its cotangent to the gradient
+    # reaching it instead of replacing it (known_grads overrides).
+    known = {view_op(fi): g for fi, g in zip(_f, grads, strict=True)}
 
     ret = grad(
         cost=None,
