@@ -1,3 +1,4 @@
+import pickle
 from functools import partial
 
 import numpy as np
@@ -793,6 +794,26 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         r1, r2 = fn(2.0, 3.0, 4.0, 5.0)
         np.testing.assert_allclose(r1, 2.0 + 3.0 * 2.0)
         np.testing.assert_allclose(r2, 4.0 + 5.0 * 4.0)
+
+    def test_pickle_after_gradients(self):
+        # https://github.com/pymc-devs/pytensor/issues/2563
+        x = vector("x")
+        y = OpFromGraph([x], [pt.sin(x) * x])(x)
+        pt.grad(y.sum(), x)
+        pushforward(y, x, x.type(), use_op_pushforward=True)
+        assert y.owner.op._lop_op_cache
+        assert y.owner.op._rop_op_cache is not None
+
+        y_new = pickle.loads(pickle.dumps(y))
+
+        assert y_new.owner.op == y.owner.op
+        # The caches are rebuilt on demand
+        g = pt.grad(y_new.sum(), y_new.owner.inputs[0])
+        fn = function([y_new.owner.inputs[0]], [y_new, g], mode=Mode(linker="py"))
+        val = np.array([0.5, 1.5], dtype=config.floatX)
+        res, grad_res = fn(val)
+        np.testing.assert_allclose(res, np.sin(val) * val, rtol=1e-6)
+        np.testing.assert_allclose(grad_res, np.cos(val) * val + np.sin(val), rtol=1e-6)
 
 
 @pytest.mark.parametrize("linker", ["cvm", "py"])
