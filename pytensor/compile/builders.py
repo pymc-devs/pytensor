@@ -420,6 +420,10 @@ class OpFromGraph(HasInnerFunction, Op):
 
         self._frozen_lop = None
         self._frozen_rop = None
+        # The shapes of the inner outputs, built by `infer_shape` on first use: per
+        # output, its shape graph (None: no shape), and those graphs frozen
+        self._inner_shape_template: list | None = None
+        self._inner_shape_frozen: FrozenFunctionGraph | None = None
 
     # Thread-safe guard against infinite recursion when freezing overrides.
     # When True, __eq__ skips override comparison entirely.
@@ -847,10 +851,7 @@ class OpFromGraph(HasInnerFunction, Op):
         return ret
 
     def infer_shape(self, node, shapes):
-        try:
-            template = self._inner_shape_template
-            frozen = self._inner_shape_frozen
-        except AttributeError:
+        if self._inner_shape_frozen is None or self._inner_shape_template is None:
             from pytensor.tensor.rewriting.shape import ShapeFeature
 
             sf = ShapeFeature()
@@ -878,6 +879,8 @@ class OpFromGraph(HasInnerFunction, Op):
             )
             self._inner_shape_template = template
             self._inner_shape_frozen = frozen
+        template = self._inner_shape_template
+        frozen = self._inner_shape_frozen
 
         # frozen.inputs is [*inner_inputs, *per-dim sizes]; mirror that layout.
         replacements = list(node.inputs)
@@ -933,6 +936,8 @@ class OpFromGraph(HasInnerFunction, Op):
         new._rop_op_cache = None
         new._frozen_lop = None
         new._frozen_rop = None
+        new._inner_shape_template = None
+        new._inner_shape_frozen = None
         return new
 
     def perform(self, node, inputs, outputs):
