@@ -1788,13 +1788,11 @@ def geomspace(
         axis=0,
         retstep=False,
     )
-    result = base**result
+    result = base**result * out_sign
 
     result = switch(gt(num, 0), set_subtensor(result[0, ...], start), result)
     if endpoint:
         result = switch(gt(num, 1), set_subtensor(result[-1, ...], stop), result)
-
-    result = result * out_sign
 
     if axis != 0:
         result = ptb.moveaxis(result, 0, axis)
