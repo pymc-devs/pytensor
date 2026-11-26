@@ -215,6 +215,22 @@ def test_stack_unstack():
     xr_assert_allclose(res, expected_res)
 
 
+def test_stack_unstack_methods_keyword_dims():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/2716
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 5))
+    stacked = x.stack(bc=("b", "c"))
+    unstacked = stacked.unstack(bc=dict(b=3, c=5))
+
+    fn = xr_function([x], [stacked, unstacked])
+    x_test = xr_arange_like(x)
+    res_stacked, res_unstacked = fn(x_test)
+    expected_res_stacked = x_test.stack(bc=("b", "c"))
+    # xarray's unstack takes dim names only, it gets the sizes from the coords
+    expected_res_unstacked = expected_res_stacked.unstack("bc")
+    xr_assert_allclose(res_stacked, expected_res_stacked)
+    xr_assert_allclose(res_unstacked, expected_res_unstacked)
+
+
 @pytest.mark.parametrize("dim", ("a", "b", "new"))
 def test_concat(dim):
     rng = np.random.default_rng(sum(map(ord, dim)))
