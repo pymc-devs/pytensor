@@ -861,9 +861,8 @@ class FuseElemwise(GraphRewriter):
                     props = update_node.op._props_dict()
                     props["inplace"] = True
                     inplace_op = type(update_node.op)(**props)
-                    write_out = inplace_op(
-                        inner_target, node.outputs[out_idx], *update_node.inputs[2:]
-                    )
+                    # The value as written, with its right padding if it has one.
+                    write_out = inplace_op(inner_target, *update_node.inputs[1:])
 
                 fgraph_outputs[out_idx] = write_out
                 fgraph_destroy_map[out_idx] = [target_pos]
