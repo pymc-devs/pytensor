@@ -4,8 +4,10 @@ reductions (see pytensor.tensor.rewriting.fused_elemwise).
 Outer inputs are `[elemwise inputs..., index arrays..., write targets...]`. Each Elemwise
 input is plain (broadcast by its type) or read through a 1-d index array along one axis.
 Each output is plain, a reduction over some loop axes, or written through an index into
-a copy of its target (inc or set). Patterns outside this raise NotImplementedError and
-the planner runs the inner graph node by node instead.
+a copy of its target (inc or set). A target may have more axes than the loop: the value
+of each element is then broadcast over the target's trailing axes (the rewrite pads the
+value on the right). Patterns outside this raise NotImplementedError and the planner
+runs the inner graph node by node instead.
 """
 
 from __future__ import annotations
@@ -49,6 +51,8 @@ class Write:
     axis: int
     target: int  # outer input position of the target
     set: bool
+    #: trailing axes of the target past the loop's, which every value is broadcast over
+    extra: int
 
 
 @dataclass
@@ -119,19 +123,20 @@ def fused_spec(op, node):
     for k, entry in enumerate(op.indexed_outputs):
         if entry is None:
             continue
-        sources, axis, mode = entry
+        sources, axis, modes = entry
         check_index(n_elem + k)
-        for s in sources:
+        for s, mode in zip(sources, modes, strict=True):
             if outs[s] is not None:
                 raise NotImplementedError(
                     "FusedElemwise: an output written through several indices"
                 )
-            outs[s] = Write(
-                n_elem + k,
-                int(axis),
-                n_elem + n_idx + written.index(int(s)),
-                mode == "set",
-            )
+            target = n_elem + n_idx + written.index(int(s))
+            extra = node.inputs[target].type.ndim - E.outputs[s].type.ndim
+            if extra < 0 or int(axis) >= E.outputs[s].type.ndim:
+                raise NotImplementedError(
+                    "FusedElemwise: a write target with fewer axes than the loop"
+                )
+            outs[s] = Write(n_elem + k, int(axis), target, mode == "set", extra)
     for i, var in enumerate(node.outputs):
         if var.type.dtype != E.outputs[i].type.dtype:
             raise NotImplementedError(
@@ -263,14 +268,20 @@ def emit_fused(op, node, cg, inputs, outputs):
             fixed[j] = load(b, x.scalar_type, x.data)
             continue
         skip = reads[j].axis if reads[j] is not None else None
-        # (an indexed axis is stepped through by the index, not by the loop)
+        # An indexed axis is stepped through by the index, not by the loop.
         plain_in[j] = x.loop_view(b, shape, zero_axes=() if skip is None else (skip,))
     plain_out = {}
+    #: per write with trailing target axes: (their lengths, strides, layout)
+    blocks = {}
     for i, spec in enumerate(outs):
         res, acc = out_arrays[i]
         if isinstance(spec, Reduce):
             plain_out[i] = reduced_view(b, acc, shape, spec.axes)
         elif isinstance(spec, Write):
+            if spec.extra:
+                lead, trail = range(nd), range(nd, res.ndim)
+                blocks[i] = _sub_axes(res, trail)
+                res = res.view(res.data, *_sub_axes(res, lead))
             plain_out[i] = res.loop_view(b, shape, zero_axes=(spec.axis,))
         else:
             plain_out[i] = res.loop_view(b, shape)
@@ -280,7 +291,7 @@ def emit_fused(op, node, cg, inputs, outputs):
         return inputs[k].load(b, i).astype(ps.int64).value
 
     def checked(v, n, what, k):
-        # (reads fail after the loop, so that it can be vectorized: `run`)
+        # Reads fail after the loop so that it can be vectorized, see `run`.
         return cg.checked_index(
             v,
             n,
@@ -351,12 +362,28 @@ def emit_fused(op, node, cg, inputs, outputs):
                     new_runs[i] = inc_run(i, d, ptr_out[i], ix, v, *runs[i])
                     continue
                 p = element(i, ptr_out[i], ix)
+                if i in blocks:
+                    write_block(blocks[i], p, d, v, spec.set)
+                    continue
                 if not spec.set:
                     v = emit_scalar(add, b, [(load(b, d, p), d), (v, d)], [d])[0]
                 store(b, d, v, p)
             else:
                 store(b, d, v, ptr_out[i])
         return new_accs, new_runs
+
+    def write_block(block, p, d, v, set_):
+        """Set or increment every element of the trailing axes at `p` with `v`."""
+
+        def each(q):
+            w = v
+            if not set_:
+                w = emit_scalar(add, b, [(load(b, d, q[0]), d), (v, d)], [d])[0]
+            store(b, d, w, q[0])
+
+        lengths, strides, layout = block
+        target = Array(d, p, lengths, strides, layout)
+        cg.for_each(lengths, [target], each)
 
     def element(i, base, ix):
         res_arr = out_arrays[i][0]
@@ -411,7 +438,7 @@ def emit_fused(op, node, cg, inputs, outputs):
     inner_inc = [
         i
         for i, s in enumerate(outs)
-        if isinstance(s, Write) and not s.set and s.axis == inner
+        if isinstance(s, Write) and not s.set and not s.extra and s.axis == inner
     ]
 
     def chunked(n, ptrs, index, init, nr):
@@ -472,7 +499,7 @@ def emit_fused(op, node, cg, inputs, outputs):
 
     def nest():
         def level(k, ptrs, index):
-            if k == nd:  # (nd == 0)
+            if k == nd:  # Only when nd is 0.
                 pi, po = split(ptrs)
                 body(pi, po, index, {})
                 return
@@ -564,7 +591,7 @@ def emit_fused(op, node, cg, inputs, outputs):
     flat_arrays = [plain_in[j] for j in in_keys] + [
         plain_out[i] for i in out_keys if not isinstance(outs[i], Reduce)
     ]
-    # (the nest has its own `order`)
+    # The nest has its own `order`.
     flat_order = loop_order(shape, flat_arrays)
     contig = b.const_bool(True)
     for arr in flat_arrays:
@@ -625,6 +652,14 @@ def reduced_view(b, acc: Array, shape, axes) -> Array:
         strides,
         Layout.make([n.const_int for n in shape], order, kinds),
     )
+
+
+def _sub_axes(a: Array, axes) -> tuple[list, list, Layout]:
+    """The lengths, strides and layout of `a` restricted to `axes` (a view at a fixed
+    index of the others)."""
+    shape = [a.shape[k] for k in axes]
+    strides = [a.strides[k] for k in axes]
+    return shape, strides, a.view_layout(shape, strides, list(axes))
 
 
 def _finish(cg, outs, out_arrays):

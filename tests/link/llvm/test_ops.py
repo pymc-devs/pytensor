@@ -541,6 +541,33 @@ def test_fused_elemwise_indexed_increments():
         f(rng.random(5), rng.random(10))
 
 
+def test_fused_elemwise_indexed_writes():
+    # Sets, and writes into targets with more axes than the loop. The rewrite moves
+    # the extra leading axes to the end, and the value is broadcast over them.
+    x = pt.vector("x")
+    m = pt.matrix("m")
+    t = pt.tensor3("t")
+    y = pt.vector("y")
+    idx = pt.lvector("idx")
+    # Each write has a value of its own: a value written several times is not fused.
+    # The writes end up in one loop.
+    outs = [
+        pt.set_subtensor(x[idx], pt.exp(y)),
+        pt.inc_subtensor(m[:, idx], pt.sin(y)),
+        pt.set_subtensor(m[:, idx], pt.cos(y)),
+        pt.inc_subtensor(t[:, :, idx], pt.log1p(y)),
+    ]
+    values = [
+        rng.random(10),
+        rng.random((3, 10)),
+        rng.random((2, 3, 10)),
+        rng.random(5),
+        np.array([0, 3, 3, -1, 9]),
+    ]
+    f = compare([x, m, t, y, idx], outs, values)
+    assert any(s.startswith("FusedElemwise") for s in steps(f))
+
+
 def test_scan_sit_sot_mit_sot_nit_sot():
     x0 = pt.dscalar("x0")
     seq = pt.vector("seq")

@@ -407,6 +407,12 @@ class TestIndexedWriteFusion:
         valv = rng.normal(size=val_shape)
         tv = rng.normal(size=target_shape)
         np.testing.assert_allclose(fn(valv, tv), fn_u(valv, tv), rtol=1e-10)
+        # The inner graph is what other backends run: it must write the padded value.
+        fn_py = function(
+            [val, target], out, mode=Mode(linker="py", optimizer=NUMBA_MODE.optimizer)
+        )
+        assert_fused(fn_py)
+        np.testing.assert_allclose(fn_py(valv, tv), fn_u(valv, tv), rtol=1e-10)
 
     def test_inc_subtensor(self):
         rng = np.random.default_rng(42)
