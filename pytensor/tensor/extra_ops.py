@@ -495,6 +495,7 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
     number of occurrences of its index value in `x`. If `weights` is
     specified the input array is weighted by it, i.e. if a value ``n`` is found
     at position ``i``, ``out[n] += weight[i]`` instead of ``out[n] += 1``.
+    The output is ``int64``, or ``float64`` if `weights` is given.
 
     Parameters
     ----------
@@ -512,6 +513,7 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
     .. versionadded:: 0.6
 
     """
+    x = ptb.as_tensor_variable(x)
     if x.ndim != 1:
         raise TypeError("Inputs must be of dimension 1.")
 
@@ -519,7 +521,11 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
         assert_op = Assert("Input to bincount has negative values!")
         x = assert_op(x, pt_all(x >= 0))
 
-    max_value = ptb.cast(x.max() + 1, "int64")
+    if x.dtype == "bool":
+        x = ptb.cast(x, "int64")
+
+    # NumPy makes no bins for an empty `x`, where `max` would raise
+    max_value = switch(x.shape[0] > 0, ptb.cast(x.max(initial=-np.inf), "int64") + 1, 0)
 
     if minlength is not None:
         max_value = maximum(max_value, minlength)
@@ -527,11 +533,11 @@ def bincount(x, weights=None, minlength=None, assert_nonneg=False):
     # Note: we do not use inc_subtensor(out[x], ...) in the following lines,
     # since out[x] raises an exception if the indices (x) are int8.
     if weights is None:
-        out = ptb.zeros([max_value], dtype=x.dtype)
+        out = ptb.zeros([max_value], dtype="int64")
         out = advanced_inc_subtensor(out, 1, x)
     else:
-        out = ptb.zeros([max_value], dtype=weights.dtype)
-        out = advanced_inc_subtensor(out, weights, x)
+        out = ptb.zeros([max_value], dtype="float64")
+        out = advanced_inc_subtensor(out, ptb.cast(weights, "float64"), x)
     return out
 
 

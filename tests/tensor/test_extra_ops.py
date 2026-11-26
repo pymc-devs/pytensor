@@ -302,6 +302,78 @@ class TestBinCount(utt.InferShapeTester):
             with pytest.raises(AssertionError):
                 f5(a)
 
+    @pytest.mark.parametrize(
+        "dtype, mode", [("int8", None), ("uint8", None), ("int8", "FAST_COMPILE")]
+    )
+    def test_small_int_dtypes(self, dtype, mode):
+        # More occurrences than the dtype can count, of the largest value it holds
+        info = np.iinfo(dtype)
+        a = np.full(info.max + 5, info.max, dtype=dtype)
+
+        x = vector("x", dtype=dtype)
+        res = pytensor.function([x], bincount(x), mode=mode)(a)
+        np.testing.assert_array_equal(res, np.bincount(a))
+        assert res.dtype == np.bincount(a).dtype
+
+    @pytest.mark.parametrize(
+        "dtype, mode",
+        [
+            ("bool", None),
+            ("int8", None),
+            ("float32", None),
+            ("int8", "FAST_COMPILE"),
+        ],
+    )
+    def test_weights_dtype(self, dtype, mode):
+        # NumPy sums the weights in float64: three int8 weights of 100 do not wrap
+        a = np.array([0, 0, 0, 2])
+        w = np.array([100, 100, 100, 5]).astype(dtype)
+
+        x = vector("x", dtype=a.dtype)
+        weights = vector("w", dtype=dtype)
+        res = pytensor.function([x, weights], bincount(x, weights), mode=mode)(a, w)
+        np.testing.assert_array_equal(res, np.bincount(a, weights=w))
+        assert res.dtype == np.bincount(a, weights=w).dtype
+
+    def test_complex_weights(self):
+        # NumPy raises rather than drop the imaginary part
+        x = vector("x", dtype="int64")
+        weights = vector("w", dtype="complex64")
+        with pytest.raises(TypeError, match="complex to real"):
+            bincount(x, weights)
+
+    def test_numpy_input(self):
+        a = np.array([0, 2, 2], dtype="uint8")
+
+        res = bincount(a).eval()
+        np.testing.assert_array_equal(res, np.bincount(a))
+        assert res.dtype == np.bincount(a).dtype
+
+    def test_bool_input(self):
+        a = np.array([True, False, True])
+
+        x = vector("x", dtype="bool")
+        res = pytensor.function([x], bincount(x))(a)
+        np.testing.assert_array_equal(res, np.bincount(a))
+        assert res.dtype == np.bincount(a).dtype
+
+    @pytest.mark.parametrize(
+        "dtype, minlength, mode",
+        [
+            ("int64", None, None),
+            ("int64", None, "FAST_COMPILE"),
+            ("uint8", None, None),
+            ("int64", 3, "FAST_COMPILE"),
+        ],
+    )
+    def test_empty_input(self, dtype, minlength, mode):
+        a = np.array([], dtype=dtype)
+
+        x = vector("x", dtype=dtype)
+        res = pytensor.function([x], bincount(x, minlength=minlength), mode=mode)(a)
+        np.testing.assert_array_equal(res, np.bincount(a, minlength=minlength or 0))
+        assert res.dtype == np.bincount(a).dtype
+
 
 class TestDiff(utt.InferShapeTester):
     def test_basic(self):
