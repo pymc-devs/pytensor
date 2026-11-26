@@ -218,9 +218,7 @@ class TestPushforwardPullback(PushforwardPullbackChecker):
         )
 
     def test_min(self):
-        # `Min` is the bare reduction Op. Unlike `pt.min`, which lowers to
-        # ``-max(-x)`` and never instantiates `Min`, this exercises the Op's
-        # own pushforward/pullback. It must behave exactly like `Max`.
+        # `Min` must behave exactly like `Max`, in its own pushforward/pullback.
         self.check_mat_pushforward_pullback(
             Min(axis=[0])(self.mx), (self.mat_in_shape[1],)
         )
