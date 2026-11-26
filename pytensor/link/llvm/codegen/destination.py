@@ -20,19 +20,17 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, Slot, size
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.num import load
-from pytensor.link.llvm.codegen.types import (
-    TensorRepr,
-    ir,
-)
+from pytensor.link.llvm.codegen.types import ir
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.types import TensorRepr
 from pytensor.scalar.basic import ScalarType
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.codegen.signature import Output
+    from pytensor.link.llvm.planning.signature import Output
 
 
 class OutputDestination:

@@ -45,7 +45,6 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple, Self
 import pytensor.scalar as ps
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
-from pytensor.link.llvm.analysis.layout import Layout, Stride
 from pytensor.link.llvm.codegen.array import Array, advance, size
 from pytensor.link.llvm.codegen.context import (
     Codegen,
@@ -58,15 +57,19 @@ from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
     EmitterOutput,
     TensorOutput,
+)
+from pytensor.link.llvm.codegen.num import cast, constant, load, store
+from pytensor.link.llvm.codegen.types import ir, memory_type
+from pytensor.link.llvm.dispatch.elemwise import identity_value
+from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
+from pytensor.link.llvm.layout import Layout, Stride
+from pytensor.link.llvm.registry import (
     llvm_emit,
     llvm_layout,
     llvm_supports,
     supported_types,
 )
-from pytensor.link.llvm.codegen.num import cast, constant, load, store
-from pytensor.link.llvm.codegen.types import element_type, ir, memory_type
-from pytensor.link.llvm.dispatch.elemwise import identity_value
-from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
+from pytensor.link.llvm.types import element_type
 from pytensor.scalar.basic import ScalarOp, ScalarType, add
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import AdvancedSubtensor

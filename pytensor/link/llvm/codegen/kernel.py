@@ -6,28 +6,41 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pytensor.graph.basic import Apply
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, Slot
 from pytensor.link.llvm.codegen.context import Codegen
+from pytensor.link.llvm.codegen.errors import ExceptionTable
 from pytensor.link.llvm.codegen.kernel_module import (
     KERNEL,
     CodegenOptions,
     KernelModule,
+    PlanGraph,
     link,
 )
-from pytensor.link.llvm.codegen.node import NodeFunction, build_node_function
-from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
+from pytensor.link.llvm.codegen.node import (
+    NodeFunction,
+    build_node_function,
+    node_function,
+)
 from pytensor.link.llvm.codegen.types import (
     PTARRAY_SIZE,
     PtArray,
-    TensorRepr,
     dtype_code,
     ir,
+    ir_type,
     kernel_params,
     ptarray_type,
 )
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.implementation import OwnModule
+from pytensor.link.llvm.planning.signature import Output, Passing, Signature
+from pytensor.link.llvm.types import TensorRepr
+
+
+if TYPE_CHECKING:
+    from pytensor.link.llvm.planning.plan import Step
 
 
 def build_kernel_wrapper(
@@ -85,7 +98,7 @@ def build_kernel_wrapper(
             for a in representation.stride_axes
         ]
         return b.aggregate(
-            representation.ir_type,
+            ir_type(representation),
             [
                 data,
                 b.aggregate(ir.Type.array(ir.i64, len(lengths)), lengths),
@@ -222,6 +235,33 @@ class CompiledNode:
         return self.unit.config
 
 
+def build_own_module(
+    step: Step,
+    options: CodegenOptions,
+    plan_graph: PlanGraph,
+    exceptions: ExceptionTable,
+) -> KernelModule:
+    """Build the module of a step the planner compiles on its own (`OwnModule`): its
+    node function, from the step's signature, wrapped as a kernel.
+
+    The program builds these before its own function, which calls them, and links them
+    with it. For example, an Elemwise of the program without a Rust kernel becomes a
+    module `node_Elemwise` specialized for its inputs' layouts. Their error codes go
+    into the program's `exceptions`."""
+    implementation = step.implementation
+    if not isinstance(implementation, OwnModule):
+        raise TypeError(f"{step.description} isn't compiled on its own")
+    node = step.node
+    unit = KernelModule.new(
+        f"node_{type(node.op).__name__}", options, plan_graph, exceptions
+    )
+    function = node_function(unit, "node", node, implementation.inner, step.signature)
+    unit.description = implementation.description
+    unit.module.label = "ptl:" + " ".join(implementation.description.split())[:160]
+    build_kernel_wrapper(unit, function)
+    return unit
+
+
 def compile_node(
     node: Apply,
     *,
@@ -243,5 +283,6 @@ def compile_node(
 __all__ = [
     "CompiledNode",
     "build_kernel_wrapper",
+    "build_own_module",
     "compile_node",
 ]

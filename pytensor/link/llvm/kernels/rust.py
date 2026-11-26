@@ -2,7 +2,7 @@
 
 `rust_kernel(op, node, in_layouts, linalg_parallel)` returns a
 `pytensor_llvm.runtime.RustKernel` (function address + config) or None when the node has
-no Rust kernel; `in_layouts` are the inputs' layouts (analysis/layout.py; None where
+no Rust kernel; `in_layouts` are the inputs' layouts (layout.py; None where
 unknown). Each kernel is made for its inputs' layouts and the number of axes of its
 outputs (`made_for`), and chooses the layouts of its outputs then
 (`Kernel::output_layouts`, in Rust next to the kernel; the counterpart of
@@ -17,9 +17,10 @@ from typing import Any
 
 import numpy as np
 
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.call import Kernel
-from pytensor.link.llvm.codegen.implementation import OutputDeclaration, RustKernel
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.implementation import OutputDeclaration, RustKernel
+from pytensor.link.llvm.registry import llvm_layout
 from pytensor.tensor.math import Dot
 
 
@@ -33,7 +34,7 @@ def made_for(node, in_layouts) -> tuple[list, list[int]]:
     """What every kernel is made for, its last two arguments: the layouts of the
     inputs (`Layout.to_spec`, None where unknown) and the number of axes of each
     output. It chooses the layouts of its outputs from them."""
-    from pytensor.link.llvm.codegen.signature import known_layouts
+    from pytensor.link.llvm.planning.signature import known_layouts
 
     ins = [
         None if layout is None else layout.to_spec()
@@ -369,7 +370,6 @@ def _declare_layouts():
     `llvm_layout` says what the kernel chooses for the inputs' layouts, so that the
     planner binds the outputs to them. (Where no kernel applies, e.g. for another
     dtype, the default: what a numba kernel then allocates.)"""
-    from pytensor.link.llvm.codegen.interface import llvm_layout
 
     def declared(op, node, input_layouts):
         kernel = rust_kernel(op, node, input_layouts)

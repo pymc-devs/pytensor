@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, c_strides, size
-from pytensor.link.llvm.codegen.interface import ScalarOutput, llvm_emit, llvm_layout
+from pytensor.link.llvm.codegen.interface import ScalarOutput
 from pytensor.link.llvm.codegen.num import cast, load, store
-from pytensor.link.llvm.codegen.types import element_type, ir
+from pytensor.link.llvm.codegen.types import ir
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.registry import llvm_emit, llvm_layout
+from pytensor.link.llvm.types import element_type
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, Join, MakeVector
 from pytensor.tensor.shape import Reshape, Shape, Shape_i

@@ -1,5 +1,6 @@
 """The LLVM implementations of ops: what each op registers (`llvm_emit`, `llvm_layout`,
-see codegen/interface.py). Importing this package registers them all.
+see registry.py). Importing this package registers them all; importing the registry
+imports it.
 
 * `scalar`: scalar ops (`gamma`: GammaLn and Psi);
 * `elemwise`: Elemwise, scalar-op nodes, CAReduce;

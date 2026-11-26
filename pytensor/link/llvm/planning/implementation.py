@@ -23,8 +23,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from pytensor.graph.basic import Apply
-from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.types import element_type, is_absent
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.registry import llvm_emit, llvm_layout
+from pytensor.link.llvm.types import element_type, is_absent
 
 
 if TYPE_CHECKING:
@@ -32,8 +33,7 @@ if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.context import Codegen
     from pytensor.link.llvm.codegen.destination import OutputDestination
     from pytensor.link.llvm.codegen.interface import EmitterInput
-    from pytensor.link.llvm.codegen.kernel_module import KernelModule
-    from pytensor.link.llvm.codegen.signature import Signature
+    from pytensor.link.llvm.planning.signature import Signature
 
 
 @dataclass(frozen=True)
@@ -123,8 +123,6 @@ class Generated:
     def outputs(
         self, node: Apply, in_layouts: Sequence[Layout | None]
     ) -> list[OutputDeclaration]:
-        from pytensor.link.llvm.codegen.interface import llvm_layout
-
         declared = llvm_layout(node.op, node, list(in_layouts))
         return [OutputDeclaration(layout) for layout in declared]
 
@@ -140,9 +138,8 @@ class Generated:
         from pytensor.link.llvm.codegen.interface import (
             ScalarOutput,
             TensorOutput,
-            llvm_emit,
         )
-        from pytensor.link.llvm.codegen.signature import (
+        from pytensor.link.llvm.planning.signature import (
             destroyed_inputs,
             view_inputs,
         )
@@ -190,12 +187,8 @@ class _KernelCall:
 
     declarations: tuple[OutputDeclaration, ...]
 
-    @property
-    def callee(self) -> Callee:
-        raise NotImplementedError
-
-    @property
-    def description(self) -> str:
+    def callee(self, cg: Codegen) -> Callee:
+        """What the code `cg` generates calls."""
         raise NotImplementedError
 
     @property
@@ -237,7 +230,7 @@ class _KernelCall:
             values.append(
                 (value, None if is_absent(var.type) else element_type(var.type))
             )
-        call_kernel(cg, self.callee, values, outputs)
+        call_kernel(cg, self.callee(cg), values, outputs)
 
 
 @dataclass(frozen=True)
@@ -249,8 +242,7 @@ class RustKernel(_KernelCall):
     kernel: Kernel
     declarations: tuple[OutputDeclaration, ...]
 
-    @property
-    def callee(self) -> Callee:
+    def callee(self, cg: Codegen) -> Callee:
         return self.kernel
 
     @property
@@ -269,8 +261,7 @@ class NumbaKernel(_KernelCall):
     #: the inputs its op destroys
     destroys: frozenset[int] = field(default=frozenset(), kw_only=True)
 
-    @property
-    def callee(self) -> Callee:
+    def callee(self, cg: Codegen) -> Callee:
         return self.kernel
 
     @property
@@ -284,21 +275,19 @@ class NumbaKernel(_KernelCall):
 
 @dataclass(frozen=True, eq=False)
 class OwnModule(_KernelCall):
-    """Generated code compiled in a module of its own (`unit`, built from `inner` with
-    the same signature), called like a kernel: a step of the program. The module is
-    linked with the program (`kernel_module.link`)."""
+    """Generated code compiled in a module of its own, called like a kernel: a step of
+    the program. The planner only decides this; codegen builds the module from `inner`
+    with the step's signature (`kernel.build_own_module`) before the code calling it,
+    which finds it in its `KernelModule.own_modules`. The module is linked with the
+    program (`kernel_module.link`)."""
 
-    unit: KernelModule
     declarations: tuple[OutputDeclaration, ...]
+    #: what it runs, for stats, dumps and perf maps
+    description: str
     inner: Implementation = field(default=GENERATED, kw_only=True)
 
-    @property
-    def callee(self) -> Callee:
-        return self.unit
-
-    @property
-    def description(self) -> str:
-        return self.unit.description
+    def callee(self, cg: Codegen) -> Callee:
+        return cg.unit.own_modules[self]
 
     @property
     def may_view(self) -> bool:

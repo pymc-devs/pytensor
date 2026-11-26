@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytensor.scalar as ps
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
-from pytensor.link.llvm.analysis.layout import PACKED, Layout, Stride
 from pytensor.link.llvm.codegen.array import Array
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import cast
-from pytensor.link.llvm.codegen.types import element_type
+from pytensor.link.llvm.layout import PACKED, Layout, Stride
+from pytensor.link.llvm.registry import llvm_emit, llvm_layout
+from pytensor.link.llvm.types import element_type
 from pytensor.tensor.basic import ScalarFromTensor, TensorFromScalar
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.shape import SpecifyShape

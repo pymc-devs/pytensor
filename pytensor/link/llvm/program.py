@@ -8,7 +8,7 @@
    (`analysis/layout.py`).
 2. The program's function runs the planned graph (`build_graph_function`,
    codegen/graph.py): it calls the steps in order, with its temporaries of a fixed size
-   in the frames the plan lays out (`analysis/memory.py`). What is decided here is its
+   in the frames the plan lays out (`planning/memory.py`). What is decided here is its
    boundary with the caller: values without data (random generators) aren't passed,
    and each output is written into memory the caller provides or handed over in a
    buffer (`_output_modes`).
@@ -28,31 +28,32 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 
 from pytensor.graph.basic import Constant
-from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.analysis.memory import Frame, plan_memory
+from pytensor.link.llvm.codegen.errors import ExceptionTable
 from pytensor.link.llvm.codegen.graph import (
     PROFILE_CALLS,
     PROFILE_ITEMS,
     PROFILE_ON,
     build_graph_function,
 )
-from pytensor.link.llvm.codegen.implementation import (
+from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper, build_own_module
+from pytensor.link.llvm.codegen.kernel_module import (
+    CodegenOptions,
+    KernelModule,
+    link,
+)
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.implementation import (
     GENERATED,
     Implementation,
     NumbaKernel,
     OwnModule,
     RustKernel,
 )
-from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
-from pytensor.link.llvm.codegen.kernel_module import (
-    CodegenOptions,
-    KernelModule,
-    link,
-)
-from pytensor.link.llvm.codegen.plan import PlannedGraph, ValueId
-from pytensor.link.llvm.codegen.signature import Output, Passing
-from pytensor.link.llvm.codegen.types import TensorRepr, is_absent, repr_of
-from pytensor.link.llvm.planner import Planner
+from pytensor.link.llvm.planning.memory import Frame, plan_memory
+from pytensor.link.llvm.planning.plan import PlannedGraph, ValueId
+from pytensor.link.llvm.planning.planner import Planner
+from pytensor.link.llvm.planning.signature import Output, Passing
+from pytensor.link.llvm.types import TensorRepr, is_absent, repr_of
 from pytensor.scalar.basic import ScalarType
 
 
@@ -176,8 +177,8 @@ def with_locations(text: str) -> str:
 
 @dataclass
 class GeneratedModule:
-    """A module the planner generated (for a step, or the program's function),
-    compiled."""
+    """A generated module (for a step compiled on its own, or the program's
+    function), compiled."""
 
     description: str
     compiled: CompiledModule
@@ -273,7 +274,7 @@ class Program:
     #: what each step runs
     descriptions: list[str]
     #: the size in bytes of the frames of the program's function, which hold its
-    #: temporary values of a fixed size (analysis/memory.py)
+    #: temporary values of a fixed size (planning/memory.py)
     frame_bytes: int
     #: the profiling cells: on/off, calls, then nanoseconds per step (`PROFILE_*`)
     profile_cells: np.ndarray
@@ -677,8 +678,9 @@ def compile_program(fgraph, options: Options | None = None):
 
 
 def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Program:
-    """Generate the program's function around the planned graph `planned`, compile it
-    with the modules the planner generated for its steps, and wrap it in a `Program`.
+    """Generate the modules of the steps compiled on their own and the program's
+    function around the planned graph `planned`, compile them together, and wrap them
+    in a `Program`.
     `ins`, `outs`: the positions of the graph's inputs and outputs the function has;
     `contiguous`: per input, is it guaranteed C-contiguous?"""
     opts, stats = planner.opts, planner.stats
@@ -688,7 +690,16 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
     out_ids = [planned.out_ids[pos] for pos in outs]
     modes = _output_modes(steps, out_ids, types)
     t0 = time.perf_counter()
-    unit = KernelModule.new("program", opts.codegen, planner.graph, planner.exceptions)
+    exceptions = ExceptionTable()
+    modules = {
+        step.implementation: build_own_module(
+            step, opts.codegen, planner.graph, exceptions
+        )
+        for step in steps
+        if isinstance(step.implementation, OwnModule)
+    }
+    unit = KernelModule.new("program", opts.codegen, planner.graph, exceptions)
+    unit.own_modules = modules
     profile = np.zeros(PROFILE_ITEMS + len(steps), dtype=np.uint64)
     # (returned outputs are handed over in any layout)
     outputs = []
@@ -721,11 +732,11 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
 
     # compile and link everything at once
     unit.module.label = f"ptl:program[{len(steps)}]"
-    link([*planner.modules, unit], opts.opt_level)
-    for m in planner.modules:
+    link([*modules.values(), unit], opts.opt_level)
+    for m in modules.values():
         assert m.compiled is not None
         stats.modules.append(GeneratedModule(m.description, m.compiled))
-    stats.n_modules = len(planner.modules)
+    stats.n_modules = len(modules)
     assert unit.compiled is not None
     stats.modules.append(GeneratedModule("program", unit.compiled))
     stats.codegen_s = t1 - t0
@@ -739,7 +750,7 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         profile,
         contiguous,
         modes,
-        any(m.uses_pool for m in (*planner.modules, unit)),
+        any(m.uses_pool for m in (*modules.values(), unit)),
     )
 
 

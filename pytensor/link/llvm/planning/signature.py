@@ -14,15 +14,14 @@ from dataclasses import dataclass, replace
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.features import op_view_parents
-from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
-from pytensor.link.llvm.codegen.implementation import GENERATED, Implementation
-from pytensor.link.llvm.codegen.interface import has_emitter
-from pytensor.link.llvm.codegen.types import (
+from pytensor.link.llvm.layout import Layout, new_memory_layout
+from pytensor.link.llvm.planning.implementation import GENERATED, Implementation
+from pytensor.link.llvm.registry import has_emitter
+from pytensor.link.llvm.types import (
     NoneRepr,
     Representation,
     ScalarRepr,
     TensorRepr,
-    ir,
     is_absent,
     repr_of,
 )
@@ -90,14 +89,6 @@ class Output:
             ),
         )
 
-    @property
-    def ir_type(self) -> ir.Type:
-        """The type of the output's parameter: the array itself for a caller buffer,
-        else a pointer (to the slot, or to the scalar)."""
-        if self.passing is Passing.CALLER_BUFFER:
-            return self.tensor.ir_type
-        return ir.ptr
-
 
 @dataclass(frozen=True)
 class Signature:
@@ -120,17 +111,6 @@ class Signature:
     def folded_values(self) -> dict[int, float]:
         """{input position: value} of the folded constants."""
         return dict(self.folded)
-
-    def param_types(self) -> list[ir.Type]:
-        input_types = [
-            representation.ir_type
-            for representation in self.inputs
-            if not isinstance(representation, NoneRepr)
-        ]
-        output_types = [
-            output.ir_type for output in self.outputs if not output.is_absent
-        ]
-        return [ir.ptr, ir.ptr, *input_types, *output_types]
 
     @property
     def has_scalars(self) -> bool:

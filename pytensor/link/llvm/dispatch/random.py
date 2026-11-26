@@ -27,15 +27,9 @@ import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, c_strides, size
-from pytensor.link.llvm.codegen.interface import (
-    llvm_emit,
-    llvm_supports,
-    supported_types,
-)
 from pytensor.link.llvm.codegen.num import cast, load, store
-from pytensor.link.llvm.codegen.types import ir, is_absent
+from pytensor.link.llvm.codegen.types import ir
 from pytensor.link.llvm.dispatch.blockwise import (
     Batched,
     batch_loop,
@@ -45,6 +39,9 @@ from pytensor.link.llvm.dispatch.blockwise import (
     unwrapped,
     wrapped_positions,
 )
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.registry import llvm_emit, llvm_supports, supported_types
+from pytensor.link.llvm.types import is_absent
 from pytensor.tensor.basic import constant
 from pytensor.tensor.type import tensor
 

@@ -25,23 +25,23 @@ rewrite groups small nodes into units.
 *Compile time*
 
 * **graph, node, variable**: PyTensor's.
-* **planner** (`planner.py`): decides how every node of a graph runs. It names values by
+* **planner** (`planning/planner.py`): decides how every node of a graph runs. It names values by
   **value ids** (`ValueId`), flattens the graph into **flat nodes** (`FlatNode`; among them
   **units**: compiled OpFromGraphs, several nodes generated as one kernel), and turns
   each into a **step** (`Step`: the node, its **implementation** and the signature that
   follows from it). The result is a **planned graph** (`PlannedGraph`, in
-  `codegen/plan.py`). A step of a program is a call of a kernel: a node's (Rust,
+  `planning/plan.py`). A step of a program is a call of a kernel: a node's (Rust,
   numba), or generated code compiled in a module of its own (`OwnModule`).
 * **emitter**: the code generation of one op (`llvm_emit`), working with a `Codegen`
   (the builder and the parameters of the kernel being generated).
 * **node function**: the LLVM function generated for one node, inlined into kernels.
 * **kernel wrapper**: the function with the kernel ABI generated around a node or unit
   function (its symbol is `kernel`).
-* **output mode** (`OutputMode`): how an output comes to be (section 3): provided,
-  returned (new memory, or a view of an input the op's `view_map` names) or in place;
-  in generated code also scalar or absent.
-* **stages** of planning (section 8): flatten, resolve, the program's function,
-  compile.
+* **passing** (`Passing`): how a tensor output is passed (section 3): into a caller
+  buffer, or through a callee slot (new memory, or a view of an input it may alias);
+  scalar outputs go through a pointer, values without data aren't passed.
+* **stages** (section 8): flatten, decide how each node runs, generate the program's
+  function, compile and link.
 
 *Run time*
 
@@ -66,8 +66,13 @@ rewrite groups small nodes into units.
 
 *Memory*
 
-* **arena**: the static temporaries of a unit (or a program), one piece of memory laid
-  out by liveness (`analysis/liveness.py`).
+* **buffer**: one piece of memory of a planned graph, with one lifetime: created by a
+  step, it holds the value it is created for and the values that may be views of it,
+  and is free after the last step that reads any of them (`planning/memory.py`).
+* **frames**: where the buffers of a fixed size of a unit (or a program) live: a
+  stack frame for small ones, on the stack if it fits, and a scratch frame for the
+  others. Buffers that are never needed at the same time share space in them
+  (`planning/memory.py`).
 * **temporary**: memory a kernel needs only while it runs (section 4): stack memory if
   it is small and of static size, else scratch.
 * **scratch**: temporary memory from the context, freed piece by piece by generated
@@ -83,7 +88,8 @@ rewrite groups small nodes into units.
 ## 1. Values: one LLVM representation per PyTensor type
 
 A representation carries only what the type doesn't fix; static information becomes
-constants in the code.
+constants in the code. `repr_of` (`types.py`) gives the representation of a type,
+`ir_type` (`codegen/types.py`) its LLVM type.
 
 | PyTensor type | LLVM representation |
 |---|---|
@@ -101,7 +107,7 @@ constants in the code.
 
 ## 1a. Layouts
 
-A `Layout` (analysis/layout.py) is what is known before running about a value's strides. Each
+A `Layout` (layout.py) is what is known before running about a value's strides. Each
 axis is `PACKED`, a static number of bytes, or `DYNAMIC`, and an axis order says how
 axes nest in memory. Packed axes are the innermost block of that order: a packed axis's
 stride is the itemsize times the lengths of the axes inside it. Axes of static length 1
@@ -119,7 +125,7 @@ so they come only from how a value is produced:
   constants are stored in their own memory order (packed, else C);
 * a view's layout follows from its input's, as the op's `llvm_layout` declares it
   (DimShuffle, Subtensor, Split, Reshape, SpecifyShape, ...; the rules in
-  analysis/layout.py); a view nothing is declared for is DYNAMIC;
+  layout.py); a view nothing is declared for is DYNAMIC;
 * an output that may overwrite an input (section 3) has that input's layout, where new
   memory can have it too (packed, or implied by C-contiguous), else DYNAMIC: whether it
   does overwrite it is decided when planning;
@@ -187,7 +193,7 @@ define internal i32 @f(ptr %ctx, ptr %config, <inputs>, <outputs>)
 * `config`: the kernel's link table (section 2a): the kernels it calls and its array
   constants.
 * Inputs: by value, in their representation.
-* Outputs: by mode (see 3).
+* Outputs: as their passing says (see 3).
 * Returns 0 on success, nonzero on failure with the message set on `ctx`.
 
 Generated functions call each other with this signature. The output slots are allocas
@@ -200,7 +206,7 @@ numba kernels and code compiled on its own the same way
 (`codegen/call.py`): it
 packs `PtArray`s (with the number of axes and the dtype of each), calls the kernel, and copies what it wrote for allocated and view
 outputs (owner included) into the node's output slots. Every node has an
-implementation (`codegen/implementation.py`: generated code, a Rust kernel, a numba
+implementation (`planning/implementation.py`: generated code, a Rust kernel, a numba
 kernel, or generated code compiled in a module of its own) and a node function like any
 other (`node.node_function`), whose body the implementation writes: a kernel call for
 the kernels, so units and generated loops can contain every kind of node. The
@@ -219,9 +225,11 @@ together (`link`): then every table is fixed, and the entries of the modules a p
 calls (`OwnModule` steps) get their addresses; nothing is patched later.
 
 Inside generated code the planner decides per node (`Planner.graph`, given the
-input layouts): generate it if we can (inlined: preferred; tried in a scratch module,
-so a failure leaves nothing behind), else its Rust kernel, else a numba kernel.
-Inside generated code every OpFromGraph is inlined. A unit (and a program) releases the
+input layouts): generate it if its op has an emitter that supports the node
+(inlined: preferred; decided by `can_generate`, nothing is generated to find out),
+else its Rust kernel, else a numba kernel. Inside generated code every OpFromGraph is
+inlined, except a Blockwise or random variable with its core shapes
+(`OpWithCoreShape`), which is a loop of its own. A unit (and a program) releases the
 buffers the kernels it calls
 allocate for values inside it when it returns (also on errors).
 
@@ -236,7 +244,7 @@ Which memory may overlap is the op's statement, not the implementation's:
   the output; an implementation is free to ignore it and write new memory.
 
 So the memory a kernel writes never overlaps what it reads, with one exception it is
-told about: an output that overwrites an input (section 3). The arena never places an
+told about: an output that overwrites an input (section 3). The frames never place an
 output over a value live during the step that writes it, temporaries are distinct
 memory (stack slots, or scratch, whose pointers are declared `noalias`), and the C API
 requires (and checks) that provided outputs don't overlap the inputs or each other.
@@ -264,8 +272,8 @@ before vectorized loops.
 What the backend needs to know about an output mostly comes from the op itself: its
 `view_map` (the inputs the output may be a view of) and its `destroy_map` (the input it
 may overwrite). The only addition is its layout, declared by a dispatch per op:
-`llvm_layout(op, node, input_layouts) -> [Layout | None]` (`codegen/interface.py`).
-`node_outputs` (`codegen/signature.py`) combines them, in one place:
+`llvm_layout(op, node, input_layouts) -> [Layout | None]` (`registry.py`).
+`node_outputs` (`planning/signature.py`) combines them, in one place:
 
 * the layout is the declared one, or the default: C for new memory, DYNAMIC for a view;
   an output that may overwrite an input has that input's layout, where new memory can
@@ -291,10 +299,10 @@ How an output is passed (`Passing`) follows:
 
 Layouts are binding:
 
-* caller buffer: whoever provides the memory provides it in the declared layout. Arena
+* caller buffer: whoever provides the memory provides it in the declared layout. Frame
   memory can have any packed order. A unit's (or program's) provided output has its
-  own layout (C-contiguous for a graph output); one declared otherwise is written to an
-  arena temporary and copied. A graph output handed over in a buffer is handed over in
+  own layout (C-contiguous for a graph output); one declared otherwise is written to a
+  temporary and copied. A graph output handed over in a buffer is handed over in
   any layout;
 * callee slot: `allocate` gives memory in the declared layout; a view gets the
   declared layout. It is an error while generating if the view's own layout
@@ -340,7 +348,7 @@ an output the `view_map` doesn't list, an output never produced). Beyond that im
 an emitter that writes to an input through a raw pointer is a bug nothing catches.
 
 **In place.** The planner decides which inputs a node may overwrite
-(`Planner.writable_inputs`): inputs its op destroys, where nothing else can see the
+(`Planner._writable_inputs`): inputs its op destroys, where nothing else can see the
 memory:
 
 * the node is one of the graph being planned, and that graph has a DestroyHandler
@@ -362,7 +370,7 @@ units, the node function passes it copies (`NumbaKernel.always_overwrites`, of t
 inputs that aren't writable).
 
 An output that may be the input's memory is a returned output that may alias it, as a
-view: the arena keeps the memory until the last reader of either (`analysis/liveness.py`).
+view: its buffer stays alive until the last reader of either (`planning/memory.py`).
 
 **Layout.** Nothing is contiguous unless the signature says so (section 1a). Every
 output's layout is part of the signature, as declared (above); a provided output can
@@ -418,17 +426,27 @@ memory: the output of a node inside a unit, when it is a temporary of the unit, 
 scratch (`escapes=True`). The node writes the piece into the output slot's owner (null
 for a view), and the unit frees it at the end of its own scope.
 
-The values passed between the steps of a function (a program, a unit, a loop body)
-that are provided outputs of a static size are its temporaries (`Codegen.temporaries`):
-each gets stack memory of its own where `temp_memory` would (small, within the stack
-budget: LLVM may keep it in registers); the others share one arena of scratch memory,
-laid out by liveness (`analysis/liveness.py`: a value's place is free again after its last
-reader, or the last reader of anything that may be a view of it). `program.dump()`
-shows each as "on the stack" or "arena +offset". Buffers kernels return
-are released when the function returns.
+Where the values passed between the steps of a graph (a program, a unit, a loop body)
+live is part of its plan (`PlannedGraph.memory`, `planning/memory.py`). Each value is
+in a buffer: memory with one lifetime, which also holds the values that may be views
+of it, and is free after the last step that reads any of them. The provided outputs
+of a fixed size that aren't graph outputs are the graph's temporaries. They are placed
+in two frames, where buffers that are never needed at the same time share space: the
+stack frame holds those of up to `STACK_TEMPORARY_BYTES` and goes on the stack if the
+function's stack budget allows, where LLVM may keep them in registers
+(`Codegen.frame`); the scratch frame is always scratch memory. Buffers kernels
+return are released right after the last step that may read them; those a graph
+output may be in, when the function returns.
+
+`program.dump()` shows all of this. In the values table, a temporary's memory is
+`stack +offset` or `scratch +offset`. The frames table lists every place in a frame,
+with the values whose buffers use it one after the other and the steps each is alive,
+from the step that creates it to the last one that needs it. In the steps section,
+"done" lists the buffers a step is the last to need: their frame space is free for
+later buffers, and memory kernels allocated is released there.
 
 There is no memory planned per kernel. An earlier design passed every kernel a
-*frame*, a fixed-size block in the program's arena, for its static temporaries. It
+fixed-size block of the program's memory for its static temporaries. It
 bought little over the stack for small temporaries and nothing over scratch for large
 ones, and cost an argument in the kernel ABI, a second ABI for numba kernels and a kind
 of interval in the planner.
@@ -641,7 +659,7 @@ On top of it, in Python (`codegen/`):
 `program.py` turns a FunctionGraph into a program: one generated function (with the
 kernel ABI) that calls a kernel per step, in order (`compile_program`).
 
-How every node runs is decided by the `Planner` (`planner.py`), the same way for the
+How every node runs is decided by the `Planner` (`planning/planner.py`), the same way for the
 program's graph (`Planner.program`) and for the inner graphs of nodes (`Planner.graph`):
 the graph becomes a list of flat nodes over value ids (`flatten`, `Values`), and for
 each it is decided how it runs, given the layouts of its inputs: a Rust kernel
@@ -660,30 +678,36 @@ differs:
   emitter never refuses while generating; a node inside a unit that no emitter supports
   calls its kernel there.
 * **Inner graphs** (of a unit, a Scan, a Blockwise) are planned when their emitter asks
-  (below): every OpFromGraph is inlined, and generated code (inlined) is preferred to
-  a kernel.
+  (below): every OpFromGraph is inlined except an `OpWithCoreShape`, and generated
+  code (inlined) is preferred to a kernel.
 
 Then:
 
 1. **The program's function** (`program._build`): the planned steps run as a graph
    (`build_graph_function`: `GraphFunction.emit_call`, as a unit's inner graph, with
    the function's outputs as `OutputDestination`s): values flow between the steps in the
-   function, temporaries are on the stack or in its arena (`analysis/liveness.py`),
+   function, temporaries are in its frames (`planning/memory.py`),
    graph outputs are produced in the caller's memory or allocated straight into their
    slots (`OutputDestination.slot_for_new_memory`; copied where they can't be), and array constants are
    in its link table.
 2. **Compile and link**: all generated modules, the program's function included, in
    one parallel batch (`kernel_module.link`).
 
-`program.dump()` prints a program: every value with its type and memory (input,
-constant, arena offset, output, allocated by its step, view of another value), then
-every step with its arguments.
+`program.dump()` prints a program as tables: every value with its type, its memory
+(`input 0`, `constant`, `stack +64` or `scratch +0` in a frame, `output 0`, `allocated`
+by its step, or a `temporary` of a size only known when running), its layout and the
+values it may be a view of; then the frames, with the steps each value uses its place
+for; and a block for every step: what it runs, its kind (an `LLVM module` of its own,
+`LLVM, inlined`, a `Rust kernel` or a `numba kernel`), the values it reads and
+makes, and those it is the last to need ("done"). Runs of consecutive values are
+written as ranges, like `%4-%9`. The plan itself stays available after compiling, as
+`program.planned`.
 
 **Inner graphs.** An emitter whose node runs an inner graph gets it from
 `cg.graph_function(inputs, outputs, in_layouts)` (`codegen/graph.py`): the graph's
 nodes planned for the layouts of the values it will pass (`Planner.graph`, cached),
 its constants bound. The layouts of the graph's variables are `graph_layouts`' (the
-function behind `infer_layouts` and the `LayoutFeature`, with every OpFromGraph
+function behind the `LayoutFeature`, with every OpFromGraph
 inlined, as generated code runs them); values inside inlined OpFromGraphs get theirs
 from `node_outputs`, as in the planner.
 
@@ -714,12 +738,15 @@ called kernels and the body's scratch are freed after every iteration.
 
 Blockwise is generated the same way (`dispatch/blockwise.py`): a loop over the batch
 whose body is the core graph (the core op's node and what its `make_node` adds), run
-for the inputs at one batch index. The outputs are allocated before the loop
-when their core lengths are static or named by an input in the signature; then core
-outputs are produced straight into their rows, and the loop may run in parallel
-(estimated by the core's `llvm_work`). A core length only the core knows (`(m,n)->(k)`)
-comes from the first iteration, which allocates the output; that loop is serial, and
-an empty batch fails, as the length isn't known.
+for the inputs at one batch index. It reaches the backend as `BlockwiseWithCoreShape`
+(the required `introduce_explicit_core_shape_blockwise` rewrite): the graph computes
+the lengths of the outputs' core axes, so the outputs are allocated before the loop in
+the batch and core shape, and core outputs are produced straight into their rows. The
+iterations are independent and the loop may run in parallel (estimated by the core's
+`llvm_work`). A Blockwise whose core shapes the rewrite can't infer (its core op has no
+`infer_shape`, or they depend on values that differ along the batch) isn't generated:
+numba runs it. Random variables use the same batch loop (`batch_loop`, as
+`RandomVariableWithCoreShape`).
 
 `ScalarLoop` (inside Elemwise or FusedElemwise) is generated like Composite: the loop
 is a `b.fold(n, init, body, until=...)` whose body is the inner scalar graph emitted

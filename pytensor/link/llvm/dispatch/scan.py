@@ -35,7 +35,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, advance
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import Captured, OutputDestination
@@ -43,14 +42,18 @@ from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
     EmitterOutput,
     TensorOutput,
+)
+from pytensor.link.llvm.codegen.num import cast, constant, load, store
+from pytensor.link.llvm.codegen.types import ir
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.signature import overwritten_layout
+from pytensor.link.llvm.registry import (
     llvm_emit,
     llvm_layout,
     llvm_supports,
     supported_types,
 )
-from pytensor.link.llvm.codegen.num import cast, constant, load, store
-from pytensor.link.llvm.codegen.signature import overwritten_layout
-from pytensor.link.llvm.codegen.types import element_type, ir, is_absent
+from pytensor.link.llvm.types import element_type, is_absent
 
 
 if TYPE_CHECKING:

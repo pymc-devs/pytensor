@@ -37,11 +37,15 @@ from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.features import ViewFeature, view_feature
 from pytensor.graph.traversal import io_toposort
-from pytensor.link.llvm.analysis.layout import Layout, graph_layouts, layout_feature
-from pytensor.link.llvm.analysis.memory import plan_memory
+from pytensor.link.llvm.analysis.layout import graph_layouts, layout_feature
 from pytensor.link.llvm.codegen.call import Kernel
-from pytensor.link.llvm.codegen.errors import ExceptionTable
-from pytensor.link.llvm.codegen.implementation import (
+from pytensor.link.llvm.dispatch.fused import fusable
+from pytensor.link.llvm.kernels.rust import (
+    runtime,
+    rust_implementation,
+)
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.implementation import (
     GENERATED,
     Implementation,
     NumbaKernel,
@@ -49,27 +53,15 @@ from pytensor.link.llvm.codegen.implementation import (
     OwnModule,
     RustKernel,
 )
-from pytensor.link.llvm.codegen.interface import can_generate, has_emitter
-from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
-from pytensor.link.llvm.codegen.kernel_module import KernelModule
-from pytensor.link.llvm.codegen.node import node_function
-from pytensor.link.llvm.codegen.plan import PlannedGraph, Step, ValueId
-from pytensor.link.llvm.codegen.signature import (
+from pytensor.link.llvm.planning.memory import plan_memory
+from pytensor.link.llvm.planning.plan import PlannedGraph, Step, ValueId
+from pytensor.link.llvm.planning.signature import (
     known_layouts,
     node_outputs,
     node_signature,
 )
-from pytensor.link.llvm.codegen.types import (
-    ScalarRepr,
-    TensorRepr,
-    is_absent,
-    repr_of,
-)
-from pytensor.link.llvm.dispatch.fused import fusable
-from pytensor.link.llvm.kernels.rust import (
-    runtime,
-    rust_implementation,
-)
+from pytensor.link.llvm.registry import can_generate, has_emitter
+from pytensor.link.llvm.types import ScalarRepr, TensorRepr, is_absent, repr_of
 from pytensor.scalar.basic import ScalarType
 from pytensor.scan.op import Scan
 from pytensor.tensor.basic import TensorFromScalar
@@ -234,11 +226,6 @@ class Planner:
     #: the program's graph (`program`), and what views of its values there may be
     fgraph: FunctionGraph
     views: ViewFeature
-    #: modules generated for steps of the program, to link with the program's
-    #: function (`kernel_module.link`)
-    modules: list[KernelModule]
-    #: the exception classes of the program's error codes (every module's)
-    exceptions: ExceptionTable
     #: (inputs, outputs, layouts) -> PlannedGraph (`graph`)
     _graphs: dict[tuple, PlannedGraph]
     #: the memory views the DestroyHandler doesn't see may lie in (never overwritten
@@ -252,8 +239,6 @@ class Planner:
         self.opts = options
         self.stats = stats
         self.values = Values()
-        self.modules = []
-        self.exceptions = ExceptionTable()
         self._graphs = {}
         self.hidden = frozenset()
         self.allow_inplace = False
@@ -488,19 +473,12 @@ class Planner:
         self, flat, folded, in_layouts, layouts, writable=frozenset()
     ) -> Step:
         """A step of the program whose code is generated and compiled in a module of
-        its own, compiled and linked with the program. `folded`: the constant scalar
-        inputs compiled into the code; `writable`: the inputs it may overwrite
+        its own, which codegen builds and links with the program. `folded`: the constant
+        scalar inputs compiled into the code; `writable`: the inputs it may overwrite
         (`_writable_inputs`)."""
         node = flat.node
-        unit = KernelModule.new(
-            f"node_{type(node.op).__name__}",
-            self.opts.codegen,
-            self.graph,
-            self.exceptions,
-        )
         signature = node_signature(node, in_layouts, folded=folded, writable=writable)
-        function = node_function(unit, "node", node, GENERATED, signature)
-        # (an output overwrites a writable input only where its layout allows that)
+        # An output overwrites a writable input only where its layout allows that.
         if any(writable & set(o.aliased_inputs) for o in signature.outputs):
             self.stats.inplace.append(str(node.op))
         if _is_unit(node):
@@ -517,12 +495,8 @@ class Planner:
                     and representation.ndim > 0
                 ]
             )
-        unit.description = desc
-        unit.module.label = "ptl:" + " ".join(desc.split())[:160]  # perf maps
-        build_kernel_wrapper(unit, function)
-        self.modules.append(unit)
         implementation = OwnModule(
-            unit, tuple(GENERATED.outputs(node, known_layouts(node, in_layouts)))
+            tuple(GENERATED.outputs(node, known_layouts(node, in_layouts))), desc
         )
         binding = self._binding(node, flat.outputs, in_layouts, layouts)
         check_conforms(node, signature.outputs, binding)
@@ -556,7 +530,7 @@ class Planner:
     def _writable_inputs(self, flat, folded) -> frozenset:
         """The inputs a node's generated code may overwrite: tensors its op destroys,
         that nothing else can see, and whose memory isn't another input's. Its emitter
-        decides whether it does (interface.py)."""
+        decides whether it does (codegen/interface.py)."""
         node = flat.node
         writable = set()
         for i in {i for ins in node.op.destroy_map.values() for i in ins}:

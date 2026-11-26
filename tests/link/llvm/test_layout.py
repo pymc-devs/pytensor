@@ -14,14 +14,14 @@ from pytensor.tensor.elemwise import DimShuffle
 
 ir = pytest.importorskip("pytensor_llvm.ir")
 
-from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
 from pytensor.link.llvm.codegen.kernel_module import (  # noqa: E402
     CodegenOptions,
     KernelModule,
 )
 from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
-from pytensor.link.llvm.codegen.signature import node_outputs  # noqa: E402
+from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
+from pytensor.link.llvm.planning.signature import node_outputs  # noqa: E402
 
 
 LLVM = get_mode("LLVM")
@@ -201,7 +201,7 @@ def test_layout_check_catches_a_wrong_claim():
 def test_specialized_signature_passes_fewer_strides():
     x = pt.dmatrix("x")
     node = pt.exp(x).owner
-    from pytensor.link.llvm.codegen.signature import node_signature
+    from pytensor.link.llvm.planning.signature import node_signature
 
     any_ = node_signature(node)
     c = node_signature(node, input_layouts=[C(2)])
@@ -353,7 +353,7 @@ def test_fused_loop_has_its_own_layouts_inside_generated_code():
 
 
 def test_declared_outputs():
-    from pytensor.link.llvm.codegen.signature import Passing
+    from pytensor.link.llvm.planning.signature import Passing
 
     x = pt.dmatrix("x")
     (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
@@ -395,7 +395,7 @@ def test_view_layout_is_checked_at_run_time():
     """A view gets the layout its op declares; `check_layouts` verifies the claim."""
     from pytensor.graph.basic import Apply
     from pytensor.graph.op import Op
-    from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+    from pytensor.link.llvm.registry import llvm_emit, llvm_layout
 
     class BadTranspose(Op):
         """Claims its view is C-contiguous, but returns the transpose."""
@@ -436,8 +436,8 @@ def test_view_layout_is_checked_at_run_time():
 def test_kernels_choose_their_output_layouts():
     """Rust kernels are made for their inputs' layouts and choose their outputs':
     a sort follows its input's memory order, faer works column-major."""
-    from pytensor.link.llvm.codegen.signature import Passing, node_outputs
     from pytensor.link.llvm.kernels.rust import rust_implementation
+    from pytensor.link.llvm.planning.signature import Passing, node_outputs
 
     def declared(out, in_layouts):
         node = out.owner

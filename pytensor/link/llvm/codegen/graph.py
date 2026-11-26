@@ -22,8 +22,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from pytensor.graph.basic import Apply
-from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.analysis.memory import BufferKind, Frame
 from pytensor.link.llvm.codegen.array import Array, Slot
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
@@ -36,24 +34,20 @@ from pytensor.link.llvm.codegen.interface import (
     ScalarOutput,
     TensorOutput,
 )
-from pytensor.link.llvm.codegen.node import NodeFunction, node_function
+from pytensor.link.llvm.codegen.node import NodeFunction, node_function, param_types
 from pytensor.link.llvm.codegen.num import constant, store
-from pytensor.link.llvm.codegen.signature import Output, Passing, Signature
-from pytensor.link.llvm.codegen.types import (
-    ScalarRepr,
-    TensorRepr,
-    element_type,
-    ir,
-    memory_type,
-    repr_of,
-)
+from pytensor.link.llvm.codegen.types import ir, ir_type, memory_type
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.memory import BufferKind, Frame
+from pytensor.link.llvm.planning.signature import Output, Passing, Signature
+from pytensor.link.llvm.types import ScalarRepr, TensorRepr, element_type, repr_of
 
 
 if TYPE_CHECKING:
     from pytensor.graph.type import Type
     from pytensor.link.llvm.codegen.destination import OutputDestination
     from pytensor.link.llvm.codegen.kernel_module import KernelModule
-    from pytensor.link.llvm.codegen.plan import PlannedGraph, Step, ValueId
+    from pytensor.link.llvm.planning.plan import PlannedGraph, Step, ValueId
     from pytensor.scalar.basic import ScalarType
     from pytensor.tensor.type import TensorType
 
@@ -271,7 +265,7 @@ def build_graph_function(
         if not output.is_tensor or output.aliased_inputs:
             raise NotImplementedError(f"function outputs can't be {output}")
     signature = Signature(tuple(in_reprs), tuple(outputs))
-    fn = unit.module.function(name, signature.param_types(), ir.i32, debug_name=name)
+    fn = unit.module.function(name, param_types(signature), ir.i32, debug_name=name)
     b = fn.builder()
     params = iter(fn.params)
     ctx, config = next(params), next(params)
@@ -306,7 +300,7 @@ def build_graph_function(
 # * a result the step writes into memory it is given goes into memory a graph output
 #   provides (`memory_targets`, e.g. a row of a Scan's buffer) if that memory has the
 #   layout the step needs, else into its buffer in one of the graph's frames
-#   (analysis/memory.py), or, for a buffer of a graph output or of a size only known
+#   (planning/memory.py), or, for a buffer of a graph output or of a size only known
 #   when running, into a temporary of its own;
 # * a result the step allocates itself goes straight into a graph output's slot if the
 #   output takes it (`slot_targets`, `OutputDestination.slot_for_new_memory`), else
@@ -523,10 +517,10 @@ def _emit_steps(
                 values[value_id] = array
                 args.append(array.pack(b, tensor))
             elif isinstance(output.representation, ScalarRepr):
-                ir_type = output.representation.ir_type
-                pointer = b.alloca(ir_type)
+                scalar_ir_type = ir_type(output.representation)
+                pointer = b.alloca(scalar_ir_type)
                 args.append(pointer)
-                scalar_reads.append((value_id, pointer, ir_type))
+                scalar_reads.append((value_id, pointer, scalar_ir_type))
             else:
                 ndim = output.tensor.ndim
                 # A result in scratch memory, or a view, has no runtime buffer.
@@ -558,8 +552,8 @@ def _emit_steps(
                 slot.release(b, ctx)
             b.ret(rc)
 
-        for value_id, pointer, ir_type in scalar_reads:
-            values[value_id] = b.load(ir_type, pointer)
+        for value_id, pointer, scalar_ir_type in scalar_reads:
+            values[value_id] = b.load(scalar_ir_type, pointer)
         for read in slot_reads:
             tensor = read.output.tensor
             array = read.slot.read(

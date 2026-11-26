@@ -5,20 +5,21 @@ from __future__ import annotations
 import numpy as np
 
 import pytensor.scalar.basic as ps
-from pytensor.link.llvm.analysis.layout import PACKED, Layout, common_order
 from pytensor.link.llvm.analysis.work import scalar_cost
 from pytensor.link.llvm.codegen.array import Array, advance, size
 from pytensor.link.llvm.codegen.context import loop_order
-from pytensor.link.llvm.codegen.interface import (
+from pytensor.link.llvm.codegen.num import cast, constant, load, store
+from pytensor.link.llvm.codegen.types import memory_type
+from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
+from pytensor.link.llvm.layout import PACKED, Layout, common_order
+from pytensor.link.llvm.planning.signature import overwritten_layout
+from pytensor.link.llvm.registry import (
     llvm_emit,
     llvm_layout,
     llvm_supports,
     supported_types,
 )
-from pytensor.link.llvm.codegen.num import cast, constant, load, store
-from pytensor.link.llvm.codegen.signature import overwritten_layout
-from pytensor.link.llvm.codegen.types import element_type, memory_type
-from pytensor.link.llvm.dispatch.scalar import emit_scalar, scalar_supported
+from pytensor.link.llvm.types import element_type
 from pytensor.tensor.elemwise import CAReduce, Elemwise
 from pytensor.tensor.math import NonZeroDimsCAReduce
 

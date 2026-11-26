@@ -43,11 +43,11 @@ from typing import TYPE_CHECKING, NewType
 import numpy as np
 
 from pytensor.link.llvm.codegen.context import STACK_TEMPORARY_BYTES
-from pytensor.link.llvm.codegen.signature import Output, Passing
+from pytensor.link.llvm.planning.signature import Output, Passing
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.codegen.plan import Step, ValueId
+    from pytensor.link.llvm.planning.plan import Step, ValueId
 
 
 #: A buffer of a planned graph: its position in `Memory.buffers`.

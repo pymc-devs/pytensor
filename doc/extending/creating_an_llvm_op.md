@@ -17,23 +17,30 @@ only shows how to use them.
 
 ## 1. Three ways to implement an op
 
-A node of the graph becomes a *step* of the program. The planner looks for the kernel
-of that step in this order:
+A node of the graph runs in one of three ways:
 
-1. **Generated code**: an emitter, registered with `llvm_emit`, writes LLVM IR for the
-   node. The code is specialized to the node's dtypes, static shapes and layouts, and
-   several nodes can be compiled into one function. This is what the tutorial covers,
-   and what most ops should use.
-2. **A Rust kernel** (`kernels/rust.py`): precompiled code that looks at its arguments
-   when it runs. For ops whose work is a library call (a Cholesky factorization, a
-   sort), where there is nothing to specialize.
-3. **A numba kernel**: PyTensor's numba implementation of the op, called through a
-   wrapper. This happens by itself for every op that has neither of the above, so a
-   graph with an op the backend doesn't know still runs. It costs numba's compile time
-   and the op can't be compiled together with its neighbors.
+* **Generated code**: an emitter, registered with `llvm_emit`, writes LLVM IR for the
+  node. The code is specialized to the node's dtypes, static shapes and layouts, and
+  several nodes can be compiled into one function. This is what the tutorial covers,
+  and what most ops should use.
+* **A Rust kernel** (`kernels/rust.py`): precompiled code that looks at its arguments
+  when it runs. For ops whose work is a library call (a Cholesky factorization, a
+  sort), where there is nothing to specialize.
+* **A numba kernel**: PyTensor's numba implementation of the op, called through a
+  wrapper. This happens by itself for every op that has neither of the above, so a
+  graph with an op the backend doesn't know still runs. It costs numba's compile time
+  and the op can't be compiled together with its neighbors.
+
+Which one the planner picks depends on where the node is. A node of the program's
+top level prefers a Rust kernel, since there is nothing to compile, then generated
+code, then numba. A node inside generated code, such as a node of a compiled unit or
+of a Scan's loop body, prefers generated code, which is inlined into its
+surroundings, then a Rust kernel, then numba. An op with an emitter therefore gets
+generated code wherever it has no Rust kernel, and inside units and loops even where
+it has one.
 
 An op whose emitter handles only some of its nodes says which with a check,
-`llvm_supports`, and the planner uses the next way for the others. Supporting only the
+`llvm_supports`, and the planner uses another way for the others. Supporting only the
 easy cases of an op is therefore fine.
 
 ## 2. The builder
@@ -294,7 +301,8 @@ byte in memory and an `i1` in a register, and they know.
 ### The emitter
 
 ```python
-from pytensor.link.llvm.codegen import Num, llvm_emit
+from pytensor.link.llvm.codegen import Num
+from pytensor.link.llvm.registry import llvm_emit
 
 
 @llvm_emit.register(CumMax)
@@ -359,12 +367,20 @@ assert f.maker.linker.stats.numba == []  # the ops that fell back to numba
 ```
 
 ```text
-program: 1 inputs, 1 outputs, 1 steps, arena 0 bytes
+program: 1 inputs, 1 outputs, 1 steps
 values:
-  %0    float64[?]               input 0
-  %1    float64[?]               allocated by its step
+  # Every value: its type, where its memory is, its layout, and the values it may
+  # be a view of.
+      type        memory     layout  may view
+  %0  float64[?]  input 0    [?]
+  %1  float64[?]  allocated  C
 steps:
-  0    (%0) -> (%1)  CumMax
+  # The steps in the order they run: what each runs and how, the values it reads
+  # and makes, and those it is the last to need.
+  0  CumMax
+     kind   LLVM module
+     reads  %0
+     makes  %1
 outputs: %1 (returned)
 ```
 
@@ -410,7 +426,7 @@ np.testing.assert_array_equal(result, [1.0, 3.0, 3.0, 5.0, 5.0])
 
 `f.maker.linker.ir()` is the IR of the code generated for a compiled function: one
 module per generated step, each under a comment naming the step, as in
-`program.dump()`. `ir(optimized=True)` is the IR after optimization, which shows whether
+`program.dump()`, and the module of the program's own function. `ir(optimized=True)` is the IR after optimization, which shows whether
 a loop was vectorized. The modules of compiled units are included. Ops
 running Rust or numba kernels have no module. For one module at a time,
 `f.maker.linker.stats.modules` lists them with their `description`, `ir` and
@@ -442,7 +458,7 @@ which looks at the node alone (not at layouts); the default only asks that every
 and output has a type the backend supports:
 
 ```py
-from pytensor.link.llvm.codegen import llvm_supports, supported_types
+from pytensor.link.llvm.registry import llvm_supports, supported_types
 
 
 @llvm_supports.register(CumMax)
@@ -459,16 +475,19 @@ others; the loop, broadcasting and the output belong to `Elemwise`. Here is a ne
 `x / (1 + |x|)`:
 
 ```python
-from pytensor.scalar.basic import UnaryScalarOp, upgrade_to_float
+from pytensor.scalar.basic import UnaryScalarOp, _resolve_float_dtypes
 from pytensor.tensor.elemwise import Elemwise
 
 
 class Softsign(UnaryScalarOp):
+    name = "softsign"
+    resolve_dtypes = _resolve_float_dtypes
+
     def impl(self, x):
         return x / (1 + abs(x))
 
 
-softsign = Elemwise(Softsign(upgrade_to_float, name="softsign"))
+softsign = Elemwise(Softsign())
 ```
 
 ```python
@@ -538,7 +557,7 @@ A `Layout` has one entry per axis:
 * `DYNAMIC`: not known; the stride is read when the code runs.
 
 ```python
-from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout
+from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout
 
 c = Layout.c(2)  # C-contiguous: all packed, last axis innermost
 unknown = Layout.dynamic(2)
@@ -590,12 +609,12 @@ without looking at its strides, so a wrong claim gives wrong results, not an err
 
 These layouts are binding: whatever runs a node gives its outputs the layouts that
 follow from its op (section "What an op says about its outputs" below). A compiled function's graph has them,
-`f.maker.fgraph.llvm_layout(var)`, and `infer_layouts` shows what the backend derives
+`f.maker.fgraph.llvm_layout(var)`, and `graph_layouts` shows what the backend derives
 for a graph:
 
 ```python
 from pytensor.graph.fg import FunctionGraph
-from pytensor.link.llvm.analysis.layout import infer_layouts
+from pytensor.link.llvm.analysis.layout import graph_layouts
 
 A = pt.matrix("A")
 outs = [A.T, A[1], A[:, ::2], A[::-1], pt.exp(A), pt.exp(A.T)]
@@ -603,7 +622,7 @@ graph = FunctionGraph([A], outs, clone=False)
 
 
 def layouts(input_layouts):
-    found = infer_layouts(graph, input_layouts)
+    found = graph_layouts(graph.inputs, graph.outputs, input_layouts)
     return [str(found[o]) for o in outs]
 
 
@@ -665,8 +684,15 @@ np.testing.assert_array_equal(
 ```
 
 ```text
-  0    (%0) -> (%1)  Subtensor{i, ::step} {C}
-  1    (%1) -> (%2)  CumMax {[16]}  [release %1]
+  0  Subtensor{i, ::step} {C}
+     kind   LLVM module
+     reads  %0
+     makes  %1
+  1  CumMax {[16]}
+     kind   LLVM module
+     reads  %1
+     makes  %2
+     done   %1
 ```
 
 The indexing takes every second element of a row of a C-contiguous matrix, so `CumMax`
@@ -746,17 +772,18 @@ layout. The stride of a reversed vector is minus the stride of the input, so if 
 is known, so is the other:
 
 ```python
-from pytensor.link.llvm.analysis.layout import itemsize_of, shape_of
-from pytensor.link.llvm.codegen import llvm_layout
+from pytensor.link.llvm.registry import llvm_layout
 
 
 @llvm_layout.register(Reverse)
 def _(op, node, input_layouts):
     var = node.inputs[0]
-    stride = input_layouts[0].static_stride(0, shape_of(var), itemsize_of(var))
+    stride = input_layouts[0].static_stride(
+        0, var.type.shape, var.type.numpy_dtype.itemsize
+    )
     return [
         Layout.make(
-            shape_of(node.outputs[0]), (0,), (DYNAMIC if stride is None else -stride,)
+            node.outputs[0].type.shape, (0,), (DYNAMIC if stride is None else -stride,)
         )
     ]
 ```
@@ -794,14 +821,21 @@ print(r.maker.linker.program.dump())
 ```
 
 ```text
-  0    (%0) -> (%1)  Reverse {C}
-  1    (%1) -> (%2)  CumMax {[-8]}  [release %1]
+  0  Reverse {C}
+     kind   LLVM module
+     reads  %0
+     makes  %1
+  1  CumMax {[-8]}
+     kind   LLVM module
+     reads  %1
+     makes  %2
+     done   %1
 ```
 
 `CumMax` runs backwards over the input with a constant stride of -8 bytes, with no copy
 in between. `Layout.dynamic(ndim)` is always a correct layout, and never a fast one.
-The layout rules of the backend's own views are in `analysis/layout.py`
-(`dimshuffle_layout`, `subtensor_layout`).
+The layout rules of the backend's own views are next to their emitters, for example
+in `dispatch/shape.py` (DimShuffle) and `dispatch/subtensor.py` (Subtensor).
 
 An output the `view_map` lists may also be new memory: a reshape of a non-contiguous
 array copies. Its emitter calls `set_view(array)` or `allocate(shape)`, possibly in two
@@ -1128,16 +1162,17 @@ with pytest.raises(Exception, match="scale < 0"):
 ```
 
 Only random variables whose draws are scalars (`ndim_supp == 0`) can be implemented
-this way. The backend has no implementation for the others (the multivariate normal,
-for one), and random variables never fall back to numba, whose generators are a
-different state: compiling a graph with one raises `NotImplementedError`.
+this way. Any other random variable, the multivariate normal for one, is a loop over
+the batch whose body is one draw by numba's core function for it
+(`numba_core_rv_funcify`), drawing from the session's random state too. That needs
+the numba fallback: with `numba_fallback=False`, as above, compiling a graph with such
+a random variable raises `NotImplementedError`.
 
 ## 8. Estimating the work
 
 **`llvm_work(op, node)`** estimates the work as a number of elements times a cost per
-element, in units of one float addition. The planner uses it to decide whether a loop
-is worth running in parallel and whether a node is small enough to be compiled together
-with its neighbors. The default is one unit per output element; a comparison and a
+element, in units of one float addition. Code generation uses it to decide whether a
+loop is worth running in parallel. The default is one unit per output element; a comparison and a
 store per element is about two:
 
 ```python
@@ -1164,7 +1199,7 @@ belongs to PyTensor gets its emitter in a module of `pytensor/link/llvm/dispatch
    `analysis/work.py`; distributions into the `SAMPLERS` table of `dispatch/random.py`.
 3. Register `llvm_work` in `analysis/work.py` if one unit per output element is far off, and
    `llvm_layout` next to the emitter if an output is a view, or new memory in another
-   order than C (a view's layout rule goes into `analysis/layout.py`).
+   order than C (a view's layout rule goes into `layout.py`).
 4. Add a test to `tests/link/llvm/test_ops.py` that compiles with
    `numba_fallback=False` and compares with numpy, over the dtypes, with a strided
    input and with static and unknown shapes; for a view, also with

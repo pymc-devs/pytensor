@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pytensor.graph.basic import Constant, Variable
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, advance, size
 from pytensor.link.llvm.codegen.types import ir, memory_type
+from pytensor.link.llvm.layout import Layout
 from pytensor.scalar.basic import ScalarType
 
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 #: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
-#: and so are the stack frames of planned graphs (`frame`, analysis/memory.py), as long
+#: and so are the stack frames of planned graphs (`frame`, planning/memory.py), as long
 #: as one generated function stays within its stack budget.
 STACK_TEMPORARY_BYTES = 1024
 STACK_BUDGET_BYTES = 16 * 1024
@@ -183,7 +183,7 @@ class Codegen:
 
     def frame(self, nbytes: int, stack: bool) -> ir.Value:
         """Memory for a frame of a planned graph: a block of `nbytes` bytes that holds
-        the graph's buffers of a fixed size (analysis/memory.py).
+        the graph's buffers of a fixed size (planning/memory.py).
 
         The stack frame (`stack`) goes on the stack if the function's stack budget
         still has room for it, where LLVM can keep the values in it in registers.

@@ -4,9 +4,10 @@ Other OpFromGraphs never get to code generation: the planner inlines them.
 """
 
 from pytensor.compile.builders import Execution, OpFromGraph
-from pytensor.link.llvm.analysis.layout import graph_layouts, new_memory_layout
+from pytensor.link.llvm.analysis.layout import graph_layouts
 from pytensor.link.llvm.codegen.array import Array
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
+from pytensor.link.llvm.layout import new_memory_layout
+from pytensor.link.llvm.registry import llvm_emit, llvm_layout
 
 
 @llvm_layout.register(OpFromGraph)

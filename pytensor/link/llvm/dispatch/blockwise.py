@@ -25,19 +25,21 @@ from dataclasses import dataclass
 
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.traversal import io_toposort
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.analysis.work import llvm_work
 from pytensor.link.llvm.codegen.array import Array, size
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import OutputDestination
 from pytensor.link.llvm.codegen.interface import (
     TensorOutput,
+)
+from pytensor.link.llvm.codegen.types import ir
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.registry import (
     llvm_emit,
     llvm_layout,
     llvm_supports,
     supported_types,
 )
-from pytensor.link.llvm.codegen.types import ir
 from pytensor.scalar.basic import ScalarType
 from pytensor.scalar.basic import int64 as scalar_int64
 from pytensor.tensor.basic import constant

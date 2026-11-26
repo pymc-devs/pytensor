@@ -19,19 +19,17 @@ from pytensor.graph.op import Op
 pytest.importorskip("pytensor_llvm.ir")
 
 
-from pytensor.link.llvm.analysis.memory import plan_memory
-from pytensor.link.llvm.codegen.interface import (
-    llvm_emit,
-)
 from pytensor.link.llvm.codegen.kernel_module import KernelModule
 from pytensor.link.llvm.codegen.node import build_node_function
 from pytensor.link.llvm.codegen.num import load, store
-from pytensor.link.llvm.codegen.signature import (
+from pytensor.link.llvm.planning.memory import plan_memory
+from pytensor.link.llvm.planning.signature import (
     Passing,
     can_update_in_place,
     node_outputs,
 )
 from pytensor.link.llvm.program import Options, build_program
+from pytensor.link.llvm.registry import llvm_emit
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
 from tests.link.llvm.test_aliasing import created, step
 

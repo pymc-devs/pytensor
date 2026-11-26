@@ -11,7 +11,8 @@ ir = pytest.importorskip("pytensor_llvm.ir")
 
 import pytensor.scalar as ps  # noqa: E402
 from pytensor.link.llvm.codegen.num import Num  # noqa: E402
-from pytensor.link.llvm.codegen.types import SUPPORTED_TYPES, value_type  # noqa: E402
+from pytensor.link.llvm.codegen.types import value_type  # noqa: E402
+from pytensor.link.llvm.types import SUPPORTED_TYPES  # noqa: E402
 
 
 #: the supported dtypes, as strings (the tests' parameters, and numpy's)

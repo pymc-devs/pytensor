@@ -14,14 +14,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pytensor.graph.basic import Variable
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.call import LinkTable
 from pytensor.link.llvm.codegen.errors import ExceptionTable
 from pytensor.link.llvm.codegen.types import ir
+from pytensor.link.llvm.layout import Layout
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.codegen.plan import PlannedGraph
+    from pytensor.link.llvm.planning.implementation import OwnModule
+    from pytensor.link.llvm.planning.plan import PlannedGraph
 
 
 @dataclass(frozen=True)
@@ -66,8 +67,11 @@ class KernelModule:
     #: that does)?
     uses_pool: bool = False
     #: the exception classes of its error codes beyond the fixed kinds: one table for
-    #: every module of a program (`Planner.exceptions`)
+    #: every module of a program (built in `program._build`)
     exceptions: ExceptionTable = field(default_factory=ExceptionTable)
+    #: the modules of the steps compiled on their own that its code calls, built
+    #: before it (`kernel.build_own_module`)
+    own_modules: dict[OwnModule, KernelModule] = field(default_factory=dict)
 
     @classmethod
     def new(

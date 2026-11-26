@@ -9,9 +9,9 @@ import pytest
 ir = pytest.importorskip("pytensor_llvm.ir")
 
 import pytensor.scalar as ps  # noqa: E402
-from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 from pytensor.link.llvm.codegen.array import Array, unknown_layout  # noqa: E402
 from pytensor.link.llvm.codegen.num import Num  # noqa: E402
+from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
 
 
 def run(build, *arrays):

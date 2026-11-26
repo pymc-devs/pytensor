@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pytensor.graph.basic import Apply
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
@@ -17,24 +16,26 @@ from pytensor.link.llvm.codegen.destination import (
     ScalarDestination,
     SlotDestination,
 )
-from pytensor.link.llvm.codegen.implementation import GENERATED, Implementation
 from pytensor.link.llvm.codegen.interface import (
     EmitterInput,
 )
 from pytensor.link.llvm.codegen.num import constant, store
-from pytensor.link.llvm.codegen.signature import (
+from pytensor.link.llvm.codegen.types import ir, ir_type, memory_type
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.implementation import GENERATED, Implementation
+from pytensor.link.llvm.planning.signature import (
+    Output,
     Passing,
     Signature,
     node_signature,
     skipped_inputs,
 )
-from pytensor.link.llvm.codegen.types import (
+from pytensor.link.llvm.types import (
+    NoneRepr,
     ScalarRepr,
     TensorRepr,
     element_type,
-    ir,
     is_absent,
-    memory_type,
     repr_of,
 )
 
@@ -42,7 +43,7 @@ from pytensor.link.llvm.codegen.types import (
 if TYPE_CHECKING:
     from pytensor.link.llvm.codegen.call import LinkTable
     from pytensor.link.llvm.codegen.kernel_module import KernelModule
-    from pytensor.link.llvm.codegen.plan import ValueId
+    from pytensor.link.llvm.planning.plan import ValueId
 
 
 @dataclass
@@ -57,6 +58,24 @@ class NodeFunction:
     #: of a node's function: the outputs it puts into scratch memory of the code around
     #: it (the rest of its new outputs are runtime buffers)
     in_scratch: frozenset[int] = frozenset()
+
+
+def param_types(signature: Signature) -> list[ir.Type]:
+    """The LLVM parameter types of a function with `signature`: the call context and
+    the config, then one per input and output with data.
+
+    Used to declare node functions and the functions of whole graphs. A caller buffer
+    is passed as the array itself, for example `{ptr, [1 x i64], [0 x i64]}`; other
+    outputs as a pointer to their slot or scalar."""
+    inputs = [ir_type(r) for r in signature.inputs if not isinstance(r, NoneRepr)]
+    outputs = [_output_type(o) for o in signature.outputs if not o.is_absent]
+    return [ir.ptr, ir.ptr, *inputs, *outputs]
+
+
+def _output_type(output: Output) -> ir.Type:
+    if output.passing is Passing.CALLER_BUFFER:
+        return ir_type(output.tensor)
+    return ir.ptr
 
 
 def _debug_name(node: Apply) -> str:
@@ -92,7 +111,7 @@ def node_function(
     """
     function = unit.module.function(
         name,
-        signature.param_types(),
+        param_types(signature),
         ir.i32,
         inline=ir.Inline.Always,
         debug_name=_debug_name(node),

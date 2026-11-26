@@ -8,15 +8,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NewType
 
 from pytensor.graph.basic import Apply
-from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.codegen.signature import Signature
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.planning.signature import Signature
 from pytensor.scalar.basic import ScalarType
 from pytensor.tensor.type import TensorType
 
 
 if TYPE_CHECKING:
-    from pytensor.link.llvm.analysis.memory import Memory
-    from pytensor.link.llvm.codegen.implementation import Implementation
+    from pytensor.link.llvm.planning.implementation import Implementation
+    from pytensor.link.llvm.planning.memory import Memory
 
 
 #: A value of a planned graph (`planner.Values`): what a variable of the graph holds,
@@ -76,7 +76,7 @@ class PlannedGraph:
     #: the layouts of its values (value id -> Layout; constants: `Planner.layout`)
     layouts: dict[ValueId, Layout | None]
     #: the buffers its values live in, and the frames of the buffers of a fixed size
-    #: (`plan_memory`, analysis/memory.py)
+    #: (`plan_memory`, planning/memory.py)
     memory: Memory
 
 

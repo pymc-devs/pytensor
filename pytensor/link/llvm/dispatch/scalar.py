@@ -17,12 +17,12 @@ import pytensor.scalar.math as psm
 from pytensor.graph.basic import Constant
 from pytensor.link.llvm.codegen.num import Num, cast, constant
 from pytensor.link.llvm.codegen.types import (
-    element_type,
     ir,
     value_bits,
     value_type,
 )
 from pytensor.link.llvm.dispatch import gamma
+from pytensor.link.llvm.types import element_type
 from pytensor.scalar.loop import ScalarLoop
 
 

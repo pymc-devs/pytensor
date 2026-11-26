@@ -5,17 +5,17 @@ from __future__ import annotations
 import operator
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, size
 from pytensor.link.llvm.codegen.context import Codegen
-from pytensor.link.llvm.codegen.interface import (
+from pytensor.link.llvm.codegen.num import Num, constant
+from pytensor.link.llvm.codegen.types import ir
+from pytensor.link.llvm.layout import Layout
+from pytensor.link.llvm.registry import (
     llvm_emit,
     llvm_layout,
     llvm_supports,
     supported_types,
 )
-from pytensor.link.llvm.codegen.num import Num, constant
-from pytensor.link.llvm.codegen.types import ir
 from pytensor.tensor.basic import ExtractDiag, Nonzero, Split
 from pytensor.tensor.extra_ops import CumOp
 from pytensor.tensor.math import Argmax

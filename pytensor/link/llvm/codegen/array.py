@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import cache
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
-from pytensor.link.llvm.analysis.layout import DYNAMIC, PACKED, Layout, StrideKind
 from pytensor.link.llvm.codegen.num import Num, cast, constant, load, store
-from pytensor.link.llvm.codegen.types import TensorRepr, ir, memory_type
+from pytensor.link.llvm.codegen.types import ir, ir_type, memory_type
+from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout, StrideKind
+from pytensor.link.llvm.types import TensorRepr
 from pytensor.scalar.basic import ScalarType
 
 
@@ -25,7 +26,7 @@ class Array:
 
     Lengths and strides are constants where the type, the layout or an allocation fixes
     them. `layout` is what is known about the strides when generating the code (default:
-    nothing); code uses it to pick loops (analysis/layout.py).
+    nothing); code uses it to pick loops (layout.py).
     """
 
     #: the type of the elements
@@ -167,7 +168,7 @@ class Array:
             scalar_type,
             data,
             list(shape),
-            layout.stride_values(b, np.dtype(scalar_type.dtype).itemsize, shape, {}),
+            stride_values(b, layout, np.dtype(scalar_type.dtype).itemsize, shape, {}),
             layout,
         )
 
@@ -194,8 +195,12 @@ class Array:
             passed = {
                 a: b.extract(st, k) for k, a in enumerate(representation.stride_axes)
             }
-        strides = representation.layout.stride_values(
-            b, np.dtype(representation.scalar_type.dtype).itemsize, shape, passed
+        strides = stride_values(
+            b,
+            representation.layout,
+            np.dtype(representation.scalar_type.dtype).itemsize,
+            shape,
+            passed,
         )
         return cls(
             representation.scalar_type, data, shape, strides, representation.layout
@@ -213,7 +218,7 @@ class Array:
             ir.Type.array(ir.i64, len(representation.stride_axes)),
             [self.strides[k] for k in representation.stride_axes],
         )
-        return b.aggregate(representation.ir_type, [self.data, lengths, strides])
+        return b.aggregate(ir_type(representation), [self.data, lengths, strides])
 
     # ---- views and layouts
 
@@ -331,8 +336,9 @@ class Array:
         Length-1 axes and empty arrays don't count, as in numpy's contiguity rules. `what`
         names this array in the error message."""
         b = cg.b
-        expected = layout.stride_values(
+        expected = stride_values(
             b,
+            layout,
             self.itemsize,
             self.shape,
             dict(enumerate(self.strides)),
@@ -377,6 +383,33 @@ def unknown_layout(shape: Sequence[ir.Value]) -> Layout:
 
 def _same_length(m: ir.Value, n: ir.Value) -> bool:
     return m is n or (m.const_int is not None and m.const_int == n.const_int)
+
+
+def stride_values(
+    b: ir.Builder,
+    layout: Layout,
+    itemsize: int,
+    shape: Sequence[ir.Value],
+    passed: Mapping[int, ir.Value],
+) -> list[ir.Value]:
+    """The i64 byte strides of an array with `layout` and the lengths `shape`.
+
+    Used wherever generated code needs the strides of an array whose layout is known:
+    static strides become constants, packed ones products of the lengths inside them,
+    and dynamic ones come from `passed[axis]`, e.g. the strides of an argument.
+    """
+    out: dict[int, ir.Value] = {}
+    acc = b.i64(itemsize)
+    for a in reversed(layout.order):
+        s = layout.strides[a]
+        if not isinstance(s, StrideKind):
+            out[a] = b.i64(s)
+        elif s is PACKED:
+            out[a] = acc
+            acc = b.mul(acc, shape[a], nsw=True)
+        else:
+            out[a] = passed[a]
+    return [out[a] for a in range(layout.ndim)]
 
 
 def c_strides(
@@ -513,8 +546,8 @@ class Slot:
         else:
             layout = layout.for_shape(static_shape)
         passed = {a: b.load(ir.i64, b.gep(ir.i64, sp, a)) for a in layout.dynamic_axes}
-        strides = layout.stride_values(
-            b, np.dtype(scalar_type.dtype).itemsize, shape, passed
+        strides = stride_values(
+            b, layout, np.dtype(scalar_type.dtype).itemsize, shape, passed
         )
         return Array(scalar_type, data, shape, strides, layout)
 

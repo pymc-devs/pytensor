@@ -16,22 +16,22 @@ from pytensor.graph.op import Op
 ir = pytest.importorskip("pytensor_llvm.ir")
 
 import pytensor.scalar as ps  # noqa: E402
-from pytensor.link.llvm.analysis.layout import Layout  # noqa: E402
-from pytensor.link.llvm.analysis.memory import (  # noqa: E402
+from pytensor.link.llvm.codegen.array import Array, unknown_layout  # noqa: E402
+from pytensor.link.llvm.codegen.num import load  # noqa: E402
+from pytensor.link.llvm.layout import Layout  # noqa: E402
+from pytensor.link.llvm.planning.memory import (  # noqa: E402
     Frame,
     first_fit,
     plan_memory,
 )
-from pytensor.link.llvm.codegen.array import Array, unknown_layout  # noqa: E402
-from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout  # noqa: E402
-from pytensor.link.llvm.codegen.num import load  # noqa: E402
-from pytensor.link.llvm.codegen.signature import (  # noqa: E402
+from pytensor.link.llvm.planning.signature import (  # noqa: E402
     Output,
     Passing,
     Signature,
     node_outputs,
 )
-from pytensor.link.llvm.codegen.types import TensorRepr  # noqa: E402
+from pytensor.link.llvm.registry import llvm_emit, llvm_layout  # noqa: E402
+from pytensor.link.llvm.types import TensorRepr  # noqa: E402
 
 
 STRICT = get_mode("LLVM").clone(link_kwargs={"numba_fallback": False})
