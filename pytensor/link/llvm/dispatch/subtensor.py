@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import subtensor_layout
+from pytensor.link.llvm.analysis.layout import Layout, subtensor_layout
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
@@ -86,7 +86,7 @@ def _entries(op, node, inputs, first):
 
 
 @llvm_layout.register(Subtensor)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     return [subtensor_layout(op, node, input_layouts[0])]
 
 
@@ -105,7 +105,7 @@ def _(op, node) -> bool:
 
 
 @llvm_layout.register(IncSubtensor)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     # x's, when the result can be written into it (else C)
     return [overwritten_layout(node, 0, input_layouts)]
 

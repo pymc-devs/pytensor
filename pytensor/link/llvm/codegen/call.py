@@ -102,13 +102,13 @@ class LinkTable:
         if not array.flags.c_contiguous:
             raise ValueError("link_array takes C-contiguous arrays")
         key = (array.dtype.itemsize, array.tobytes()) if share else None
-        if key is None or key not in self._arrays:
-            self.entries.append(array.ctypes.data)
-            self._keep.append(array)
-            if key is None:
-                return len(self.entries) - 1
+        if key is not None and key in self._arrays:
+            return self._arrays[key]
+        self.entries.append(array.ctypes.data)
+        self._keep.append(array)
+        if key is not None:
             self._arrays[key] = len(self.entries) - 1
-        return self._arrays[key]
+        return len(self.entries) - 1
 
     def fix(self) -> None:
         """Fix the table (`link`): no entries can be added, its address is final."""

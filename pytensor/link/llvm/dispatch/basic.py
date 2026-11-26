@@ -149,7 +149,7 @@ def _(op, node, cg, inputs, outputs):
 
 
 @llvm_layout.register(Reshape)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     # a view of a C-contiguous input, else a C-contiguous copy: C either way
     return [Layout.c(node.outputs[0].type.ndim)]
 
@@ -253,7 +253,7 @@ def _(op, node, cg, inputs, outputs):
 
 
 @llvm_layout.register(CheckAndRaise)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     return [same_layout(node, input_layouts[0])]
 
 

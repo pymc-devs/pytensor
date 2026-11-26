@@ -102,7 +102,9 @@ class LLVMLinker(JITLinker):
         new.program = new.stats = None
         return new
 
-    def fgraph_convert(self, fgraph, **kwargs):
+    def fgraph_convert(
+        self, fgraph, order, input_storage, output_storage, storage_map, **kwargs
+    ):
         from pytensor.link.llvm.program import Options, compile_program
 
         global _warned

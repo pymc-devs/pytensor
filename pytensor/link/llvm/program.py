@@ -123,7 +123,7 @@ def with_locations(text: str) -> str:
         """`field` of the metadata node `ref` ("!12"), unquoted."""
         return md.get(ref.lstrip("!"), {}).get(field, "").strip('"')
 
-    cache = {}
+    cache: dict[str, str] = {}
 
     def where(ref):
         if ref not in cache:

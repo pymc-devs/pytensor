@@ -49,12 +49,12 @@ def broadcast_shape(cg, node, inputs):
 
 
 @llvm_layout.register(Elemwise)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     """New memory in the memory order most inputs are packed in (C if there is none):
     then all operands share one order and the loop is flat. Elemwise on transposed
     inputs gives a transposed output instead of a strided loop. Outputs in
     `inplace_pattern` have their input's layout, so that they can be written into it."""
-    layouts = []
+    layouts: list[Layout | None] = []
     for k, output in enumerate(node.outputs):
         overwritten = overwritten_layout(node, k, input_layouts)
         if overwritten is not None:

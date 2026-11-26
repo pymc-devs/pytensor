@@ -7,7 +7,6 @@ from collections.abc import (
     Callable,
     Generator,
     Iterable,
-    Iterator,
     Mapping,
     Sequence,
 )
@@ -438,7 +437,7 @@ class Codegen:
         return clamped
 
     @contextmanager
-    def deferred_checks(self, messages: Iterable[str]) -> Iterator[None]:
+    def deferred_checks(self, messages: Iterable[str]) -> Generator[None]:
         """Index checks with these `messages` deferred inside (`checked_index` with
         `defer`) fail when the scope ends, not in the loop they are in: loops without
         an exit in the middle can be vectorized. Use it around a loop whose results

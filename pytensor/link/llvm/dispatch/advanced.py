@@ -44,7 +44,7 @@ def index_arrays(op, index_vars) -> tuple[int, list[int]] | None:
     first one indexes, their positions in `index_vars`), or None for a pattern that
     isn't handled (bounded slices, non-integer or separated index arrays, none)."""
     entries = unflatten_index_variables(list(enumerate(index_vars)), op.idx_list)
-    first = None
+    first: int | None = None
     found: list[int] = []
     for a, e in enumerate(entries):
         if isinstance(e, slice):

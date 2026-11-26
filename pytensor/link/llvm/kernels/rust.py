@@ -13,6 +13,7 @@ decided here (`fresh_mode`). `rust_kernel_outputs` reads both back.
 from __future__ import annotations
 
 from functools import singledispatch
+from typing import Any
 
 import numpy as np
 
@@ -48,7 +49,7 @@ def fresh_mode(out):
 
 
 @singledispatch
-def rust_kernel(op, node, in_layouts=None, linalg_parallel=False):
+def rust_kernel(op, node, in_layouts=None, linalg_parallel=False) -> Any:
     """A Rust kernel for `node`, or None. It is made for the inputs' layouts, and
     chooses the layouts of its outputs then (`Kernel::output_layouts`, next to the
     kernel in Rust).

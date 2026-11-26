@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytensor.scalar as ps
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
-from pytensor.link.llvm.analysis.layout import dimshuffle_layout, same_layout
+from pytensor.link.llvm.analysis.layout import Layout, dimshuffle_layout, same_layout
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import cast
@@ -15,13 +15,13 @@ from pytensor.tensor.shape import SpecifyShape
 
 
 @llvm_layout.register(DimShuffle)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     return [dimshuffle_layout(op, node, input_layouts[0])]
 
 
 @llvm_layout.register(TypeCastingOp)
 @llvm_layout.register(SpecifyShape)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     x = input_layouts[0]
     # (no layout: a cast of a value without data, like the xtensor rng casts)
     return [None if x is None else same_layout(node, x)]

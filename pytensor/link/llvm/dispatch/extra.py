@@ -5,7 +5,7 @@ from __future__ import annotations
 import operator
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import split_layouts
+from pytensor.link.llvm.analysis.layout import Layout, split_layouts
 from pytensor.link.llvm.codegen.array import Array, size
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.interface import (
@@ -87,7 +87,7 @@ def _(op, node, cg, inputs, outputs):
 
 
 @llvm_layout.register(Split)
-def _(op, node, input_layouts):
+def _(op, node, input_layouts) -> list[Layout | None]:
     return split_layouts(op, node, input_layouts[0])
 
 

@@ -32,7 +32,7 @@ planner makes whatever runs a node give its outputs those layouts.
 from __future__ import annotations
 
 import enum
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -44,6 +44,7 @@ from pytensor.graph.rewriting.basic import GraphRewriter
 
 
 if TYPE_CHECKING:
+    from pytensor.link.llvm.codegen.types import ir
     from pytensor.tensor.type import TensorType
 
 
@@ -179,21 +180,27 @@ class Layout:
             n *= int(length)
         return n  # length-1 axis
 
-    def stride_values(self, b, itemsize: int, shape_vals, passed: dict):
+    def stride_values(
+        self,
+        b: ir.Builder,
+        itemsize: int,
+        shape_vals: Sequence[ir.Value],
+        passed: Mapping[int, ir.Value],
+    ) -> list[ir.Value]:
         """i64 stride values: constants, products of lengths (packed) or `passed[axis]`."""
 
-        out = [None] * self.ndim
+        out: dict[int, ir.Value] = {}
         acc = b.i64(itemsize)
         for a in reversed(self.order):
             s = self.strides[a]
-            if s is PACKED:
+            if not isinstance(s, StrideKind):
+                out[a] = b.i64(s)
+            elif s is PACKED:
                 out[a] = acc
                 acc = b.mul(acc, shape_vals[a], nsw=True)
-            elif s is DYNAMIC:
-                out[a] = passed[a]
             else:
-                out[a] = b.i64(s)
-        return out
+                out[a] = passed[a]
+        return [out[a] for a in range(self.ndim)]
 
     def satisfied_by(self, shape, strides, itemsize) -> bool:
         """Do the run-time `shape` and byte `strides` of an array satisfy the layout?"""
@@ -262,7 +269,7 @@ class Layout:
         return (
             list(self.order),
             [
-                "P" if s is PACKED else "?" if s is DYNAMIC else int(s)
+                int(s) if not isinstance(s, StrideKind) else "P" if s is PACKED else "?"
                 for s in self.strides
             ],
         )
@@ -376,7 +383,9 @@ def dimshuffle_layout(op, node, x: Layout) -> Layout:
     return Layout.make(shape_of(node.outputs[0]), order, strides)
 
 
-def _static_int(var):
+def _static_int(var) -> int | str | None:
+    """The value of the scalar `var` if it is a constant, None if there is no `var`,
+    else "dynamic"."""
     from pytensor.graph.basic import Constant
 
     if var is None:
@@ -407,9 +416,11 @@ def subtensor_layout(op, node, x: Layout) -> Layout:
         n_out = out_shape[a - len(removed)]
         if not (shape[a] is not None and n_out == shape[a]):
             demoted.update(outer_in_block(x, a, shape))
-        if step not in (None, 1):
+        if step is not None and step != 1:
             st = x.static_stride(a, shape, isz)
-            stepped[a] = DYNAMIC if step == "dynamic" or st is None else st * step
+            stepped[a] = (
+                st * step if isinstance(step, int) and st is not None else DYNAMIC
+            )
             demoted.update(outer_in_block(x, a, shape))
     strides = demote(x, demoted, shape, isz)
     for a, stride in stepped.items():
@@ -420,11 +431,11 @@ def subtensor_layout(op, node, x: Layout) -> Layout:
     return Layout.make(out_shape, order, [strides[a] for a in keep])
 
 
-def split_layouts(op, node, x: Layout) -> list[Layout]:
+def split_layouts(op, node, x: Layout) -> list[Layout | None]:
     xv = node.inputs[0]
     shape, isz = shape_of(xv), itemsize_of(xv)
     a = int(op.axis) % x.ndim
-    outs = []
+    outs: list[Layout | None] = []
     for var in node.outputs:
         os = shape_of(var)
         if os[a] is not None and os[a] == shape[a]:

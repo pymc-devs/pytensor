@@ -280,7 +280,10 @@ def emit_core_draws(node, cg, inputs, outputs, core_shape: Array) -> None:
     ]
     core = cg.graph_function(graph_inputs, graph_outputs, layouts, name="draw")
     batch_ndim = op.batch_ndim(node)
-    shapes = [[], core_lengths(cg, node.outputs[1], batch_ndim, core_shape)]
+    shapes: list[list[ir.Value]] = [
+        [],
+        core_lengths(cg, node.outputs[1], batch_ndim, core_shape),
+    ]
     batch_loop(cg, core, [None, *operands], outputs, batch, shapes, what=str(op))
 
 
