@@ -37,13 +37,7 @@ from pytensor.compile.builders import Execution, OpFromGraph
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.features import ViewFeature, view_feature
 from pytensor.graph.traversal import io_toposort
-from pytensor.link.llvm.analysis.layout import (
-    Layout,
-    graph_layouts,
-    itemsize_of,
-    layout_feature,
-    shape_of,
-)
+from pytensor.link.llvm.analysis.layout import Layout, graph_layouts, layout_feature
 from pytensor.link.llvm.analysis.memory import plan_memory
 from pytensor.link.llvm.codegen.call import Kernel
 from pytensor.link.llvm.codegen.errors import ExceptionTable
@@ -606,7 +600,7 @@ class Planner:
         ]
         orders = [
             None
-            if layout is None or layout.is_c(shape_of(var))
+            if layout is None or layout.is_c(var.type.shape)
             else tuple(layout.order)
             for var, layout in zip(node.outputs, layouts, strict=True)
         ]
@@ -679,7 +673,7 @@ def _layouts_note(reprs):
 def _allocated_layout(op, var, layout: Layout) -> Layout:
     """The layout a kernel allocates `var` in to give it the layout `lay`: `lay` if it
     is packed, else C-contiguous (which must imply it)."""
-    shape, size = shape_of(var), itemsize_of(var)
+    shape, size = var.type.shape, var.type.numpy_dtype.itemsize
     if layout.fully_packed(shape):
         return layout
     if not Layout.c(var.type.ndim).implies(layout, shape, size):
@@ -693,7 +687,8 @@ def conforms(node, outputs, binding) -> bool:
     """Do the `outputs` (`Output`s) of something running `node` have layouts that
     imply the `binding` ones?"""
     return all(
-        layout is None or output.layout.implies(layout, shape_of(var), itemsize_of(var))
+        layout is None
+        or output.layout.implies(layout, var.type.shape, var.type.numpy_dtype.itemsize)
         for var, output, layout in zip(node.outputs, outputs, binding, strict=True)
     )
 

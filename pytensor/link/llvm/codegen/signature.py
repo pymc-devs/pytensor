@@ -14,12 +14,7 @@ from dataclasses import dataclass, replace
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.features import op_view_parents
-from pytensor.link.llvm.analysis.layout import (
-    Layout,
-    itemsize_of,
-    new_memory_layout,
-    shape_of,
-)
+from pytensor.link.llvm.analysis.layout import Layout, new_memory_layout
 from pytensor.link.llvm.codegen.implementation import GENERATED, Implementation
 from pytensor.link.llvm.codegen.interface import has_emitter
 from pytensor.link.llvm.codegen.types import (
@@ -263,7 +258,7 @@ def node_outputs(
         if layout is None:
             ndim = var.type.ndim
             layout = Layout.dynamic(ndim) if viewed else Layout.c(ndim)
-        shape, itemsize = shape_of(var), itemsize_of(var)
+        shape, itemsize = var.type.shape, var.type.numpy_dtype.itemsize
         aliased = viewed + tuple(
             k
             for k in destroyed

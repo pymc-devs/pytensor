@@ -4,7 +4,7 @@ Other OpFromGraphs never get to code generation: the planner inlines them.
 """
 
 from pytensor.compile.builders import Execution, OpFromGraph
-from pytensor.link.llvm.analysis.layout import infer_layouts, new_memory_layout
+from pytensor.link.llvm.analysis.layout import graph_layouts, new_memory_layout
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 
@@ -14,7 +14,8 @@ def _(op, node, input_layouts):
     """The layouts of the inner outputs. Inlined, that is what they are; a compiled
     unit has them where new memory can, since it copies an output that isn't in its
     inputs' memory (`new_memory_layout`)."""
-    inner_layouts = infer_layouts(op.fgraph, input_layouts)
+    inner = op.fgraph
+    inner_layouts = graph_layouts(inner.inputs, inner.outputs, input_layouts)
     layouts = [inner_layouts[output] for output in op.fgraph.outputs]
     if op.execution is Execution.COMPILED:
         return [

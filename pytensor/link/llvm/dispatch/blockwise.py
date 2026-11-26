@@ -25,12 +25,7 @@ from dataclasses import dataclass
 
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.traversal import io_toposort
-from pytensor.link.llvm.analysis.layout import (
-    Layout,
-    itemsize_of,
-    remove_axis,
-    shape_of,
-)
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.analysis.work import llvm_work
 from pytensor.link.llvm.codegen.array import Array, size
 from pytensor.link.llvm.codegen.context import Codegen
@@ -134,10 +129,10 @@ def blockwise_core_layouts(node, in_layouts) -> list:
 
 def core_layout(var, given: Layout | None, batch_ndim: int) -> Layout:
     """The layout of `var` (laid out as `given`) without its first `batch_ndim` axes."""
-    shape, isz = list(shape_of(var)), itemsize_of(var)
+    shape, isz = list(var.type.shape), var.type.numpy_dtype.itemsize
     layout = Layout.unknown(shape) if given is None else given.for_shape(shape)
     for _ in range(batch_ndim):
-        layout = remove_axis(layout, 0, shape, isz)
+        layout = layout.remove_axis(0, shape, isz)
         shape = shape[1:]
     return layout
 

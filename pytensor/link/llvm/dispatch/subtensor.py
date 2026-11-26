@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import Layout, subtensor_layout
+from pytensor.graph.basic import Constant
+from pytensor.link.llvm.analysis.layout import DYNAMIC, Layout, Stride
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
@@ -87,7 +90,46 @@ def _entries(op, node, inputs, first):
 
 @llvm_layout.register(Subtensor)
 def _(op, node, input_layouts) -> list[Layout | None]:
-    return [subtensor_layout(op, node, input_layouts[0])]
+    """A view of the input. An integer index removes its axis; a slice that may not
+    cover its whole axis, or has a step, makes the packed axes outside it no longer
+    follow from the lengths inside them, and a step changes the axis's own stride."""
+    x = input_layouts[0]
+    xv = node.inputs[0]
+    shape, itemsize = xv.type.shape, xv.type.numpy_dtype.itemsize
+    out_shape = node.outputs[0].type.shape
+    entries = unflatten_index_variables(node.inputs[1:], op.idx_list)
+    demoted: set[int] = set()
+    removed: list[int] = []
+    stepped: dict[int, Stride] = {}
+    for a, entry in enumerate(entries):
+        if not isinstance(entry, slice):
+            # The axis disappears: packed axes outside it now skip its length.
+            removed.append(a)
+            demoted.update(x.outer_in_block(a, shape))
+            continue
+        # The step: 1 if there is none, None if it is only known when running.
+        if entry.step is None:
+            step: int | None = 1
+        elif isinstance(entry.step, Constant):
+            step = int(np.asarray(entry.step.data))
+        else:
+            step = None
+        if entry.start is None and entry.stop is None and step == 1:
+            continue
+        n_out = out_shape[a - len(removed)]
+        if not (shape[a] is not None and n_out == shape[a]):
+            demoted.update(x.outer_in_block(a, shape))
+        if step != 1:
+            stride = x.static_stride(a, shape, itemsize)
+            stepped[a] = DYNAMIC if step is None or stride is None else stride * step
+            demoted.update(x.outer_in_block(a, shape))
+    strides = x.demoted_strides(demoted, shape, itemsize)
+    for a, stride in stepped.items():
+        strides[a] = stride
+    keep = [a for a in range(x.ndim) if a not in removed]
+    renumber = {a: k for k, a in enumerate(keep)}
+    order = [renumber[a] for a in x.order if a in renumber]
+    return [Layout.make(out_shape, order, [strides[a] for a in keep])]
 
 
 @llvm_emit.register(Subtensor)

@@ -180,6 +180,36 @@ class Layout:
             n *= int(length)
         return n  # length-1 axis
 
+    def outer_in_block(self, axis: int, shape) -> list[int]:
+        """The packed axes outside `axis` in the packed block, innermost first. Empty
+        if `axis` isn't in the block."""
+        block = self.packed_block(shape)
+        if axis not in block:
+            return []
+        return block[block.index(axis) + 1 :]
+
+    def demoted_strides(self, axes, shape, itemsize: int) -> list[Stride]:
+        """The strides, with the packed `axes` turned into their static value, or
+        DYNAMIC where that isn't known. Used when an axis inside them changes length,
+        so that they no longer follow from the lengths of the axes inside them."""
+        strides = list(self.strides)
+        for a in axes:
+            if strides[a] is PACKED and not _is_one(shape[a]):
+                s = self.static_stride(a, shape, itemsize)
+                strides[a] = DYNAMIC if s is None else s
+        return strides
+
+    def remove_axis(self, axis: int, shape, itemsize: int) -> Layout:
+        """The layout of `x[..., i, ...]`, an integer index on `axis`, for an array `x`
+        with this layout and `shape`."""
+        strides = self.demoted_strides(
+            self.outer_in_block(axis, shape), shape, itemsize
+        )
+        keep = [a for a in range(self.ndim) if a != axis]
+        renumber = {a: k for k, a in enumerate(keep)}
+        order = [renumber[a] for a in self.order if a in renumber]
+        return Layout.make([shape[a] for a in keep], order, [strides[a] for a in keep])
+
     def stride_values(
         self,
         b: ir.Builder,
@@ -322,133 +352,6 @@ class Layout:
     __repr__ = __str__
 
 
-def shape_of(var) -> tuple:
-    return tuple(None if s is None else int(s) for s in var.type.shape)
-
-
-def itemsize_of(var) -> int:
-    dtype: np.dtype = np.dtype(var.type.dtype)
-    return dtype.itemsize
-
-
-def demote(layout: Layout, axes, shape, itemsize) -> list[Stride]:
-    """Strides with packed `axes` turned into their static value or DYNAMIC."""
-    strides = list(layout.strides)
-    for a in axes:
-        if strides[a] is PACKED and not _is_one(shape[a]):
-            s = layout.static_stride(a, shape, itemsize)
-            strides[a] = DYNAMIC if s is None else s
-    return strides
-
-
-def outer_in_block(layout: Layout, axis, shape) -> list[int]:
-    """Packed axes outside `axis` in the packed block (empty if `axis` isn't in it)."""
-    block = layout.packed_block(shape)
-    if axis not in block:
-        return []
-    return block[block.index(axis) + 1 :]
-
-
-def remove_axis(layout: Layout, axis, shape, itemsize) -> Layout:
-    """The layout of `x[..., i, ...]` (integer index on `axis`) for `x` with `layout`."""
-    strides = demote(layout, outer_in_block(layout, axis, shape), shape, itemsize)
-    keep = [a for a in range(layout.ndim) if a != axis]
-    renumber = {a: k for k, a in enumerate(keep)}
-    order = [renumber[a] for a in layout.order if a in renumber]
-    return Layout.make([shape[a] for a in keep], order, [strides[a] for a in keep])
-
-
-# ------------------------------------------------------------------ layouts of views
-# (used by the ops' `llvm_layout`, next to their emitters)
-
-
-def same_layout(node, x: Layout) -> Layout:
-    """A view that is its input (ViewOp, SpecifyShape, ...): the input's layout, for the
-    output's (possibly more static) shape."""
-    return x.for_shape(shape_of(node.outputs[0]))
-
-
-def dimshuffle_layout(op, node, x: Layout) -> Layout:
-    out_of = {}  # input axis -> output axis
-    strides: list[Stride] = []
-    for j, entry in enumerate(op.new_order):
-        if entry == "x":
-            strides.append(PACKED)
-        else:
-            out_of[int(entry)] = j
-            strides.append(x.strides[int(entry)])
-    order = [j for j, entry in enumerate(op.new_order) if entry == "x"] + [
-        out_of[a] for a in x.order if a in out_of
-    ]
-    return Layout.make(shape_of(node.outputs[0]), order, strides)
-
-
-def _static_int(var) -> int | str | None:
-    """The value of the scalar `var` if it is a constant, None if there is no `var`,
-    else "dynamic"."""
-    from pytensor.graph.basic import Constant
-
-    if var is None:
-        return None
-    if isinstance(var, Constant):
-        return int(np.asarray(var.data))
-    return "dynamic"
-
-
-def subtensor_layout(op, node, x: Layout) -> Layout:
-    from pytensor.tensor.subtensor import unflatten_index_variables
-
-    xv = node.inputs[0]
-    shape, isz = shape_of(xv), itemsize_of(xv)
-    out_shape = shape_of(node.outputs[0])
-    entries = unflatten_index_variables(node.inputs[1:], op.idx_list)
-    demoted, removed = set(), []
-    stepped: dict[int, Stride] = {}
-    for a, e in enumerate(entries):
-        if not isinstance(e, slice):
-            # the axis disappears: packed axes outside it now skip its length
-            removed.append(a)
-            demoted.update(outer_in_block(x, a, shape))
-            continue
-        step = _static_int(e.step)
-        if e.start is None and e.stop is None and step in (None, 1):
-            continue
-        n_out = out_shape[a - len(removed)]
-        if not (shape[a] is not None and n_out == shape[a]):
-            demoted.update(outer_in_block(x, a, shape))
-        if step is not None and step != 1:
-            st = x.static_stride(a, shape, isz)
-            stepped[a] = (
-                st * step if isinstance(step, int) and st is not None else DYNAMIC
-            )
-            demoted.update(outer_in_block(x, a, shape))
-    strides = demote(x, demoted, shape, isz)
-    for a, stride in stepped.items():
-        strides[a] = stride
-    keep = [a for a in range(x.ndim) if a not in removed]
-    renumber = {a: k for k, a in enumerate(keep)}
-    order = [renumber[a] for a in x.order if a in renumber]
-    return Layout.make(out_shape, order, [strides[a] for a in keep])
-
-
-def split_layouts(op, node, x: Layout) -> list[Layout | None]:
-    xv = node.inputs[0]
-    shape, isz = shape_of(xv), itemsize_of(xv)
-    a = int(op.axis) % x.ndim
-    outs: list[Layout | None] = []
-    for var in node.outputs:
-        os = shape_of(var)
-        if os[a] is not None and os[a] == shape[a]:
-            outs.append(x.for_shape(os))
-        else:
-            outs.append(
-                Layout.make(
-                    os, x.order, demote(x, outer_in_block(x, a, shape), shape, isz)
-                )
-            )
-    return outs
-
-
 def common_order(layouts, shape) -> list[int] | None:
     """The memory order (outermost first) most of `layouts` are packed in over the axes
     of `shape` that aren't statically 1, if one covers them all (else None)."""
@@ -503,15 +406,10 @@ def _default_layout(var, inputs_c=False):
     return Layout.dynamic(var.type.ndim)
 
 
-def infer_layouts(fgraph, input_layouts=None) -> dict:
-    """{variable: Layout} for the variables of `fgraph` (`node_outputs`; None for
-    those that aren't tensors). `input_layouts`: per graph input (default: nothing
-    known)."""
-    return graph_layouts(fgraph.inputs, fgraph.outputs, input_layouts)
-
-
 def graph_layouts(inputs, outputs, input_layouts=None, inlined=False) -> dict:
-    """Like `infer_layouts`, for the graph from the variables `inputs` to `outputs`.
+    """{variable: Layout} for the variables of the graph from the variables `inputs`
+    to `outputs` (`node_outputs`; None for those that aren't tensors).
+    `input_layouts`: per input, default nothing known.
 
     With `inlined`, every OpFromGraph is treated as inlined, which is what generated
     code does with them: its outputs get the layouts its inner graph gives them, even
@@ -661,12 +559,7 @@ __all__ = [
     "Layout",
     "LayoutFeature",
     "common_order",
-    "dimshuffle_layout",
     "graph_layouts",
-    "infer_layouts",
     "layout_feature",
     "new_memory_layout",
-    "same_layout",
-    "split_layouts",
-    "subtensor_layout",
 ]

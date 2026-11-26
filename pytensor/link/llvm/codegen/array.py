@@ -124,20 +124,13 @@ class Array:
     def at(self, b: ir.Builder, i: ir.Value | int, axis: int = 0) -> Array:
         """The sub-array at index `i` of `axis` (`a[i]`, `a[:, i]`, ...): a view with
         one axis less, with what its layout still says."""
-        from pytensor.link.llvm.analysis.layout import remove_axis
-
         axis = range(self.ndim)[axis]
         keep = [a for a in range(self.ndim) if a != axis]
         return self.view(
             advance(b, self.data, i, self.strides[axis], self.scalar_type),
             [self.shape[a] for a in keep],
             [self.strides[a] for a in keep],
-            remove_axis(
-                self.layout,
-                axis,
-                self.static_shape(),
-                self.itemsize,
-            ),
+            self.layout.remove_axis(axis, self.static_shape(), self.itemsize),
         )
 
     # ---- construction and conversion

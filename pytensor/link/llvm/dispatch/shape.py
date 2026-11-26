@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytensor.scalar as ps
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
-from pytensor.link.llvm.analysis.layout import Layout, dimshuffle_layout, same_layout
+from pytensor.link.llvm.analysis.layout import PACKED, Layout, Stride
 from pytensor.link.llvm.codegen.array import Array
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import cast
@@ -16,15 +16,30 @@ from pytensor.tensor.shape import SpecifyShape
 
 @llvm_layout.register(DimShuffle)
 def _(op, node, input_layouts) -> list[Layout | None]:
-    return [dimshuffle_layout(op, node, input_layouts[0])]
+    """A view with the input's axes reordered, and new axes of length 1 added. The axes
+    keep their strides; a new axis is packed."""
+    x = input_layouts[0]
+    out_of = {}  # input axis -> output axis
+    strides: list[Stride] = []
+    for j, entry in enumerate(op.new_order):
+        if entry == "x":
+            strides.append(PACKED)
+        else:
+            out_of[int(entry)] = j
+            strides.append(x.strides[int(entry)])
+    order = [j for j, entry in enumerate(op.new_order) if entry == "x"] + [
+        out_of[a] for a in x.order if a in out_of
+    ]
+    return [Layout.make(node.outputs[0].type.shape, order, strides)]
 
 
 @llvm_layout.register(TypeCastingOp)
 @llvm_layout.register(SpecifyShape)
 def _(op, node, input_layouts) -> list[Layout | None]:
+    """A view that is its input, for the output's possibly more static shape."""
     x = input_layouts[0]
-    # (no layout: a cast of a value without data, like the xtensor rng casts)
-    return [None if x is None else same_layout(node, x)]
+    # A cast of a value without data, like the xtensor rng casts, has no layout.
+    return [None if x is None else x.for_shape(node.outputs[0].type.shape)]
 
 
 @llvm_emit.register(DimShuffle)

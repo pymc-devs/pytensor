@@ -264,8 +264,12 @@ def _output_modes(steps, out_ids, types) -> list:
 
 class Program:
     """A planned and compiled program: its function, callable from Python
-    (`function`, or the program itself) and from C (`c_function`)."""
+    (`function`, or the program itself) and from C (`c_function`), and the plan it
+    was made from (`planned`)."""
 
+    #: the planned graph the program's function runs: its steps, the layouts of its
+    #: values and where they live (`PlannedGraph.memory`)
+    planned: PlannedGraph
     #: what each step runs
     descriptions: list[str]
     #: the size in bytes of the frames of the program's function, which hold its
@@ -276,7 +280,7 @@ class Program:
     #: the address and config of the program's kernel
     address: int
     config: int
-    #: may it run work on the runtime's thread pool? (Calls then run on the pool.)
+    #: may it run work on the runtime's thread pool? Calls then run on the pool.
     uses_pool: bool
     #: the compiled function, callable from Python
     function: Function
@@ -287,18 +291,17 @@ class Program:
         types,
         unit,
         node_function,
-        memory,
+        planned,
         layout_of,
         profile,
-        steps,
-        in_ids,
         contiguous,
-        out_ids,
         modes,
         uses_pool,
     ):
+        steps, in_ids, out_ids = planned.steps, planned.in_ids, planned.out_ids
+        self.planned = planned
         self.descriptions = [step.description for step in steps]
-        self.frame_bytes = sum(memory.frame_bytes.values())
+        self.frame_bytes = sum(planned.memory.frame_bytes.values())
         self.profile_cells = profile
         self.address = unit.address
         self.uses_pool = uses_pool
@@ -320,12 +323,13 @@ class Program:
             ],
             [unit.compiled, unit.links.keepalive],
             uses_pool,
-            unit.exceptions.classes,  # (complete: everything is generated)
+            # The exception table is complete: everything is generated.
+            unit.exceptions.classes,
         )
         self._dump = _dump(
             types,
             node_function,
-            memory,
+            planned.memory,
             layout_of,
             steps,
             in_ids,
@@ -730,13 +734,10 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         types,
         unit,
         node_function,
-        function_graph.memory,
+        function_graph,
         lambda k: planner.layout(k, planned.layouts),
         profile,
-        steps,
-        in_ids,
         contiguous,
-        out_ids,
         modes,
         any(m.uses_pool for m in (*planner.modules, unit)),
     )

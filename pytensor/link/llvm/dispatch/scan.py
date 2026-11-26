@@ -34,10 +34,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import Layout, remove_axis
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, advance
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import Captured, OutputDestination
@@ -487,9 +485,7 @@ def _rotate_and_trim(cg, out, buffer: Array, trace_len, is_while: bool):
 
 def _row_layout(a: Array) -> Layout:
     """The layout of one row of `a` (what `a.at(b, i)` has)."""
-    return remove_axis(
-        a.layout, 0, a.static_shape(), np.dtype(a.scalar_type.dtype).itemsize
-    )
+    return a.layout.remove_axis(0, a.static_shape(), a.itemsize)
 
 
 def emit_scan(

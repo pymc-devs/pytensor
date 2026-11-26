@@ -369,7 +369,6 @@ def _declare_layouts():
     `llvm_layout` says what the kernel chooses for the inputs' layouts, so that the
     planner binds the outputs to them. (Where no kernel applies, e.g. for another
     dtype, the default: what a numba kernel then allocates.)"""
-    from pytensor.link.llvm.analysis.layout import shape_of
     from pytensor.link.llvm.codegen.interface import llvm_layout
 
     def declared(op, node, input_layouts):
@@ -377,7 +376,7 @@ def _declare_layouts():
         if kernel is None:
             return [None] * len(node.outputs)
         return [
-            Layout.from_spec(spec, shape_of(var))
+            Layout.from_spec(spec, var.type.shape)
             for var, (_, spec) in zip(node.outputs, kernel.outputs(), strict=True)
         ]
 

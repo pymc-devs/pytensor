@@ -5,7 +5,7 @@ from __future__ import annotations
 import operator
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import Layout, split_layouts
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, size
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.interface import (
@@ -88,7 +88,23 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_layout.register(Split)
 def _(op, node, input_layouts) -> list[Layout | None]:
-    return split_layouts(op, node, input_layouts[0])
+    """Views of pieces of the input along the split axis. A piece that may be shorter
+    than the axis makes the packed axes outside it no longer follow from the lengths
+    inside them."""
+    x = input_layouts[0]
+    xv = node.inputs[0]
+    shape, itemsize = xv.type.shape, xv.type.numpy_dtype.itemsize
+    axis = int(op.axis) % x.ndim
+    layouts: list[Layout | None] = []
+    for var in node.outputs:
+        out_shape = var.type.shape
+        if out_shape[axis] is not None and out_shape[axis] == shape[axis]:
+            layouts.append(x.for_shape(out_shape))
+        else:
+            outer = x.outer_in_block(axis, shape)
+            strides = x.demoted_strides(outer, shape, itemsize)
+            layouts.append(Layout.make(out_shape, x.order, strides))
+    return layouts
 
 
 @llvm_emit.register(Split)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytensor.scalar as ps
-from pytensor.link.llvm.analysis.layout import Layout, same_layout
+from pytensor.link.llvm.analysis.layout import Layout
 from pytensor.link.llvm.codegen.array import Array, c_strides, size
 from pytensor.link.llvm.codegen.interface import ScalarOutput, llvm_emit, llvm_layout
 from pytensor.link.llvm.codegen.num import cast, load, store
@@ -254,7 +254,8 @@ def _(op, node, cg, inputs, outputs):
 
 @llvm_layout.register(CheckAndRaise)
 def _(op, node, input_layouts) -> list[Layout | None]:
-    return [same_layout(node, input_layouts[0])]
+    """A view that is its input, for the output's possibly more static shape."""
+    return [input_layouts[0].for_shape(node.outputs[0].type.shape)]
 
 
 @llvm_emit.register(CheckAndRaise)
