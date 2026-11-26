@@ -19,7 +19,7 @@ from pytensor.graph.op import Op
 pytest.importorskip("pytensor_llvm.ir")
 
 
-from pytensor.link.llvm.analysis.liveness import lifetimes, place_temporaries
+from pytensor.link.llvm.analysis.memory import plan_memory
 from pytensor.link.llvm.codegen.interface import (
     llvm_emit,
 )
@@ -33,7 +33,7 @@ from pytensor.link.llvm.codegen.signature import (
 )
 from pytensor.link.llvm.program import Options, build_program
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
-from tests.link.llvm.test_aliasing import step
+from tests.link.llvm.test_aliasing import created, step
 
 
 # (fused, a chain of Elemwise is one loop and has nothing to overwrite)
@@ -339,11 +339,10 @@ def test_an_overwritten_value_lives_on_under_another_name():
         step([0], [3], [P]),
         step([2, 3], [4], [P]),
     ]
-    _, end = lifetimes(steps, kept=[4])
-    assert end[1] == 3  # alive until 2 was read
-    offsets, _ = place_temporaries(steps, {1: 64, 3: 64}, kept=[4])
-    assert offsets[1] != offsets[3]
+    memory = plan_memory(steps, [0], [4], ())
+    assert created(memory, 1).free_after == 3  # alive until 2 was read
+    assert memory.place_in_frame(1) != memory.place_in_frame(3)
 
     # overwriting the function's output: alive until the end
-    _, end = lifetimes([step([0], [1], [P]), step([1], [2], [R], [(0,)])], kept=[2])
-    assert end[1] == 2
+    steps = [step([0], [1], [P]), step([1], [2], [R], [(0,)])]
+    assert created(plan_memory(steps, [0], [2], ()), 1).free_after is None

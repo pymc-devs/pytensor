@@ -51,12 +51,6 @@ class NodeFunction:
     signature: Signature
     #: its link table (call.py): the config to call it with, or None
     links: LinkTable | None = None
-    #: of a graph's function: the arena ({value id: offset} of the temporary values in
-    #: it, its size in bytes)
-    arena: tuple[dict[ValueId, int], int] = ({}, 0)
-    #: of a graph's function: the value ids of all its temporary values (in the arena
-    #: or on the stack)
-    temporaries: frozenset[ValueId] = frozenset()
     #: of a graph's function: where its array constants are in the link table
     #: ({value id: entry})
     constants: dict[ValueId, int] = field(default_factory=dict)

@@ -242,8 +242,10 @@ def test_constants_keep_their_memory_order():
     outs = [a @ v[:5], b @ v, b * x, b[1:, ::2] * x[0, 0], c * x[0, 0], b]
     f = compare([v, x], outs, [rng.normal(size=6), rng.normal(size=(5, 6))])
     dump = f.maker.linker.program.dump()
-    at = dict(re.findall(r"(\[\d+, \d+\]) +constant at (\w+)", dump))
-    assert at["[6, 5]"] == at["[5, 6]"]
+    layouts = dict(re.findall(r"(\[\d+, \d+\]) +constant +(.+?)$", dump, re.M))
+    # the transpose keeps the matrix's memory order: both are the same bytes, which
+    # the link table keeps once
+    assert layouts == {"[6, 5]": "C", "[5, 6]": "[P0, P1]"}
 
 
 @pytest.mark.parametrize("axis", [0, 1, -1])

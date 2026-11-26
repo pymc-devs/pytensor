@@ -38,7 +38,7 @@ def info(f):
     return {
         "steps": p.steps,
         "n_steps": p.n_steps,
-        "arena_bytes": p.arena_bytes,
+        "frame_bytes": p.frame_bytes,
         "stats": f.maker.linker.stats,
     }
 
@@ -76,9 +76,9 @@ def test_small_static_graph_is_one_unit():
     assert i["steps"][0].startswith("unit[")
 
 
-def test_arena_reuses_temporaries():
+def test_frame_reuses_temporaries():
     # large static intermediates aren't grouped: each is a step whose output lives in
-    # the arena, which reuses memory by liveness
+    # the scratch frame, where values that are never needed together share memory
     n = 10_000
     x = pt.tensor("x", shape=(n,))
     a = pt.exp(x)
@@ -90,7 +90,20 @@ def test_arena_reuses_temporaries():
     i = info(f)
     temporaries = len(i["steps"]) - 1
     assert temporaries >= 4
-    assert n * 8 <= i["arena_bytes"] < temporaries * n * 8
+    assert n * 8 <= i["frame_bytes"] < temporaries * n * 8
+
+
+def test_allocated_buffers_are_released_after_their_last_use():
+    x = pt.vector("x")
+    a = pt.sort(pt.exp(x))
+    f = compare([x], pt.sort(pt.sort(pt.log1p(a)) * 2), [rng.normal(size=7)])
+    dump = f.maker.linker.program.dump()
+    # exp's result is released right after the sort that reads it; the sort's result
+    # only after the step that reads log1p's result, which may have overwritten it;
+    # the output never
+    for step, done in [(1, "%2"), (3, "%3, %4"), (5, "%5, %6")]:
+        block = rf"^  {step}  Sort\(axis=0\)\n(     .*\n)*?     done   {done}$"
+        assert re.search(block, dump, re.M), dump
 
 
 def test_compiled_ofg_calls_kernels():

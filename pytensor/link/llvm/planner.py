@@ -44,6 +44,7 @@ from pytensor.link.llvm.analysis.layout import (
     layout_feature,
     shape_of,
 )
+from pytensor.link.llvm.analysis.memory import plan_memory
 from pytensor.link.llvm.codegen.call import Kernel
 from pytensor.link.llvm.codegen.errors import ExceptionTable
 from pytensor.link.llvm.codegen.implementation import (
@@ -310,7 +311,8 @@ class Planner:
                 layouts.setdefault(k, layout)
         steps = self._decide(flat_nodes, layouts, top_level=True)
         constants = values.constants_of(steps, out_ids)
-        return PlannedGraph(in_ids, out_ids, steps, constants, layouts)
+        memory = plan_memory(steps, in_ids, out_ids, constants.keys())
+        return PlannedGraph(in_ids, out_ids, steps, constants, layouts, memory)
 
     def graph(self, inputs, outputs, in_layouts) -> PlannedGraph:
         """Decide how every node of a graph runs, when the graph runs inside generated
@@ -344,9 +346,9 @@ class Planner:
             if known.get(v) is not None and k not in values.consts:
                 layouts.setdefault(k, known[v])
         steps = self._decide(flat_nodes, layouts, top_level=False)
-        body = PlannedGraph(
-            in_ids, out_ids, steps, values.constants_of(flat_nodes, out_ids), layouts
-        )
+        constants = values.constants_of(flat_nodes, out_ids)
+        memory = plan_memory(steps, in_ids, out_ids, constants.keys())
+        body = PlannedGraph(in_ids, out_ids, steps, constants, layouts, memory)
         self._graphs[key] = body
         return body
 
@@ -649,7 +651,8 @@ def _is_unit(node) -> bool:
 
 
 def _layouts_note(reprs):
-    """` {C, [?, P0]}`: the input layouts a generated step is specialized for."""
+    """` {C x 2, [?, P0]}`: the input layouts a generated step is specialized for, in
+    the order of the inputs. A layout that repeats is written once, with a count."""
 
     def unknown(representation):
         n = sum(1 for s in representation.shape if s != 1)
@@ -657,16 +660,20 @@ def _layouts_note(reprs):
 
     if not reprs or all(unknown(representation) for representation in reprs):
         return ""
-    return (
-        " {"
-        + ", ".join(
-            "?"
-            if unknown(representation)
-            else representation.layout.describe(representation.shape)
-            for representation in reprs
-        )
-        + "}"
-    )
+    layouts = [
+        "?"
+        if unknown(representation)
+        else representation.layout.describe(representation.shape)
+        for representation in reprs
+    ]
+    runs: list[list] = []
+    for layout in layouts:
+        if runs and runs[-1][0] == layout:
+            runs[-1][1] += 1
+        else:
+            runs.append([layout, 1])
+    parts = [layout if n == 1 else f"{layout} x {n}" for layout, n in runs]
+    return " {" + ", ".join(parts) + "}"
 
 
 def _allocated_layout(op, var, layout: Layout) -> Layout:

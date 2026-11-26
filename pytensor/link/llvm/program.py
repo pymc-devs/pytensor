@@ -7,8 +7,8 @@
    The layouts of the values come from the graph's `LayoutFeature`
    (`analysis/layout.py`).
 2. The program's function runs the planned graph (`build_graph_function`,
-   codegen/graph.py): it calls the steps in order, its temporaries on the stack or in
-   an arena laid out by liveness (`analysis/liveness.py`). What is decided here is its
+   codegen/graph.py): it calls the steps in order, with its temporaries of a fixed size
+   in the frames the plan lays out (`analysis/memory.py`). What is decided here is its
    boundary with the caller: values without data (random generators) aren't passed,
    and each output is written into memory the caller provides or handed over in a
    buffer (`_output_modes`).
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import copy
 import re
+import textwrap
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
@@ -28,11 +29,19 @@ import numpy as np
 
 from pytensor.graph.basic import Constant
 from pytensor.link.llvm.analysis.layout import Layout
+from pytensor.link.llvm.analysis.memory import Frame, plan_memory
 from pytensor.link.llvm.codegen.graph import (
     PROFILE_CALLS,
     PROFILE_ITEMS,
     PROFILE_ON,
     build_graph_function,
+)
+from pytensor.link.llvm.codegen.implementation import (
+    GENERATED,
+    Implementation,
+    NumbaKernel,
+    OwnModule,
+    RustKernel,
 )
 from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper
 from pytensor.link.llvm.codegen.kernel_module import (
@@ -259,8 +268,9 @@ class Program:
 
     #: what each step runs
     descriptions: list[str]
-    #: the size in bytes of the arena, the scratch memory of the temporary values
-    arena_bytes: int
+    #: the size in bytes of the frames of the program's function, which hold its
+    #: temporary values of a fixed size (analysis/memory.py)
+    frame_bytes: int
     #: the profiling cells: on/off, calls, then nanoseconds per step (`PROFILE_*`)
     profile_cells: np.ndarray
     #: the address and config of the program's kernel
@@ -277,6 +287,8 @@ class Program:
         types,
         unit,
         node_function,
+        memory,
+        layout_of,
         profile,
         steps,
         in_ids,
@@ -286,7 +298,7 @@ class Program:
         uses_pool,
     ):
         self.descriptions = [step.description for step in steps]
-        self.arena_bytes = node_function.arena[1]
+        self.frame_bytes = sum(memory.frame_bytes.values())
         self.profile_cells = profile
         self.address = unit.address
         self.uses_pool = uses_pool
@@ -311,7 +323,14 @@ class Program:
             unit.exceptions.classes,  # (complete: everything is generated)
         )
         self._dump = _dump(
-            types, node_function, steps, in_ids, contiguous, out_ids, modes
+            types,
+            node_function,
+            memory,
+            layout_of,
+            steps,
+            in_ids,
+            out_ids,
+            modes,
         )
 
     def __call__(self, *args):
@@ -327,8 +346,9 @@ class Program:
         return len(self.descriptions)
 
     def dump(self) -> str:
-        """The program as text: its values with their types and memory, its steps,
-        its outputs."""
+        """The program as text: tables of its values, with their types, memory and
+        layouts, of its frames and of its steps, each with a short note on what it
+        shows, then its outputs."""
         return self._dump
 
     __str__ = dump
@@ -386,8 +406,11 @@ class Program:
         return "\n".join(lines) + "\n"
 
 
-def _dump(types, node_function, steps, in_ids, contiguous, out_ids, modes) -> str:
-    """`Program.dump`'s text."""
+def _dump(
+    types, node_function, memory, layout_of, steps, in_ids, out_ids, modes
+) -> str:
+    """`Program.dump`'s text. `layout_of(value id)` is the layout of a value, None if it
+    isn't known."""
     ids: dict[ValueId, int] = {}  # value id -> its number in the dump
     for k in [*in_ids, *node_function.constants]:
         ids.setdefault(k, len(ids))
@@ -396,7 +419,6 @@ def _dump(types, node_function, steps, in_ids, contiguous, out_ids, modes) -> st
             ids.setdefault(k, len(ids))
     for k in out_ids:
         ids.setdefault(k, len(ids))
-    offsets = node_function.arena[0]
     produced = {}  # value id -> (step, its Output)
     for step in steps:
         for k, output in zip(step.outputs, step.signature.outputs, strict=True):
@@ -407,55 +429,189 @@ def _dump(types, node_function, steps, in_ids, contiguous, out_ids, modes) -> st
         return f"{np.dtype(types[k].dtype).name}[{shape}]"
 
     lines = [
-        f"program: {len(in_ids)} inputs, {len(out_ids)} outputs, {len(steps)} "
-        f"steps, arena {node_function.arena[1]} bytes",
+        f"program: {len(in_ids)} inputs, {len(out_ids)} outputs, {len(steps)} steps",
         "values:",
+        _VALUES_NOTE,
     ]
-    for k in ids:  # (in the order of their numbers)
+    rows = [["", "type", "memory", "layout", "may view"]]
+    # Values are listed in the order of their numbers.
+    for k in ids:
         if is_absent(types[k]):
             continue
+        may_view = ""
         if k in in_ids:
-            pos = in_ids.index(k)
-            kind = f"input {pos}" + (" (C-contiguous)" if contiguous[pos] else "")
-        elif k in node_function.constants:
-            kind = f"constant at 0x{int(node_function.links.entries[node_function.constants[k]]):x}"
+            where = f"input {in_ids.index(k)}"
         elif k not in produced:
-            kind = "constant (folded)"
+            where = "constant"
         else:
             step, output = produced[k]
-            if k in node_function.temporaries:
-                kind = f"arena +{offsets[k]}" if k in offsets else "on the stack"
-                order = list(output.layout.order) if output.layout is not None else []
-                packed = output.layout.fully_packed(output.representation.shape)
-                if packed and order != sorted(order):
-                    kind += f", order {order}"
+            place = memory.place_in_frame(k)
+            if place is not None:
+                frame, offset = place
+                where = f"{frame.value} +{offset}"
             elif output.passing is Passing.CALLER_BUFFER and k in out_ids:
-                kind = f"output {out_ids.index(k)}"
+                where = f"output {out_ids.index(k)}"
             elif output.passing is Passing.CALLER_BUFFER:
-                kind = "temporary"
-            elif output.aliased_inputs:
-                kind = "returned by its step, may be (a view of) " + ", ".join(
+                where = "temporary"
+            else:
+                where = "allocated"
+            if output.aliased_inputs:
+                may_view = ", ".join(
                     f"%{ids[step.arguments[a]]}"
                     for a in step.signature.alias_arguments(output)
                 )
-            else:
-                kind = "allocated by its step"
-        lines.append(f"  %{ids[k]:<4} {ty(k):<24} {kind}")
-    lines.append("steps:")
+        layout = layout_of(k)
+        shown = "?" if layout is None else str(layout)
+        rows.append([f"%{ids[k]}", ty(k), where, shown, may_view])
+    lines += _columns(rows)
+    lines += _frames_section(memory, ids)
+    # The buffers each step is the last to need: their frame space is free again, and
+    # memory kernels allocated is released.
+    done: dict[int, list[int]] = {}
+    for buffer in memory.buffers:
+        if buffer.created_by is not None and buffer.free_after is not None:
+            done.setdefault(buffer.free_after, []).append(ids[buffer.values[0]])
+    lines += ["steps:", _STEPS_NOTE]
+    number_width = len(str(len(steps) - 1))
     for i, step in enumerate(steps):
-        ins = ", ".join(f"%{ids[k]}" for k in step.arguments)
-        outs = ", ".join(
-            f"%{ids[k]}"
+        makes = [
+            ids[k]
             for k, output in zip(step.outputs, step.signature.outputs, strict=True)
             if not output.is_absent
-        )
-        lines.append(f"  {i:<4} ({ins}) -> ({outs})  {step.description}")
+        ]
+        facts = [
+            ("kind", _kind(step.implementation)),
+            ("reads", _id_list([ids[k] for k in step.arguments])),
+            ("makes", _id_list(makes)),
+            ("done", _id_list(sorted(done.get(i, [])))),
+        ]
+        lines += _step_block(i, number_width, step.description, facts)
     outs = ", ".join(
         f"%{ids[k]} ({'provided' if m is Passing.CALLER_BUFFER else 'returned'})"
         for k, m in zip(out_ids, modes, strict=True)
     )
     lines.append(f"outputs: {outs}")
     return "\n".join(lines) + "\n"
+
+
+#: What the sections of `Program.dump` show, printed under their headings.
+_VALUES_NOTE = (
+    "  # Every value: its type, where its memory is, its layout, and the values it may"
+    "\n  # be a view of."
+)
+_FRAMES_NOTE = (
+    "  # Memory for the values of a fixed size, shared by values that are never needed"
+    "\n  # at the same time."
+)
+_STEPS_NOTE = (
+    "  # The steps in the order they run: what each runs and how, the values it reads"
+    "\n  # and makes, and those it is the last to need."
+)
+
+
+#: The width the dump wraps the blocks of its steps at.
+_WIDTH = 88
+
+
+def _kind(implementation: Implementation) -> str:
+    """For the dump: what kind of implementation runs a step. Generated code is an
+    LLVM module of its own, unless it is inlined into the code around it."""
+    if implementation is GENERATED:
+        return "LLVM, inlined"
+    if isinstance(implementation, OwnModule):
+        return "LLVM module"
+    if isinstance(implementation, RustKernel):
+        return "Rust kernel"
+    if isinstance(implementation, NumbaKernel):
+        return "numba kernel"
+    return type(implementation).__name__
+
+
+def _id_list(numbers: list[int]) -> str:
+    """For the dump: values by their numbers, as `%3, %5-%8`. Runs of three or more
+    consecutive numbers, in the order given, become ranges."""
+    runs: list[list[int]] = []
+    for n in numbers:
+        if runs and n == runs[-1][-1] + 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    parts = []
+    for run in runs:
+        if len(run) >= 3:
+            parts.append(f"%{run[0]}-%{run[-1]}")
+        else:
+            parts += [f"%{n}" for n in run]
+    return ", ".join(parts)
+
+
+def _step_block(
+    number: int, number_width: int, description: str, facts: list[tuple[str, str]]
+) -> list[str]:
+    """For the dump: the lines of one step. First what it runs, cut off after two
+    lines, then a line for each of `facts` that isn't empty, each a label and a text,
+    wrapped with an indent."""
+    head = f"  {number:<{number_width}}  "
+    indent = " " * len(head)
+    lines = textwrap.wrap(
+        " ".join(description.split()),
+        _WIDTH,
+        initial_indent=head,
+        subsequent_indent=indent + "  ",
+        max_lines=2,
+        placeholder=" …",
+        break_on_hyphens=False,
+    )
+    for label, values in facts:
+        if values:
+            lines += textwrap.wrap(
+                values,
+                _WIDTH,
+                initial_indent=f"{indent}{label:<6} ",
+                subsequent_indent=indent + " " * 7,
+                break_on_hyphens=False,
+            )
+    return lines
+
+
+def _columns(rows: list[list[str]]) -> list[str]:
+    """For the dump: `rows` as lines with aligned columns."""
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    lines = []
+    for row in rows:
+        cells = [cell.ljust(width) for cell, width in zip(row, widths, strict=True)]
+        lines.append(("  " + "  ".join(cells)).rstrip())
+    return lines
+
+
+def _frames_section(memory, ids) -> list[str]:
+    """For the dump: the frames, with one line per place in a frame, listing the values
+    whose buffers are there and the steps from their creation to their last use. Values
+    at the same place share its memory, one after the other."""
+    places: dict[tuple[Frame, int], list] = {}
+    for buffer in memory.buffers:
+        if buffer.frame is not None:
+            places.setdefault((buffer.frame, buffer.offset), []).append(buffer)
+    if not places:
+        return []
+    sizes = ", ".join(
+        f"{frame.value} {memory.frame_bytes[frame]} bytes"
+        for frame in Frame
+        if memory.frame_bytes[frame]
+    )
+    rows = [["frame", "offset", "bytes", "values"]]
+    for (frame, offset), buffers in sorted(
+        places.items(), key=lambda item: (list(Frame).index(item[0][0]), item[0][1])
+    ):
+        users = ", ".join(
+            f"%{ids[buffer.values[0]]} (steps {buffer.created_by}-"
+            + ("end" if buffer.free_after is None else str(buffer.free_after))
+            + ")"
+            for buffer in buffers
+        )
+        nbytes = max(buffer.nbytes for buffer in buffers)
+        rows.append([frame.value, f"+{offset}", str(nbytes), users])
+    return [f"frames: {sizes}", _FRAMES_NOTE, *_columns(rows)]
 
 
 def build_program(fgraph, options: Options | None = None):
@@ -541,8 +697,11 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         else:
             layout = Layout.dynamic(ndim)
         outputs.append(Output(repr_of(types[k], layout), passing))
+    # The function has only some of the graph's inputs and outputs. Which values are
+    # outputs decides which buffers are in a frame, so its memory is planned again.
+    memory = plan_memory(steps, in_ids, out_ids, planned.constants.keys())
     function_graph = PlannedGraph(
-        in_ids, out_ids, steps, planned.constants, planned.layouts
+        in_ids, out_ids, steps, planned.constants, planned.layouts, memory
     )
     node_function = build_graph_function(
         unit,
@@ -571,6 +730,8 @@ def _build(planner: Planner, planned: PlannedGraph, ins, contiguous, outs) -> Pr
         types,
         unit,
         node_function,
+        function_graph.memory,
+        lambda k: planner.layout(k, planned.layouts),
         profile,
         steps,
         in_ids,

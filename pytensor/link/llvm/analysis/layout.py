@@ -17,7 +17,7 @@ identity order" (`Layout.c(ndim)`); numpy's other contiguity rules hold as well
 Layouts are claims the generated code relies on: a value claimed PACKED is read without
 its strides. They come from how a value is produced:
 
-* memory the planner provides (arena, fresh outputs) and buffers that generated code,
+* memory the planner provides (frames, fresh outputs) and buffers that generated code,
   Rust kernels and Scan allocate are C-contiguous;
 * views get theirs from their input's (as the op declares, with the rules below);
 * numba kernels allocate their outputs packed, in the order asked for (default C);

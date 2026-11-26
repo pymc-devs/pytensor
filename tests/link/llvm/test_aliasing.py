@@ -1,5 +1,6 @@
 """Which memory outputs may share: the op's view_map decides."""
 
+import re
 from types import SimpleNamespace
 
 import numpy as np
@@ -16,10 +17,10 @@ ir = pytest.importorskip("pytensor_llvm.ir")
 
 import pytensor.scalar as ps  # noqa: E402
 from pytensor.link.llvm.analysis.layout import Layout  # noqa: E402
-from pytensor.link.llvm.analysis.liveness import (  # noqa: E402
+from pytensor.link.llvm.analysis.memory import (  # noqa: E402
+    Frame,
     first_fit,
-    lifetimes,
-    place_temporaries,
+    plan_memory,
 )
 from pytensor.link.llvm.codegen.array import Array, unknown_layout  # noqa: E402
 from pytensor.link.llvm.codegen.interface import llvm_emit, llvm_layout  # noqa: E402
@@ -35,6 +36,7 @@ from pytensor.link.llvm.codegen.types import TensorRepr  # noqa: E402
 
 STRICT = get_mode("LLVM").clone(link_kwargs={"numba_fallback": False})
 P, R = Passing.CALLER_BUFFER, Passing.CALLEE_SLOT
+S = Frame.STACK
 
 
 # ------------------------------------------------------------------ what the op says
@@ -59,8 +61,9 @@ def test_how_an_output_comes_to_be_follows_from_the_op_and_the_type():
 
 
 def step(inputs, outputs, passings, aliases=None):
-    """A step as `analysis.liveness` sees it: arguments, outputs, how they are passed
-    and the arguments they may be views of."""
+    """A step as `analysis.memory` sees it: arguments, outputs, how they are passed
+    and the arguments they may be views of. Outputs passed in a caller buffer are 64
+    bytes."""
     aliases = aliases or [()] * len(outputs)
     representation = TensorRepr(ps.float64, (8,), Layout.c(1))
     outs = [
@@ -74,6 +77,11 @@ def step(inputs, outputs, passings, aliases=None):
     )
 
 
+def created(memory, value_id):
+    """The buffer created for `value_id`."""
+    return memory.buffers[memory.created_for[value_id]]
+
+
 def test_a_value_lives_as_long_as_what_may_alias_it():
     steps = [
         step([0], [1], [P]),  # 1: new
@@ -82,10 +90,12 @@ def test_a_value_lives_as_long_as_what_may_alias_it():
         step([0], [4], [P]),  # 4: new, while 3 is still needed
         step([3, 4], [5], [P]),
     ]
-    _, end = lifetimes(steps, kept=[5])
-    assert end[1] == end[2] == end[3] == 4  # the chain keeps 1 alive until 3 is read
-    offsets, _ = place_temporaries(steps, {1: 64, 4: 64}, kept=[5])
-    assert offsets[1] != offsets[4]  # so 4 can't take 1's place
+    memory = plan_memory(steps, [0], [5], ())
+    # the chain may put 2 and 3 into 1's buffer, which lives until 3 is read
+    assert created(memory, 1).values == (1, 2, 3)
+    assert created(memory, 1).free_after == 4
+    # so 4 can't take 1's place
+    assert memory.place_in_frame(1) != memory.place_in_frame(4)
 
 
 def test_several_candidates_are_all_kept_alive():
@@ -96,21 +106,26 @@ def test_several_candidates_are_all_kept_alive():
         step([0], [4], [P]),
         step([3, 4], [5], [P]),
     ]
-    _, end = lifetimes(steps, kept=[5])
-    assert end[1] == end[2] == 4
-    offsets, _ = place_temporaries(steps, {1: 64, 2: 64, 4: 64}, kept=[5])
-    assert len(set(offsets.values())) == 3
+    memory = plan_memory(steps, [0], [5], ())
+    created_for = memory.created_for
+    assert memory.buffer_of[3] == (created_for[3], created_for[1], created_for[2])
+    assert created(memory, 1).free_after == created(memory, 2).free_after == 4
+    assert len({memory.place_in_frame(k) for k in (1, 2, 4)}) == 3
 
 
-def test_arena_space_is_reused_when_nothing_needs_it():
+def test_frame_space_is_reused_when_nothing_needs_it():
+    def places(memory, values):
+        return {k: memory.place_in_frame(k) for k in values}
+
     steps = [step([0], [1], [P]), step([1], [2], [P]), step([2], [3], [P])]
-    # (3 is the output: not a temporary)
-    assert place_temporaries(steps, {1: 8, 2: 8}, kept=[3]) == ({1: 0, 2: 64}, 128)
+    # 3 is the output: the call provides its memory, so it isn't in the frame
+    memory = plan_memory(steps, [0], [3], ())
+    assert places(memory, [1, 2, 3]) == {1: (S, 0), 2: (S, 64), 3: None}
+    assert memory.frame_bytes == {S: 128, Frame.SCRATCH: 0}
     steps.append(step([3], [4], [P]))
-    assert place_temporaries(steps, {1: 8, 2: 8, 3: 8}, kept=[4]) == (
-        {1: 0, 2: 64, 3: 0},
-        128,
-    )
+    memory = plan_memory(steps, [0], [4], ())
+    assert places(memory, [1, 2, 3]) == {1: (S, 0), 2: (S, 64), 3: (S, 0)}
+    assert memory.frame_bytes[S] == 128
     offsets, total = first_fit(
         [(0, 1, 100, "a"), (1, 2, 10, "b"), (2, 3, 100, "c"), (3, 3, 10, "d")]
     )
@@ -190,7 +205,9 @@ def test_an_output_may_alias_several_inputs():
         np.testing.assert_allclose(r1, want * 2)
         np.testing.assert_allclose(r2, want[::-1] + 1)
     dump = g.maker.linker.program.dump()
-    assert "may be (a view of) %" in dump and dump.count("Pick") == 1
+    # Pick's result may be in the memory of either of its arguments
+    assert re.search(r"allocated +\S+ +%\d+, %\d+$", dump, re.M), dump
+    assert dump.count("Pick") == 1
 
 
 def test_an_emitter_only_returns_views_the_op_declares():

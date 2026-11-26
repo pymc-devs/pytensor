@@ -1,6 +1,7 @@
 """Static layouts: the rules, the specialization of generated code, the checks."""
 
 import ctypes
+import re
 
 import numpy as np
 import pytest
@@ -138,7 +139,7 @@ def test_c_inputs_are_checked_by_the_c_api():
         [x], pt.exp(x), mode=LLVM.clone(link_kwargs={"input_layout": "c"})
     )
     p = f.maker.linker.program
-    assert "(C-contiguous)" in p.dump()
+    assert re.search(r"%0 +float64\[\?\] +input 0 +C$", p.dump(), re.M)
     fn = p.c_function()
     a = Api.from_address(p.c_api_table())
     new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.session_new)
@@ -316,7 +317,7 @@ def test_elemwise_output_follows_its_inputs():
     r = f(xv, yv)
     np.testing.assert_allclose(r, np.exp(xv.T) * yv.T)
     assert r.flags.f_contiguous and not r.flags.c_contiguous
-    # static shapes: the temporary is an arena value in the inputs' order
+    # static shapes: the temporary is a frame value in the inputs' order
     s = pt.tensor("s", shape=(4, 6))
     f = pytensor.function(
         [s],
@@ -382,7 +383,7 @@ def test_provided_layouts_are_binding():
     dump = p.dump()
     # a graph output must be C-contiguous: the node writes a temporary in its declared
     # order, which is copied into the output
-    assert "on the stack, order [1, 0]" in dump, dump
+    assert re.search(r"output 0 +\[P0, P1\]$", dump, re.M), dump
     sv, tv = rng.normal(size=(4, 6)), rng.normal(size=(4, 6))
     for fn in (f, g):
         r = fn(sv, tv)

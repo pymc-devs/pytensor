@@ -15,7 +15,7 @@ just a graph of steps. All of them are run the same way:
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -23,7 +23,7 @@ import numpy as np
 
 from pytensor.graph.basic import Apply
 from pytensor.link.llvm.analysis.layout import Layout
-from pytensor.link.llvm.analysis.liveness import temporary_lives
+from pytensor.link.llvm.analysis.memory import BufferKind, Frame
 from pytensor.link.llvm.codegen.array import Array, Slot
 from pytensor.link.llvm.codegen.context import Codegen
 from pytensor.link.llvm.codegen.destination import (
@@ -105,7 +105,7 @@ class GraphFunction:
         inputs: Sequence[Array | ir.Value | None],
         outputs: Sequence[EmitterOutput | OutputDestination | None],
         profile: int | None = None,
-    ) -> tuple[frozenset[ValueId], tuple[dict[ValueId, int], int]]:
+    ) -> None:
         """Emit the code that runs the graph, into the function `cg` is building.
 
         Nodes with generated code are inlined; the others become calls of their
@@ -133,14 +133,16 @@ class GraphFunction:
         then the graph's inputs may still be read, so outputs must not overwrite them
         before `finish`.
 
-        Memory that kernels allocate inside the graph is released when the innermost
-        `scratch_scope` ends: use the results before that.
+        Memory that kernels allocate inside the graph is released right after the last
+        step that may read it (`Buffer.free_after`). Memory a graph output may be in is
+        released when the innermost `scratch_scope` ends: use the results before
+        that.
 
-        `profile`: the link table entry of the profile counters, if profiling.
+        The graph's buffers of a fixed size are in its frames, which get their memory
+        here (`Codegen.frame`). Where in the frames each buffer is, the plan says
+        (`PlannedGraph.memory`).
 
-        Returns where the graph's temporary values went: the value ids of all of them,
-        and the arena that holds those not on the stack ({value id: offset}, size in
-        bytes)."""
+        `profile`: the link table entry of the profile counters, if profiling."""
         planned = self.planned
         b = cg.b
         destinations = [
@@ -175,13 +177,28 @@ class GraphFunction:
                 slot_targets[value_id] = out
                 target_of[value_id] = k
 
-        memory, arena = _temporaries_of(
-            cg, planned.steps, memory_targets, planned.out_ids
-        )
+        frames = {
+            frame: cg.frame(nbytes, stack=frame is Frame.STACK)
+            for frame, nbytes in planned.memory.frame_bytes.items()
+            if nbytes
+        }
+        memory: dict[ValueId, ir.Value] = {}
+        for value_id in planned.memory.created_for:
+            place = planned.memory.place_in_frame(value_id)
+            if place is not None:
+                frame, offset = place
+                memory[value_id] = b.gep_bytes(frames[frame], offset)
+        # The buffers kernels allocate are released after the last step that may read
+        # them; those a graph output may be in, when the scope ends.
+        release_after: dict[int, list[ValueId]] = {}
+        for value_id, buffer_id in planned.memory.created_for.items():
+            buffer = planned.memory.buffers[buffer_id]
+            if buffer.kind is BufferKind.ALLOCATED and buffer.free_after is not None:
+                release_after.setdefault(buffer.free_after, []).append(value_id)
 
         name = self.name if self._calls == 0 else f"{self.name}{self._calls}"
         self._calls += 1
-        written, owned = _emit_steps(
+        written, held = _emit_steps(
             cg,
             name,
             planned.steps,
@@ -189,9 +206,10 @@ class GraphFunction:
             memory_targets,
             slot_targets,
             memory=memory,
+            release_after=release_after,
             profile=profile,
         )
-        for slot in owned:
+        for slot in held:
             cg.release_later(slot.field(b, Slot.OWNER))
 
         for k, (value_id, out) in enumerate(
@@ -216,7 +234,6 @@ class GraphFunction:
         for out in destinations:
             if out is not None:
                 out.finish()
-        return frozenset(memory), arena
 
 
 def build_graph_function(
@@ -242,9 +259,8 @@ def build_graph_function(
     * `profile`: if given, an array of counters (`PROFILE_ITEMS + len(planned.steps)`
       uint64 values) that the code adds the time of each step to;
 
-    The returned `NodeFunction` also says where the temporary values went (`arena`,
-    `temporaries`) and where the array constants are in the link table
-    (`constants`)."""
+    The returned `NodeFunction` also says where the array constants are in the link
+    table (`constants`)."""
     in_reprs: list[TensorRepr] = []
     for t, layout in zip(in_types, in_layouts, strict=True):
         representation = repr_of(t, layout)
@@ -275,16 +291,9 @@ def build_graph_function(
     with cg.scratch_scope(function=True):
         graph = GraphFunction.bind(cg, planned, name)
         cells = None if profile is None else unit.links.link_array(profile, share=False)
-        temporaries, arena = graph.emit_call(cg, inputs, outs, profile=cells)
+        graph.emit_call(cg, inputs, outs, profile=cells)
     b.ret(0)
-    return NodeFunction(
-        fn,
-        signature,
-        unit.links,
-        arena=arena,
-        temporaries=temporaries,
-        constants=graph.entries,
-    )
+    return NodeFunction(fn, signature, unit.links, constants=graph.entries)
 
 
 # ------------------------------------------------------------------ emitting the steps
@@ -296,8 +305,9 @@ def build_graph_function(
 #
 # * a result the step writes into memory it is given goes into memory a graph output
 #   provides (`memory_targets`, e.g. a row of a Scan's buffer) if that memory has the
-#   layout the step needs, else into a temporary (`_temporaries_of`: on the stack, or in
-#   an arena shared by values that are never needed at the same time);
+#   layout the step needs, else into its buffer in one of the graph's frames
+#   (analysis/memory.py), or, for a buffer of a graph output or of a size only known
+#   when running, into a temporary of its own;
 # * a result the step allocates itself goes straight into a graph output's slot if the
 #   output takes it (`slot_targets`, `OutputDestination.slot_for_new_memory`), else
 #   into memory that is released afterwards;
@@ -315,34 +325,6 @@ def _writes_into(memory: Array, output: Output) -> bool:
     `memory`? If `memory`'s layout implies the one the step needs."""
     tensor = output.tensor
     return memory.layout.implies(tensor.layout, tensor.shape, memory.itemsize)
-
-
-def _temporaries_of(
-    cg: Codegen,
-    steps: Sequence[Step],
-    memory_targets: Mapping[ValueId, Array],
-    kept: Collection[ValueId],
-) -> tuple[dict[ValueId, ir.Value], tuple[dict[ValueId, int], int]]:
-    """Memory for the temporary values of the steps `steps` (`Codegen.temporaries`).
-
-    A temporary is a result a step writes into memory it is given, when it can't be
-    memory a graph output provides (`memory_targets`, value id -> Array, see
-    `_writes_into`). `kept`: the values still needed after the last step (the outputs).
-    Returns what `Codegen.temporaries` returns."""
-    sizes: dict[ValueId, int] = {}
-    for step in steps:
-        for value_id, output in zip(step.outputs, step.signature.outputs, strict=True):
-            if output.passing is not Passing.CALLER_BUFFER:
-                continue
-            tensor = output.tensor
-            if not tensor.static:
-                continue
-            target = memory_targets.get(value_id)
-            if target is not None and _writes_into(target, output):
-                continue
-            elements = int(np.prod(tensor.fixed_shape, dtype=np.int64))
-            sizes[value_id] = elements * np.dtype(tensor.scalar_type.dtype).itemsize
-    return cg.temporaries(sizes, temporary_lives(steps, sizes, kept))
 
 
 @dataclass
@@ -404,6 +386,7 @@ def _emit_steps(
     memory_targets: Mapping[ValueId, Array] | None = None,
     slot_targets: Mapping[ValueId, OutputDestination] | None = None,
     memory: Mapping[ValueId, ir.Value] | None = None,
+    release_after: Mapping[int, Sequence[ValueId]] | None = None,
     profile: int | None = None,
 ) -> tuple[set[ValueId], list[Slot]]:
     """Emit the steps `steps` (`planner.Step`, in order) into the function
@@ -419,13 +402,17 @@ def _emit_steps(
       allocates may be allocated into, if the destination takes it
       (`slot_for_new_memory`);
     * `memory`: {value id: pointer}: where the other values written into given memory
-      go (`_temporaries_of`); others get temporary memory of their own;
+      go, their buffers in the graph's frames; others get temporary memory of their
+      own;
+    * `release_after`: {step: value ids}: the values whose buffers kernels allocate,
+      to release right after that step, because no later step reads them;
     * `profile`: the link entry of the profile cells (`PROFILE_*`): while profiling is
       on, each step's wall time is added to its cell.
 
-    Returns (written, owned): the value ids produced directly in their targets, and
-    the slots of buffers kernels allocated for other values, for the caller to
-    `release` when they are no longer used (on failure, they are released here)."""
+    Returns (written, held): the value ids produced directly in their targets, and the
+    slots of buffers kernels allocated that weren't released after a step, for the
+    caller to `release` when they are no longer used. If a step fails, the buffers
+    held at that point are released here."""
     from pytensor.link.llvm.codegen.call import linked
 
     b = cg.b
@@ -433,7 +420,8 @@ def _emit_steps(
     memory_targets = memory_targets or {}
     slot_targets = slot_targets or {}
     written: set[ValueId] = set()
-    owned: list[Slot] = []  # whose owner is a runtime buffer
+    release_after = release_after or {}
+    owned: dict[ValueId, Slot] = {}  # slots whose owner is a runtime buffer
     layouts: dict[ValueId, Layout] = {}  # of what the steps produced
     if profile is not None:
         cells = linked(cg, profile)
@@ -541,14 +529,14 @@ def _emit_steps(
                 scalar_reads.append((value_id, pointer, ir_type))
             else:
                 ndim = output.tensor.ndim
-                # (a result in scratch memory, or a view, has no runtime buffer)
+                # A result in scratch memory, or a view, has no runtime buffer.
                 in_scratch = j in function.in_scratch
                 if j in into_slot:
                     slot = into_slot[j]
                 else:
                     slot = Slot.alloca(b, ndim)
                     if not in_scratch:
-                        owned.append(slot)
+                        owned[value_id] = slot
                 args.append(slot.pointer)
                 slot_reads.append(_SlotRead(value_id, slot, output, in_scratch))
 
@@ -566,7 +554,7 @@ def _emit_steps(
         failed = b.ne(rc, 0)
         with b.if_(failed):
             b.rt_error_context(ctx, " ".join(step.description.split())[:200])
-            for slot in owned:
+            for slot in owned.values():
                 slot.release(b, ctx)
             b.ret(rc)
 
@@ -585,9 +573,14 @@ def _emit_steps(
                 ]
                 _maybe_view(b, array, sources, read.slot)
             if read.in_scratch:
-                # (`SlotDestination.in_scratch_memory`: the owner is the scratch)
+                # The owner of a result in scratch memory is the scratch memory, see
+                # `SlotDestination.in_scratch_memory`.
                 cg.free_later(read.slot.owner(b))
-    return written, owned
+        for value_id in release_after.get(n, ()):
+            slot = owned.pop(value_id, None)
+            if slot is not None:
+                slot.release(b, ctx)
+    return written, list(owned.values())
 
 
 def _maybe_view(

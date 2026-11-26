@@ -1,5 +1,6 @@
 """What the planner decides about a graph and codegen runs: the steps of a graph, each
-with how it runs (`Step`), and the graph with them (`PlannedGraph`)."""
+with how it runs (`Step`), and the graph with them and the memory of its values
+(`PlannedGraph`)."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from pytensor.tensor.type import TensorType
 
 
 if TYPE_CHECKING:
+    from pytensor.link.llvm.analysis.memory import Memory
     from pytensor.link.llvm.codegen.implementation import Implementation
 
 
@@ -61,7 +63,9 @@ class PlannedGraph:
     `Planner.program`): a Scan's loop body, a Blockwise's core, a unit's inner graph,
     or the program.
 
-    Its steps are in the order they run, and refer to values by their `ValueId`."""
+    Its steps are in the order they run, and refer to values by their `ValueId`. The
+    planner works out where the values live from the steps, as the last part of
+    planning (`memory`, `plan_memory`)."""
 
     #: the values of the graph's inputs and outputs
     in_ids: list[ValueId]
@@ -71,6 +75,9 @@ class PlannedGraph:
     constants: dict[ValueId, tuple[TensorType | ScalarType, Any]]
     #: the layouts of its values (value id -> Layout; constants: `Planner.layout`)
     layouts: dict[ValueId, Layout | None]
+    #: the buffers its values live in, and the frames of the buffers of a fixed size
+    #: (`plan_memory`, analysis/memory.py)
+    memory: Memory
 
 
 __all__ = ["PlannedGraph", "Step", "ValueId"]

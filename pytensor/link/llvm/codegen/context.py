@@ -30,7 +30,8 @@ if TYPE_CHECKING:
 
 
 #: Temporaries of a static size up to this many bytes are stack memory (`temp_memory`),
-#: as long as one generated function has no more than the budget of them.
+#: and so are the stack frames of planned graphs (`frame`, analysis/memory.py), as long
+#: as one generated function stays within its stack budget.
 STACK_TEMPORARY_BYTES = 1024
 STACK_BUDGET_BYTES = 16 * 1024
 
@@ -172,63 +173,45 @@ class Codegen:
         b = self.b
         n = nbytes.const_int
         if n is not None and not escapes:
-            p = self._stack_memory(n)
-            if p is not None:
-                return p
-        at_entry = n is not None and not escapes
-        p = b.rt_scratch(self.ctx, nbytes, at_entry=at_entry)
+            p = self._stack_memory(n) if n <= STACK_TEMPORARY_BYTES else None
+            return p if p is not None else self._scratch_at_entry(n)
+        p = b.rt_scratch(self.ctx, nbytes)
         self.check(b.ne(p, b.null()), None)
-        if at_entry:
-            self.free_later(p, function=True)
-        elif not escapes:
+        if not escapes:
             self.free_later(p)
         return p
 
-    def _stack_memory(self, n: int) -> ir.Value | None:
-        """Stack memory for `n` bytes, or None if it shouldn't go on the stack.
+    def frame(self, nbytes: int, stack: bool) -> ir.Value:
+        """Memory for a frame of a planned graph: a block of `nbytes` bytes that holds
+        the graph's buffers of a fixed size (analysis/memory.py).
 
-        This is the rule `temp_memory` follows: memory goes on the stack if it is small
-        (at most `STACK_TEMPORARY_BYTES`) and the function hasn't used up its stack
+        The stack frame (`stack`) goes on the stack if the function's stack budget
+        still has room for it, where LLVM can keep the values in it in registers.
+        Otherwise, and for the scratch frame, it is scratch memory, taken when the
+        function starts and freed when the function's scope ends."""
+        if stack:
+            p = self._stack_memory(nbytes)
+            if p is not None:
+                return p
+        return self._scratch_at_entry(nbytes)
+
+    def _stack_memory(self, n: int) -> ir.Value | None:
+        """Stack memory for `n` bytes, or None if the function has used up its stack
         budget (`STACK_BUDGET_BYTES`)."""
-        if n > STACK_TEMPORARY_BYTES:
-            return None
         rounded = max(64, -(-n // 64) * 64)
         if self.stack_bytes + rounded > STACK_BUDGET_BYTES:
             return None
         self.stack_bytes += rounded
         return self.b.alloca(ir.Type.array(ir.i8, max(n, 1)))
 
-    def temporaries[K](
-        self, sizes: dict[K, int], lives: dict[K, tuple[int, int]]
-    ) -> tuple[dict[K, ir.Value], tuple[dict[K, int], int]]:
-        """Memory for several temporary values of a known size.
-
-        * `sizes`: the size in bytes of each value ({key: bytes});
-        * `lives`: when each value is needed: from item `lives[key][0]` to item
-          `lives[key][1]` (both included).
-
-        Each value gets its own stack memory if `temp_memory` would put it on the stack
-        (the values defined first get the stack first). The other values share one
-        block of scratch memory, the arena: two values can use the same place in it if
-        they are never needed at the same time (`analysis.liveness.first_fit`).
-
-        Returns the memory of each value ({key: pointer}), and the arena's layout
-        ({key: offset in the arena}, size of the arena in bytes)."""
-        from pytensor.link.llvm.analysis.liveness import first_fit
-
-        memory: dict[K, ir.Value] = {}
-        shared: list[tuple[int, int, int, K]] = []
-        for key in sorted(sizes, key=lambda k: lives[k]):
-            p = self._stack_memory(sizes[key])
-            if p is None:
-                shared.append((*lives[key], sizes[key], key))
-            else:
-                memory[key] = p
-        offsets, nbytes = first_fit(shared)
-        if offsets:
-            arena = self.temp_memory(self.b.i64(nbytes))
-            memory.update((k, self.b.gep_bytes(arena, at)) for k, at in offsets.items())
-        return memory, (offsets, nbytes)
+    def _scratch_at_entry(self, n: int) -> ir.Value:
+        """Scratch memory for `n` bytes, taken when the function starts and freed when
+        its scope ends."""
+        b = self.b
+        p = b.rt_scratch(self.ctx, b.i64(n), at_entry=True)
+        self.check(b.ne(p, b.null()), None)
+        self.free_later(p, function=True)
+        return p
 
     def free_later(self, p: ir.Value, function: bool = False) -> None:
         """Free the scratch memory `p` when the innermost `scratch_scope` ends, or with
