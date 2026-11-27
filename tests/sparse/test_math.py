@@ -145,6 +145,7 @@ class TestAddMul:
 
                 val = eval_outputs([apb])
                 assert val.shape == (3, 2)
+                assert val.format == aR.type.format, (val.format, aR.type.format)
                 if op is add:
                     assert np.all(val.todense() == array1 + array2)
                     if dtype1.startswith("float") and dtype2.startswith("float"):

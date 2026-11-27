@@ -692,7 +692,10 @@ class MultiplySparseSparse(Op):
         assert y.shape == x.shape
         # This calls the element-wise multiple
         # x * y calls dot...
-        out[0] = x.multiply(y)
+        # SciPy 1.16+ may return CSR from CSC.multiply(CSC). Convert back to
+        # the format declared by make_node so downstream CSM/CSMGrad see a
+        # matching indptr length.
+        out[0] = x.multiply(y).asformat(node.outputs[0].type.format)
 
     def pullback(self, inputs, outputs, gout):
         (x, y) = inputs
