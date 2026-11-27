@@ -461,6 +461,8 @@ def vectorize_graph(
         A sequence of string labels for the new batch dimensions introduced by ``TensorVariable``
         replacements. These dimensions correspond to the leading axes of the new tensor variables.
         This argument is required if any ``TensorVariable`` replacements introduce new dimensions.
+        Without ``TensorVariable`` replacements, these labels must name batch dimensions
+        introduced by ``XTensorVariable`` replacements and can be used to order them.
 
     Returns
     -------
@@ -597,7 +599,7 @@ def vectorize_graph(
 
     # Create a mapping from new_tensor_dims -> broadcasted shape from tensors
     new_tensor_sizes: dict[str, Variable] = {}
-    if new_tensor_dims:
+    if new_tensor_dims and new_tensor_dim_lengths:
         new_tensor_bcast_dim_lengths = broadcast_shape(
             *new_tensor_dim_lengths, arrays_are_shapes=True
         )
@@ -607,6 +609,12 @@ def vectorize_graph(
                 f"{len(new_tensor_dims)} tensor dims were specified, but only {len(new_tensor_bcast_dim_lengths)} were found in the new inputs"
             )
         new_tensor_sizes = dict(zip(new_tensor_dims, new_tensor_bcast_dim_lengths))
+    elif new_tensor_dims and (
+        missing_dims := set(new_tensor_dims) - new_xtensor_sizes.keys()
+    ):
+        raise ValueError(
+            f"Batch dimensions not introduced by XTensor replacements: {sorted(missing_dims)}"
+        )
 
     # Give preference to tensor sizes to avoid unnecessary broadcasting (Alloc)
     # XTensor sizes are implicitly handled by transpose and dim names, so they don't need strict size equality
