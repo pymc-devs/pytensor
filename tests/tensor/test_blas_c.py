@@ -239,6 +239,53 @@ class TestCGemv(OptimizationTestMixin):
             expected = test_beta * test_y
             np.testing.assert_allclose(out, expected)
 
+    @pytest.mark.parametrize("dtype", ["float32", "float64"])
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_zero_stride_inputs(self, dtype, inplace):
+        skip_if_blas_ldflags_empty()
+        A = tensor("A", dtype=dtype, shape=(None, None))
+        x = tensor("x", dtype=dtype, shape=(None,))
+        y = tensor("y", dtype=dtype, shape=(None,))
+        alpha = pt.constant(np.array(1.0, dtype=dtype))
+        beta = pt.constant(np.array(1.0, dtype=dtype))
+        out = CGemv(inplace=inplace)(y, alpha, A, x, beta)
+        fn = pytensor.function(
+            [A, x, pytensor.In(y, mutable=inplace)],
+            out,
+            mode=self.mode,
+            accept_inplace=inplace,
+        )
+
+        # Zero-stride x (length > 1 and length == 1)
+        for cols in (3, 1):
+            A_val = np.arange(5 * cols, dtype=dtype).reshape(5, cols)
+            x_val = np.broadcast_to(np.array(2.0, dtype=dtype), (cols,))
+            y_val = np.arange(5, dtype=dtype)
+            res = fn(A_val, x_val, y_val.copy())
+            np.testing.assert_allclose(res, A_val @ x_val + y_val)
+
+        # Zero-stride A along rows, cols, both, and combined with negative stride
+        x_val = np.array([1.0, 2.0, 3.0], dtype=dtype)
+        y_val = np.arange(5, dtype=dtype)
+        A_row = np.broadcast_to(np.array([1.0, 2.0, 3.0], dtype=dtype), (5, 3))
+        A_col = np.broadcast_to(np.arange(5, dtype=dtype)[:, None], (5, 3))
+        A_both = np.broadcast_to(np.array(2.0, dtype=dtype), (5, 3))
+        for A_val in (A_row, A_col, A_both, A_row[:, ::-1], A_col[::-1, :]):
+            res = fn(A_val, x_val, y_val.copy())
+            np.testing.assert_allclose(res, A_val @ x_val + y_val)
+
+        # Zero-stride y (length > 1 and length == 1)
+        for rows in (5, 1):
+            A_val = np.arange(rows * 3, dtype=dtype).reshape(rows, 3)
+            y_buf = np.array(3.0, dtype=dtype)
+            y_val = np.lib.stride_tricks.as_strided(
+                y_buf, shape=(rows,), strides=(0,), writeable=True
+            )
+            res = fn(A_val, x_val, y_val)
+            np.testing.assert_allclose(
+                res, A_val @ x_val + np.full(rows, 3.0, dtype=dtype)
+            )
+
 
 class TestCGemvFloat32(BaseGemv, OptimizationTestMixin):
     mode = mode_blas_opt

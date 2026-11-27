@@ -632,6 +632,16 @@ def gemv_c_code(node, name, inputs, outputs, sub):
         if (NA0 * NA1)
         {
             // Non-empty A matrix
+            npy_intp z_stride = PyArray_STRIDES(%(z)s)[0];
+            if ((NA0 > 1) && ((z_stride == 0) || (z_stride %% elemsize != 0)))
+            {
+                PyArrayObject * z_copy = (PyArrayObject *) PyArray_Copy(%(z)s);
+                if (!z_copy)
+                    %(fail)s
+                Py_XDECREF(%(z)s);
+                %(z)s = z_copy;
+                z_stride = PyArray_STRIDES(%(z)s)[0];
+            }
 
             if (%(must_initialize_y)d && dbeta == 0)
             {
@@ -644,14 +654,30 @@ def gemv_c_code(node, name, inputs, outputs, sub):
                 PyArray_FILLWBYTE(%(z)s, 0);
             }
 
+            npy_intp x_stride = PyArray_STRIDES(%(x)s)[0];
+            if ((NA1 > 1) && ((x_stride == 0) || (x_stride %% elemsize != 0)))
+            {
+                PyArrayObject * x_copy = (PyArrayObject *) PyArray_Copy(%(x)s);
+                if (!x_copy)
+                    %(fail)s
+                Py_XDECREF(%(x)s);
+                %(x)s = x_copy;
+                x_stride = PyArray_STRIDES(%(x)s)[0];
+            }
+
             /* In the case where A is actually a row or column matrix,
              * the strides corresponding to the dummy dimension don't matter,
              * but BLAS requires these to be no smaller than the number of elements in the array.
              */
-            int SA0 = (NA0 > 1) ? (PyArray_STRIDES(%(A)s)[0] / elemsize) : NA1;
-            int SA1 = (NA1 > 1) ? (PyArray_STRIDES(%(A)s)[1] / elemsize) : NA0;
-            int Sz = PyArray_STRIDES(%(z)s)[0] / elemsize;
-            int Sx = PyArray_STRIDES(%(x)s)[0] / elemsize;
+            npy_intp A_stride0 = PyArray_STRIDES(%(A)s)[0];
+            npy_intp A_stride1 = PyArray_STRIDES(%(A)s)[1];
+            bool A_unaligned_stride =
+                ((NA0 > 1) && (A_stride0 %% elemsize != 0))
+                || ((NA1 > 1) && (A_stride1 %% elemsize != 0));
+            int SA0 = (NA0 > 1) ? (A_stride0 / elemsize) : NA1;
+            int SA1 = (NA1 > 1) ? (A_stride1 / elemsize) : NA0;
+            int Sz = (NA0 > 1) ? (z_stride / elemsize) : 1;
+            int Sx = (NA1 > 1) ? (x_stride / elemsize) : 1;
 
             dtype_%(A)s* A_data = (dtype_%(A)s*) PyArray_DATA(%(A)s);
             dtype_%(x)s* x_data = (dtype_%(x)s*) PyArray_DATA(%(x)s);
@@ -665,7 +691,10 @@ def gemv_c_code(node, name, inputs, outputs, sub):
             if (Sz < 0)
                 z_data += (NA0 - 1) * Sz;
 
-            if ( ((SA0 < 0) || (SA1 < 0)) && (abs(SA0) == 1 || (abs(SA1) == 1)) )
+            if (!A_unaligned_stride
+                && ((SA0 < 0) || (SA1 < 0))
+                && (((abs(SA0) == 1) && (abs(SA1) >= NA0))
+                    || ((abs(SA1) == 1) && (abs(SA0) >= NA1))))
             {
                 // We can treat the array A as C-or F-contiguous by changing the order of iteration
                 // printf("GEMV: Iterating in reverse NA0=%%d, NA1=%%d, SA0=%%d, SA1=%%d\\n", NA0, NA1, SA0, SA1);
@@ -679,14 +708,13 @@ def gemv_c_code(node, name, inputs, outputs, sub):
                     SA1 = -SA1;  // Iterate over columns in reverse
                     Sx = -Sx;  // Iterate over x in reverse
                 }
-            } else if ((SA0 < 0) || (SA1 < 0) || ((SA0 != 1) && (SA1 != 1)))
+            } else if (A_unaligned_stride
+                       || !(((SA0 == 1) && (SA1 >= NA0))
+                            || ((SA1 == 1) && (SA0 >= NA1))))
             {
-                // Array isn't contiguous, we have to make a copy
+                // Array isn't contiguous or has invalid BLAS strides, we have to make a copy
                 // - if the copy is too long, maybe call vector/vector dot on each row instead
                 // printf("GEMV: Making a copy NA0=%%d, NA1=%%d, SA0=%%d, SA1=%%d\\n", NA0, NA1, SA0, SA1);
-                npy_intp dims[2];
-                dims[0] = NA0;
-                dims[1] = NA1;
                 PyArrayObject * A_copy = (PyArrayObject *) PyArray_Copy(%(A)s);
                 if (!A_copy)
                     %(fail)s
