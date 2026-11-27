@@ -83,7 +83,7 @@ def eye_identity_rule(key, op, feature, fgraph, node, input_states) -> list[Fact
         return [FactState.UNKNOWN]
     if k.data.item() == 0:
         return [eye_is_square(n, m)]
-    rows, cols = node.outputs[0].type.shape
+    rows, cols = node.outputs[0].type.shape[-2:]
     if rows is None or cols is None:
         return [FactState.UNKNOWN]
     return true_if(rows == cols == 0, else_false=True)
@@ -91,7 +91,7 @@ def eye_identity_rule(key, op, feature, fgraph, node, input_states) -> list[Fact
 
 def eye_band_is_empty(node, k: int) -> FactState:
     """Decide statically whether an :class:`Eye`'s ``k``-th diagonal is empty."""
-    rows, cols = node.outputs[0].type.shape
+    rows, cols = node.outputs[0].type.shape[-2:]
     if rows is None or cols is None:
         return FactState.UNKNOWN
     band_is_empty = rows == 0 or cols == 0 or k <= -rows or k >= cols
