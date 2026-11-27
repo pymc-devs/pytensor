@@ -102,6 +102,7 @@ from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.rewriting.basic import (
     broadcast_like_elemwise,
+    elemwise_of,
     local_second_sink,
     register_canonicalize,
     register_specialize,
@@ -4230,3 +4231,30 @@ local_log_iv = PatternNodeRewriter(
 )
 
 register_stabilize(local_log_iv)
+
+
+@register_specialize
+@node_rewriter([elemwise_of(ps_math.GammaIncGrad)])
+def local_gammainc_and_grad(fgraph, node):
+    """Compute gammainc_grad and the gammainc and gammaincc of its inputs in one node.
+
+    `GammaIncAndGrad` gives all three from one series or continued fraction. Without
+    a gammainc or gammaincc to share it, the gradient keeps its own graph.
+    """
+    values = [
+        client
+        for client, _ in fgraph.clients[node.inputs[0]]
+        if isinstance(client.op, Elemwise)
+        and isinstance(client.op.scalar_op, ps_math.GammaInc | ps_math.GammaIncC)
+        and client.inputs == node.inputs
+    ]
+    if not values:
+        return None
+    joint_op = ps_math.GammaIncAndGrad(*node.op.scalar_op.inputs_type)
+    p, q, dp_dk = Elemwise(joint_op)(*node.inputs)
+    replacements = {node.outputs[0]: dp_dk}
+    for client in values:
+        is_p = isinstance(client.op.scalar_op, ps_math.GammaInc)
+        replacements[client.outputs[0]] = p if is_p else q
+    copy_stack_trace(list(replacements), [p, q, dp_dk])
+    return replacements

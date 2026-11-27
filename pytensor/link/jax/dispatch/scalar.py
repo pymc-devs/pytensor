@@ -9,9 +9,9 @@ from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.scalar import Softplus
 from pytensor.scalar.basic import (
     Add,
+    BaseComposite,
     Cast,
     Clip,
-    Composite,
     Identity,
     IntDiv,
     Mod,
@@ -27,7 +27,9 @@ from pytensor.scalar.math import (
     Erfcinv,
     Erfcx,
     Erfinv,
+    GammaIncAndGrad,
     GammaIncCInv,
+    GammaIncGrad,
     GammaIncInv,
     Ive,
     Kve,
@@ -197,7 +199,7 @@ def jax_funcify_Clip(op, **kwargs):
     return clip
 
 
-@jax_funcify.register(Composite)
+@jax_funcify.register(BaseComposite)
 def jax_funcify_Composite(op, node, vectorize=True, **kwargs):
     jax_impl = jax_funcify(op.fgraph)
 
@@ -235,6 +237,28 @@ def jax_funcify_GammaIncCInv(op, **kwargs):
     gammainccinv = try_import_tfp_jax_op(op, jax_op_name="igammacinv")
 
     return gammainccinv
+
+
+@jax_funcify.register(GammaIncGrad)
+def jax_funcify_GammaIncGrad(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
+    def gammainc_grad(k, x):
+        k, x = jnp.broadcast_arrays(jnp.asarray(k, dtype), jnp.asarray(x, dtype))
+        return jax.lax.igamma_grad_a(k, x)
+
+    return gammainc_grad
+
+
+@jax_funcify.register(GammaIncAndGrad)
+def jax_funcify_GammaIncAndGrad(op, node, **kwargs):
+    dtype = node.outputs[0].dtype
+
+    def gammainc_and_grad(k, x):
+        k, x = jnp.broadcast_arrays(jnp.asarray(k, dtype), jnp.asarray(x, dtype))
+        return jax.lax.igamma(k, x), jax.lax.igammac(k, x), jax.lax.igamma_grad_a(k, x)
+
+    return gammainc_and_grad
 
 
 @jax_funcify.register(Erf)
