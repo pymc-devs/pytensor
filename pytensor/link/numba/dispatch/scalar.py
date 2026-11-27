@@ -9,7 +9,6 @@ from numba.core.extending import get_cython_function_address
 
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
-from pytensor.link.numba.dispatch import _gamma_tables as gamma_tables
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
@@ -21,6 +20,7 @@ from pytensor.link.utils import (
     get_name_for_object,
 )
 from pytensor.scalar import ScalarLoop
+from pytensor.scalar import _gamma_tables as gamma_tables
 from pytensor.scalar.basic import (
     Add,
     Cast,
