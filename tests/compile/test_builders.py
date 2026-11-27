@@ -453,6 +453,17 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         assert opt_res.shape_feature.shape_tuple(x) is None
         assert opt_res.shape_feature.shape_tuple(z)[0].data == 2
 
+        # An op with a new inner graph infers shapes from that graph, not from the
+        # template its original cached
+        v = vector("v")
+        op = OpFromGraph([v], [v[:3]])
+        [(length,)] = op.infer_shape(op(v).owner, [(v.shape[0],)])
+        w = vector("w")
+        new_op = op.clone_with_inner_graph(FunctionGraph([w], [w[:5]]))
+        [(new_length,)] = new_op.infer_shape(new_op(v).owner, [(v.shape[0],)])
+        value = np.zeros(10, dtype=v.dtype)
+        assert (length.eval({v: value}), new_length.eval({v: value})) == (3, 5)
+
     def test_missing_input(self):
         x = pt.lscalar("x")
 

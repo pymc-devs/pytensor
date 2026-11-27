@@ -1,0 +1,4 @@
+target/
+# the extension, built into the package by editable installs
+python/pytensor_llvm/*.so
+python/pytensor_llvm/*.pyd

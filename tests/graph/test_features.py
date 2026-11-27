@@ -3,6 +3,7 @@ import pickle
 import pytest
 
 import pytensor.tensor as pt
+from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import rewrite_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.destroyhandler import DestroyHandler
@@ -10,6 +11,7 @@ from pytensor.graph.features import (
     Feature,
     FullHistory,
     ReplaceValidate,
+    ViewFeature,
     register_feature_callback,
 )
 from pytensor.graph.fg import FunctionGraph
@@ -170,8 +172,8 @@ def test_provides_callback_collision_rejected_at_class_time():
 
 @pytest.mark.parametrize(
     "feature_factory",
-    [ReplaceValidate, DestroyHandler],
-    ids=["ReplaceValidate", "DestroyHandler"],
+    [ReplaceValidate, DestroyHandler, ViewFeature],
+    ids=["ReplaceValidate", "DestroyHandler", "ViewFeature"],
 )
 def test_feature_provides_dispatch_contract(feature_factory):
     """Names listed in ``Feature.provides`` are reachable as ``fgraph.<name>``
@@ -187,3 +189,40 @@ def test_feature_provides_dispatch_contract(feature_factory):
     fg2 = pickle.loads(pickle.dumps(fg))
     for name in feature.provides:
         assert callable(getattr(fg2, name)), name
+
+
+def test_view_feature():
+    x, y = pt.vector("x"), pt.vector("y")
+    a = x[1:]
+    b = a[::2]
+    c = pt.exp(b)
+    fg = FunctionGraph([x, y], [b, c], clone=False)
+    fg.attach_feature(ViewFeature())
+
+    assert fg.view_parents(b) == (a,)
+    assert fg.view_sources(b) == {a, x}
+    assert fg.view_roots(b) == {x}
+    assert fg.view_sources(c) == set()
+    assert fg.view_roots(c) == {c}
+    assert fg.undeclared_view_roots() == set()
+
+    # replacing an input invalidates what is downstream
+    a2 = y[1:]
+    fg.replace(a, a2)
+    assert fg.view_sources(b) == {a2, y}
+    assert fg.view_roots(c) == {c}
+
+
+def test_view_feature_op_from_graph():
+    xi = pt.vector("xi")
+    e = pt.exp(xi)
+    # passes its input through, returns `e` twice and a view of it
+    ofg = OpFromGraph([xi], [xi, e, e, e[1:]])
+    x = pt.vector("x")
+    o = ofg(x)
+    fg = FunctionGraph([x], o, clone=False)
+    fg.attach_feature(ViewFeature())
+
+    assert [fg.view_parents(v) for v in o] == [(x,), (), (o[1],), (o[1],)]
+    assert fg.view_roots(o[3]) == {o[1]}
+    assert fg.undeclared_view_roots() == {x, o[1]}

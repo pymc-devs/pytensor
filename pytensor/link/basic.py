@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import copy, deepcopy
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Self, Union
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
@@ -175,7 +175,7 @@ class Linker(ABC):
         """
         return self._allow_gc
 
-    def clone(self, allow_gc: bool | None = None) -> "Linker":
+    def clone(self, allow_gc: bool | None = None) -> Self:
         new = copy(self)
         if allow_gc is not None:
             new._allow_gc = allow_gc

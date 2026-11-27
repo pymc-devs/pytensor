@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import sysconfig
 
@@ -41,6 +42,32 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "slow: mark test as slow to run")
+
+
+#: What the LLVM backend doesn't support (yet): tests failing with this report as
+#: xfailed under `mode=LLVM`
+_LLVM_UNSUPPORTED = re.compile(
+    r"LLVM backend: (dtype (complex\d+|float16) is not supported"
+    r"|no representation for (SparseTensorType|TypedList))"
+)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = yield
+    if (
+        call.when == "call"
+        and call.excinfo is not None
+        and call.excinfo.errisinstance(NotImplementedError)
+        and (match := _LLVM_UNSUPPORTED.search(str(call.excinfo.value)))
+    ):
+        # (imported here: `pytest_sessionstart` sets PYTENSOR_FLAGS first)
+        import pytensor
+
+        if pytensor.config.mode == "LLVM":
+            report.outcome = "skipped"
+            report.wasxfail = match.group(0)
+    return report
 
 
 def pytest_collection_modifyitems(config, items):

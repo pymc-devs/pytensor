@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "pytensor-llvm"
+version = "0.1.0"
+description = "Native LLVM code generation and runtime for PyTensor's LLVM backend"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+
+[tool.maturin]
+# the extension is `pytensor_llvm.pytensor_llvm`, inside the package in `python/`, which
+# ships its type stubs (`*.pyi`, `py.typed`)
+module-name = "pytensor_llvm.pytensor_llvm"
+python-source = "python"
+features = ["pyo3/extension-module"]
+
+# Rebuild when the Rust sources change: by default uv/pixi key their cache of a path
+# dependency on pyproject.toml alone and would reuse a stale binary after Rust edits.
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "src/**/*.rs" },
+    { file = "include/*.h" },
+    { file = "python/**/*" },
+]

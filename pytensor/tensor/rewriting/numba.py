@@ -30,7 +30,8 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
     after inplacing without conflicting with the destroyers in the surrounding
     graph.
 
-    This rewrite is required for the numba backend implementation of Blockwise.
+    This rewrite is required for the numba and LLVM backend implementations of
+    Blockwise.
 
     Example
     -------
@@ -116,5 +117,6 @@ optdb.register(
     introduce_explicit_core_shape_blockwise.__name__,
     dfs_rewriter(introduce_explicit_core_shape_blockwise),
     "numba",
+    "llvm",
     position=100,
 )

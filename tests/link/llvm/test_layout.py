@@ -1,0 +1,460 @@
+"""Static layouts: the rules, the specialization of generated code, the checks."""
+
+import ctypes
+import re
+
+import numpy as np
+import pytest
+
+import pytensor
+import pytensor.tensor as pt
+from pytensor.compile.mode import get_mode
+from pytensor.tensor.elemwise import DimShuffle
+
+
+ir = pytest.importorskip("pytensor_llvm.ir")
+
+from pytensor.link.llvm.codegen.kernel import build_kernel_wrapper  # noqa: E402
+from pytensor.link.llvm.codegen.kernel_module import (  # noqa: E402
+    CodegenOptions,
+    KernelModule,
+)
+from pytensor.link.llvm.codegen.node import build_node_function  # noqa: E402
+from pytensor.link.llvm.layout import DYNAMIC, PACKED, Layout  # noqa: E402
+from pytensor.link.llvm.planning.signature import node_outputs  # noqa: E402
+
+
+LLVM = get_mode("LLVM")
+CHECKED = LLVM.clone(link_kwargs={"check_layouts": True, "numba_fallback": False})
+C = Layout.c
+rng = np.random.default_rng(3)
+
+
+def view_layout(out, *ins):
+    """The layout of `out` given its node's input layouts (from `llvm_layout`)."""
+    node = out.owner
+    ins = list(ins) + [None] * (len(node.inputs) - len(ins))
+    return node_outputs(node, ins)[node.outputs.index(out)].layout
+
+
+# ------------------------------------------------------------------ rules
+
+
+def test_view_rules():
+    x = pt.dmatrix("x")
+    s = pt.tensor("s", shape=(4, 5, 6))
+    assert str(view_layout(x.T, C(2))) == "[P0, P1]"
+    assert str(view_layout(x[:, :3], C(2))) == "[?, P0]"
+    assert view_layout(x[1:], C(2)) == C(2)
+    assert view_layout(x[0], C(2)) == C(1)
+    assert str(view_layout(x[:, 0], C(2))) == "[?]"
+    assert str(view_layout(x[:, ::2], C(2))) == "[?, 16]"
+    # static shapes give static strides
+    assert str(view_layout(s[:, ::2], C(3))) == "[240, 96, P0]"
+    assert str(view_layout(s[:, 1], C(3))) == "[240, P0]"
+    assert view_layout(s[1:3], C(3)) == C(3)
+    assert (
+        str(
+            view_layout(
+                s.dimshuffle(2, 1, 0)[0], view_layout(s.dimshuffle(2, 1, 0), C(3))
+            )
+        )
+        == "[48, 240]"
+    )
+    # length-1 axes don't matter
+    assert view_layout(x.dimshuffle(0, "x", 1), C(2)) == C(3)
+    b = pt.tensor("b", shape=(None, 1, None))
+    assert view_layout(b.dimshuffle(0, 2), C(3)) == C(2)
+    # a slice that keeps the static length keeps the layout
+    assert view_layout(s[0:4], C(3)) == C(3)
+    # nothing known stays nothing known
+    assert view_layout(x.T, Layout.dynamic(2)) == Layout.dynamic(2)
+
+
+def test_satisfied_implies_join():
+    a = np.zeros((4, 5))
+    sl = a[:, :3]
+    lay = Layout.make((None, None), (0, 1), (DYNAMIC, PACKED))
+    assert lay.satisfied_by(sl.shape, sl.strides, 8)
+    assert not C(2).satisfied_by(sl.shape, sl.strides, 8)
+    assert C(2).satisfied_by(a.shape, a.strides, 8)
+    assert C(2).satisfied_by((0, 3), (999, 8), 8)  # empty
+    assert C(2).satisfied_by((3, 1), (8, 999), 8)  # length-1 axis
+    assert C(2).implies(lay, (None, None), 8) and not lay.implies(C(2), (None, None), 8)
+    assert C(2).join(lay, (None, None), 8) == lay
+    assert C(2).join(
+        Layout.make((None, None), (1, 0), (PACKED, PACKED)), (None, None), 8
+    ) == Layout.dynamic(2)
+
+
+# ------------------------------------------------------------------ programs
+
+
+def check_against_numpy(inputs, outputs, values, mode=CHECKED):
+    f = pytensor.function(inputs, outputs, mode=mode)
+    ref = pytensor.function(inputs, outputs, mode="FAST_COMPILE")
+    for r, e in zip(f(*values), ref(*values), strict=True):
+        np.testing.assert_allclose(r, e, rtol=1e-12)
+    return f
+
+
+def test_views_feed_specialized_code():
+    x = pt.dmatrix("x")
+    y = pt.tensor("y", shape=(6, 7))
+    outs = [
+        pt.exp(x[:, 1:]).sum(axis=1),
+        pt.exp(x.T) * 2,
+        pt.exp(x[::2]) + 1,
+        pt.log1p(y[:, ::3] ** 2).sum(),
+        (y.T[2:] @ y[:, :3]),
+        pt.exp(y[2]) * y[0, :],
+    ]
+    values = [rng.normal(size=(6, 7)), rng.normal(size=(6, 7))]
+    check_against_numpy([x, y], outs, values)
+    # with C-contiguous inputs, views of them are known too: steps are specialized
+    f = check_against_numpy(
+        [x, y], outs, values, mode=CHECKED.clone(link_kwargs={"input_layout": "c"})
+    )
+    dump = f.maker.linker.program.dump()
+    assert "[?, P0]" in dump and "[P0, P1]" in dump, dump
+
+
+@pytest.mark.parametrize("input_layout", ["any", "c"])
+def test_non_contiguous_inputs(input_layout):
+    x = pt.dmatrix("x")
+    mode = CHECKED.clone(link_kwargs={"input_layout": input_layout})
+    f = pytensor.function([x], [pt.exp(x) + x[:, ::-1], x.sum(axis=0)], mode=mode)
+    base = rng.normal(size=(8, 10))
+    for v in (base, base.T, base[::2, 1:7], np.asfortranarray(base)):
+        r = f(v)
+        np.testing.assert_allclose(r[0], np.exp(v) + v[:, ::-1])
+        np.testing.assert_allclose(r[1], v.sum(axis=0))
+
+
+def test_c_inputs_are_checked_by_the_c_api():
+    from tests.link.llvm.test_c_api import Api, PtArray, as_ptarrays
+
+    x = pt.dvector("x")
+    f = pytensor.function(
+        [x], pt.exp(x), mode=LLVM.clone(link_kwargs={"input_layout": "c"})
+    )
+    p = f.maker.linker.program
+    assert re.search(r"%0 +float64\[\?\] +input 0 +C$", p.dump(), re.M)
+    fn = p.c_function()
+    a = Api.from_address(p.c_api_table())
+    new = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)(a.session_new)
+    call = ctypes.CFUNCTYPE(
+        ctypes.c_int32,
+        ctypes.c_void_p,
+        ctypes.POINTER(PtArray),
+        ctypes.POINTER(PtArray),
+    )(a.call)
+    err = ctypes.CFUNCTYPE(ctypes.c_char_p, ctypes.c_void_p)(a.last_error)
+    st = new(fn)
+    v = np.arange(10.0)
+    out = np.empty(5)
+    ins, _k1 = as_ptarrays([v[::2]])
+    outs, _k2 = as_ptarrays([out])
+    assert call(st, ins, outs) != 0 and b"must be C-contiguous" in err(st)
+    ins, _k1 = as_ptarrays([v[:5]])
+    assert call(st, ins, outs) == 0
+    np.testing.assert_allclose(out, np.exp(v[:5]))
+    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.session_free)(st)
+    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(a.function_decref)(fn)
+
+
+def test_scan_body_gets_row_layouts():
+    x = pt.dmatrix("x")
+    w = pt.dvector("w")
+    res = pytensor.scan(
+        lambda r, acc: acc + pt.exp(r[1:]) @ w[1:],
+        sequences=[x],
+        outputs_info=[pt.zeros(())],
+        return_updates=False,
+    )
+    values = [rng.normal(size=(5, 4)), rng.normal(size=4)]
+    check_against_numpy([x, w], [res], values)
+    # a transposed sequence: rows aren't contiguous, and that's known too
+    res = pytensor.scan(
+        lambda r, acc: acc + pt.exp(r).sum(),
+        sequences=[x.T],
+        outputs_info=[pt.zeros(())],
+        return_updates=False,
+    )
+    check_against_numpy([x], [res], values[:1])
+
+
+def test_layout_check_catches_a_wrong_claim():
+    x = pt.dmatrix("x")
+    node = pt.exp(x).owner
+    unit = KernelModule.new("wrong_claim", CodegenOptions(check_layouts=True))
+    nf = build_node_function(unit, node, "node", input_layouts=[C(2)])
+    build_kernel_wrapper(unit, nf)
+    c = unit.module.compile()
+    v = rng.normal(size=(3, 4))
+    (r,) = ir.call_kernel(c.address("kernel"), [v], [(np.dtype("float64"), 2)])
+    np.testing.assert_allclose(r, np.exp(v))
+    with pytest.raises(Exception, match="layout check"):
+        ir.call_kernel(c.address("kernel"), [v.T], [(np.dtype("float64"), 2)])
+
+
+def test_specialized_signature_passes_fewer_strides():
+    x = pt.dmatrix("x")
+    node = pt.exp(x).owner
+    from pytensor.link.llvm.planning.signature import node_signature
+
+    any_ = node_signature(node)
+    c = node_signature(node, input_layouts=[C(2)])
+    assert len(any_.inputs[0].stride_axes) == 2 and c.inputs[0].stride_axes == ()
+    sl = node_signature(
+        node, input_layouts=[Layout.make((None, None), (0, 1), (DYNAMIC, PACKED))]
+    )
+    assert sl.inputs[0].stride_axes == (0,)
+
+
+# ------------------------------------------------------------------ the feature and the rewrite
+
+
+def test_feature_predicts_and_invalidates():
+    from pytensor.graph.fg import FunctionGraph
+    from pytensor.link.llvm.analysis.layout import LayoutFeature
+
+    x = pt.dmatrix("x")
+    t = x.T
+    y = pt.exp(t[1:])
+    z = y.T[:, :2]
+    fg = FunctionGraph([x], [z], clone=False)
+    fg.attach_feature(LayoutFeature(input_layout="c"))
+    assert fg.llvm_layout(x) == C(2)
+    assert str(fg.llvm_layout(t)) == "[P0, P1]"
+    assert str(fg.llvm_layout(t[1:].owner.outputs[0])) == "[P0, ?]"
+    assert fg.llvm_layout(y) == C(2)
+    assert (
+        str(fg.llvm_layout(z)) == "[P0, P1]"
+    )  # slicing the outermost packed axis keeps it packed
+    # replacing y by a transposed (C-contiguous) input changes everything downstream
+    u = pt.dmatrix("u")
+    fg.add_input(u)
+    fg.replace(y, u.T, import_missing=True)
+    assert str(fg.llvm_layout(fg.outputs[0])) == "[?, P0]"
+
+
+def test_compiled_graph_has_the_layouts_of_its_values():
+    x = pt.vector("x")
+    # static and dynamic lengths: reshapes into provided and allocated memory
+    outs = [x.reshape((2, 3)).T.reshape((6,)), x.reshape((2, -1)).T.reshape((-1,))]
+    f = pytensor.function([x], outs, mode=LLVM.excluding("llvm_units"))
+    fg = f.maker.fgraph
+    for n in fg.apply_nodes:
+        if isinstance(n.op, DimShuffle):
+            assert str(fg.llvm_layout(n.outputs[0])) == "[P0, P1]"
+    # the reshapes were generated for that layout: they copy
+    assert f.maker.linker.program.descriptions.count("Reshape{1} {[P0, P1], C}") == 2
+    expected = np.arange(6.0).reshape(2, 3).T.ravel()
+    for r in f(np.arange(6.0)):
+        np.testing.assert_array_equal(r, expected)
+
+
+# ------------------------------------------------------------------ code follows the layout
+
+
+def _blocks(node, lays):
+    unit = KernelModule.new("t")
+    build_node_function(unit, node, "node", input_layouts=lays)
+    labels = [
+        ln.split(":")[0]
+        for ln in unit.module.ir().splitlines()
+        if ln and ln[0] not in " ;}" and ":" in ln
+    ]
+    # (loops, run-time choices between loop variants: if_else blocks; checks are if_)
+    return sum(
+        lb.startswith(("loop", "fold")) and ".exit" not in lb for lb in labels
+    ), sum(lb.startswith("else") for lb in labels)
+
+
+T2 = Layout.make((None, None), (1, 0), (PACKED, PACKED))
+
+
+def test_known_layouts_decide_loops_at_compile_time():
+    import pytensor.scalar as ps
+    from pytensor.tensor.elemwise import Elemwise
+
+    x = pt.dmatrix("x")
+    # a full reduction is one flat loop for any contiguous layout, transposed too
+    assert _blocks(x.sum().owner, [T2]) == (1, 0)
+    loops, branches = _blocks(x.sum().owner, [None])
+    assert branches == 1 and loops > 1  # unknown: flat or nest, chosen at run time
+    # an elementwise op with many inputs: only inputs of unknown layout are checked, so
+    # the code has one variant more, not one per combination
+    s = [ps.float64(f"s{i}") for i in range(6)]
+    comp = ps.Composite(s, [s[0] * s[1] + ps.exp(s[2]) - s[3] * s[4] + s[5]])
+    node = Elemwise(comp)(*[pt.dmatrix(f"a{i}") for i in range(6)]).owner
+    known = _blocks(node, [C(2)] * 6)
+    one_unknown = _blocks(node, [C(2)] * 5 + [None])
+    all_unknown = _blocks(node, [None] * 6)
+    assert known[1] == 0 and one_unknown[1] == 1 and all_unknown[1] == 1
+    # transposed inputs: no flat loop with a C output, but no run-time check either
+    assert _blocks(node, [T2] * 6)[1] == 0
+
+
+def test_code_follows_memory_order():
+    x = pt.dmatrix("x")
+    outs = [x.T.sum(axis=0), x.T.sum(axis=1), pt.exp(x.T) * x.T, x.T.sum()]
+    v = rng.normal(size=(7, 5))
+    check_against_numpy(
+        [x], outs, [v], mode=CHECKED.clone(link_kwargs={"input_layout": "c"})
+    )
+    check_against_numpy([x], outs, [v[:, ::2]], mode=CHECKED)
+
+
+def test_elemwise_output_follows_its_inputs():
+    x = pt.dmatrix("x")
+    y = pt.dmatrix("y")
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c"})
+    # allocated output: transposed like its inputs (one flat loop), not C with a strided loop
+    f = pytensor.function([x, y], pt.exp(x.T) * y.T, mode=mode)
+    xv, yv = rng.normal(size=(4, 6)), rng.normal(size=(4, 6))
+    r = f(xv, yv)
+    np.testing.assert_allclose(r, np.exp(xv.T) * yv.T)
+    assert r.flags.f_contiguous and not r.flags.c_contiguous
+    # static shapes: the temporary is a frame value in the inputs' order
+    s = pt.tensor("s", shape=(4, 6))
+    f = pytensor.function(
+        [s],
+        (pt.exp(s.T) + 1).sum(axis=0),
+        mode=mode.clone(link_kwargs={"input_layout": "c"}),
+    )
+    np.testing.assert_allclose(f(xv), (np.exp(xv.T) + 1).sum(axis=0))
+    # mixed: the majority decides, the result is still right
+    z = pt.dmatrix("z")
+    g = pytensor.function([x, y, z], pt.exp(x.T) + y.T - z, mode=mode)
+    zv = rng.normal(size=(6, 4))
+    np.testing.assert_allclose(g(xv, yv, zv), np.exp(xv.T) + yv.T - zv)
+
+
+def test_fused_loop_has_its_own_layouts_inside_generated_code():
+    from pytensor.link.llvm.analysis.layout import graph_layouts
+    from pytensor.link.llvm.dispatch.fused import fusable
+    from pytensor.tensor.rewriting.fused_elemwise import FusedElemwise
+
+    # (generated code inlines OpFromGraphs, but a FusedElemwise run as one loop is a
+    # node of its own: not the layouts of its inner graph, transposed like the inputs)
+    x = pt.dmatrix("x")
+    y = pt.dmatrix("y")
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c"})
+    f = pytensor.function([x, y], [pt.exp(x.T) * y.T, (x.T * y.T).sum()], mode=mode)
+    fgraph = f.maker.fgraph
+    (node,) = [n for n in fgraph.apply_nodes if isinstance(n.op, FusedElemwise)]
+    assert fusable(node.op, node)
+    ins = [C(2), C(2)]
+    inlined = graph_layouts(fgraph.inputs, fgraph.outputs, ins, inlined=True)
+    alone = graph_layouts(fgraph.inputs, fgraph.outputs, ins)
+    assert [inlined[v] for v in node.outputs] == [alone[v] for v in node.outputs]
+
+
+def test_declared_outputs():
+    from pytensor.link.llvm.planning.signature import Passing
+
+    x = pt.dmatrix("x")
+    (o,) = node_outputs((pt.exp(x.T)).owner, [T2])
+    assert (
+        o.passing is Passing.CALLEE_SLOT
+        and o.aliased_inputs == ()
+        and str(o.layout) == "[P0, P1]"
+    )
+    (o,) = node_outputs((pt.exp(x.T)).owner, [None])
+    assert o.layout == C(2)
+    (o,) = node_outputs(x.T.owner, [C(2)])
+    assert o.passing is Passing.CALLEE_SLOT
+    assert o.aliased_inputs == (0,) and o.layout == T2
+
+
+def test_provided_layouts_are_binding():
+    s = pt.tensor("s", shape=(4, 6))
+    t = pt.tensor("t", shape=(4, 6))
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c", "numba_fallback": False})
+    out = (
+        pt.exp(s.T) * t.T
+    )  # declared: provided memory in the inputs' (transposed) order
+    # as steps of the program (inside a compiled unit the unit does the same)
+    f = pytensor.function([s, t], out, mode=mode.excluding("llvm_units"))
+    g = pytensor.function([s, t], out, mode=mode)
+    p = f.maker.linker.program
+    dump = p.dump()
+    # a graph output must be C-contiguous: the node writes a temporary in its declared
+    # order, which is copied into the output
+    assert re.search(r"output 0 +\[P0, P1\]$", dump, re.M), dump
+    sv, tv = rng.normal(size=(4, 6)), rng.normal(size=(4, 6))
+    for fn in (f, g):
+        r = fn(sv, tv)
+        np.testing.assert_allclose(r, np.exp(sv.T) * tv.T)
+        assert r.flags.c_contiguous
+
+
+def test_view_layout_is_checked_at_run_time():
+    """A view gets the layout its op declares; `check_layouts` verifies the claim."""
+    from pytensor.graph.basic import Apply
+    from pytensor.graph.op import Op
+    from pytensor.link.llvm.registry import llvm_emit, llvm_layout
+
+    class BadTranspose(Op):
+        """Claims its view is C-contiguous, but returns the transpose."""
+
+        view_map = {0: [0]}
+
+        def make_node(self, x):
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, out):
+            out[0][0] = inputs[0].T
+
+    @llvm_layout.register(BadTranspose)
+    def _(op, node, input_layouts):
+        return [C(2)]
+
+    @llvm_emit.register(BadTranspose)
+    def _(op, node, cg, inputs, outputs):
+        x = inputs[0]
+        outputs[0].set_view(x.view(x.data, x.shape[::-1], x.strides[::-1]))
+
+    x = pt.dmatrix("x")
+    node = BadTranspose()(x).owner
+    v = rng.normal(size=(3, 4))
+    for check in (False, True):
+        unit = KernelModule.new("bad", CodegenOptions(check_layouts=check))
+        nf = build_node_function(unit, node, "node", input_layouts=[C(2)])
+        build_kernel_wrapper(unit, nf)
+        c = unit.module.compile()
+        outputs = [(np.dtype("float64"), 2)]
+        if check:
+            with pytest.raises(Exception, match="layout check: a view"):
+                ir.call_kernel(c.address("kernel"), [v], outputs)
+        else:
+            ir.call_kernel(c.address("kernel"), [v], outputs)  # not caught
+
+
+def test_kernels_choose_their_output_layouts():
+    """Rust kernels are made for their inputs' layouts and choose their outputs':
+    a sort follows its input's memory order, faer works column-major."""
+    from pytensor.link.llvm.kernels.rust import rust_implementation
+    from pytensor.link.llvm.planning.signature import Passing, node_outputs
+
+    def declared(out, in_layouts):
+        node = out.owner
+        implementation = rust_implementation(node, in_layouts)
+        (o,) = node_outputs(node, in_layouts, implementation=implementation)
+        return o
+
+    x = pt.dmatrix("x")
+    for lay in [C(2), T2]:
+        assert declared(pt.sort(x), [lay]).layout == lay
+    o = declared(pt.sort(x), [None])
+    assert o.passing is Passing.CALLEE_SLOT and o.layout == C(2)
+    a = pt.tensor("a", shape=(3, 4))
+    o = declared(pt.dot(a, a.T), None)
+    assert o.passing is Passing.CALLER_BUFFER and o.layout == T2
+    # and the outputs are made so
+    mode = CHECKED.clone(link_kwargs={"input_layout": "c"})
+    f = pytensor.function([x], [pt.linalg.inv(x), pt.sort(x.T)], mode=mode)
+    inv, srt = f(np.eye(3) + rng.normal(size=(3, 3)) * 0.1)
+    assert inv.flags.f_contiguous and srt.flags.f_contiguous
