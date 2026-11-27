@@ -226,11 +226,6 @@ class TestLazyIfElse(IfElseCompatibilityTests):
         )
 
     @pytest.mark.parametrize("shape_kind", ["scalar", "vector", "tuple"])
-    @pytest.mark.xfail(
-        reason="Shape arguments lose static information across inner-graph boundaries",
-        raises=(TypeError, AttributeError),
-        strict=True,
-    )
     def test_shared_shape_input(self, shape_kind):
         c = pt.iscalar("c")
         x, y = pt.vectors("x", "y")
@@ -257,6 +252,61 @@ class TestLazyIfElse(IfElseCompatibilityTests):
                 np.testing.assert_array_equal(
                     result_shape, rows if shape_kind == "scalar" else z_shape
                 )
+
+    def test_shared_shape_arithmetic(self):
+        c = pt.iscalar("c")
+        x, y = pt.vectors("x", "y")
+        z = pt.matrix("z")
+        n = z.shape[0] * 2
+        out = ifelse(c, x.reshape((n, -1)).sum(1), y)
+        fn = function([c, x, y, z], [out, n], mode=self.mode)
+        x_value = np.arange(12, dtype=x.dtype)
+        y_value = np.full(4, 5, dtype=y.dtype)
+        z_value = np.zeros((2, 3), dtype=z.dtype)
+        for condition in (False, True):
+            res, res_n = fn(condition, x_value, y_value, z_value)
+            expected = x_value.reshape((4, 3)).sum(1) if condition else y_value
+            np.testing.assert_array_equal(res, expected)
+            np.testing.assert_array_equal(res_n, 4)
+
+    def test_independent_scalar_shape_input(self):
+        c = pt.iscalar("c")
+        x, y = pt.vectors("x", "y")
+        n = pt.lscalar("n")
+        out = ifelse(c, x.reshape((n, -1)).sum(1), y)
+        fn = function([c, x, y, n], out, mode=self.mode)
+        x_value = np.arange(6, dtype=x.dtype)
+        res_t = fn(True, x_value, np.zeros(2, dtype=y.dtype), 2)
+        np.testing.assert_array_equal(res_t, x_value.reshape((2, 3)).sum(1))
+        res_f = fn(False, x_value, np.full(2, 7, dtype=y.dtype), 2)
+        np.testing.assert_array_equal(res_f, np.full(2, 7, dtype=y.dtype))
+        # Recompilation with new static n value
+        res_recompile = fn(True, x_value, np.zeros(3, dtype=y.dtype), 3)
+        np.testing.assert_array_equal(res_recompile, x_value.reshape((3, 2)).sum(1))
+
+    def test_alloc_shape_input(self):
+        c = pt.iscalar("c")
+        z = pt.matrix("z")
+        n = z.shape[0]
+        out_zeros = ifelse(c, pt.zeros((n, 3)), pt.ones((2, 3)))
+        fn_zeros = function([c, z], [out_zeros, n], mode=self.mode)
+        res_zeros, res_n = fn_zeros(True, np.zeros((2, 3)))
+        assert res_zeros.shape == (2, 3)
+        np.testing.assert_array_equal(res_n, 2)
+
+    def test_user_static_argnums(self):
+        from pytensor.compile.mode import Mode
+        from pytensor.link.jax.linker import JAXLinker
+
+        c = pt.iscalar("c")
+        x, y = pt.vectors("x", "y")
+        n = pt.lscalar("n")
+        out = ifelse(c, x.reshape((n, -1)).sum(1), y)
+        linker = JAXLinker(static_argnums=(3,))
+        mode = Mode(linker=linker)
+        fn = function([c, x, y, n], out, mode=mode)
+        res = fn(True, np.arange(6.0), np.zeros(2), 2)
+        np.testing.assert_array_equal(res, [3.0, 12.0])
 
 
 def test_jax_checkandraise():
