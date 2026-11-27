@@ -7,6 +7,7 @@ import pytensor
 from pytensor import function
 from pytensor import tensor as pt
 from pytensor.assumptions.specify import assume
+from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
@@ -546,6 +547,30 @@ class TestSelectionDotToIndexing:
         )
         R_np = np.eye(n)[:, idx]
         assert_allclose(f(mv, idx), R_np @ M_np @ R_np.T)
+
+    @pytest.mark.parametrize("side", ["left", "right"])
+    @pytest.mark.parametrize("source", ["eye", "assumed"])
+    def test_identity(self, source, side):
+        n = self.n
+        d = pt.tensor("d", shape=(2, n, n))
+        s = pt.matrix("s", shape=(n, n))
+        identity = (
+            pt.eye(n) if source == "eye" else assume(s, permutation=True, diagonal=True)
+        )
+        out = identity @ d if side == "left" else d @ identity
+
+        result = RewriteTester([d, s], [out])
+        result.assert_graph(d)
+
+    def test_identity_keeps_shape_check_without_shape_unsafe(self):
+        n = pt.iscalar("n")
+        d = pt.matrix("d")
+        f = function(
+            [n, d], pt.eye(n) @ d, mode=get_default_mode().excluding("shape_unsafe")
+        )
+
+        with pytest.raises(ValueError):
+            f(3, np.ones((5, 2)))
 
 
 def test_gather_matches_upcast_matmul_dtype():
