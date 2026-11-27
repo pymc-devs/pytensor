@@ -38,6 +38,9 @@ class JAXOp(Op):
     >>> import numpy as np
     >>> import jax
     >>> import jax.numpy as jnp
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> from pytensor.link.jax.ops import JAXOp
     >>> from pytensor.tensor import TensorType
     >>>
     >>> # Create the jax function that sums the input array.
@@ -252,6 +255,7 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
     --------
 
     >>> import jax.numpy as jnp
+    >>> import pytensor
     >>> import pytensor.tensor as pt
     >>> from pytensor import wrap_jax
     >>> @wrap_jax
@@ -268,6 +272,7 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
 
     >>> import jax
     >>> import jax.numpy as jnp
+    >>> import pytensor
     >>> import pytensor.tensor as pt
     >>> from pytensor import wrap_jax
     >>> @wrap_jax
@@ -282,17 +287,17 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
 
     Or Equinox modules:
 
-    >>> x = pt.tensor("x", shape=(3,))  # doctest +SKIP
-    >>> y = pt.tensor("y", shape=(3,))  # doctest +SKIP
-    >>> import equinox as eqx  # doctest +SKIP
+    >>> x = pt.tensor("x", shape=(3,))  # doctest: +SKIP
+    >>> y = pt.tensor("y", shape=(3,))  # doctest: +SKIP
+    >>> import equinox as eqx  # doctest: +SKIP
     >>> mlp = eqx.nn.MLP(
     ...     3, 3, 3, depth=2, activation=jnp.tanh, key=jax.random.key(0)
-    ... )  # doctest +SKIP
-    >>> mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)  # doctest +SKIP
-    >>> @wrap_jax  # doctest +SKIP
-    ... def neural_network(x, mlp):  # doctest +SKIP
-    ...     return mlp(x)  # doctest +SKIP
-    >>> out = neural_network(x, mlp)  # doctest +SKIP
+    ... )  # doctest: +SKIP
+    >>> mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)  # doctest: +SKIP
+    >>> @wrap_jax  # doctest: +SKIP
+    ... def neural_network(x, mlp):  # doctest: +SKIP
+    ...     return mlp(x)  # doctest: +SKIP
+    >>> out = neural_network(x, mlp)  # doctest: +SKIP
 
     If the input shapes are not fully determined, and valid
     input shapes cannot be inferred by evaluating the inputs either,
@@ -306,8 +311,9 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
     >>> x = pt.vector("x")  # shape is not fully determined
     >>> y = pt.vector("y")  # shape is not fully determined
     >>> result = add(x, y)
-    ValueError: Could not compile a function to infer example shapes. Please provide inputs with fully determined shapes by calling pt.specify_shape.
+    Traceback (most recent call last):
     ...
+    ValueError: Could not compile a function to infer example shapes. Please provide inputs with fully determined shapes by calling pt.specify_shape.
     """
 
     def decorator(func):
