@@ -19,7 +19,7 @@ inputs-to-outputs graph is transformed into a callable object.
 PyTensor defines the following modes by name:
 
 - ``'FAST_COMPILE'``: Apply just a few graph rewrites and only use Python implementations.
-- ``'FAST_RUN'``: Apply all rewrites, and use C implementations where possible.
+- ``'FAST_RUN'``: Apply all rewrites. Defaults to Numba JIT compilation when ``config.linker == "auto"``, or uses the configured backend linker (such as C/CVM).
 - ``NUMBA``: Apply all relevant related rewrites and compile the whole graph using Numba.
 - ``JAX``: Apply all relevant rewrites and compile the whole graph using JAX.
 - ``PYTORCH`` Apply all relevant rewrites and compile the whole graph using PyTorch compile.
