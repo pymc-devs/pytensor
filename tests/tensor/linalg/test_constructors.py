@@ -44,8 +44,8 @@ def test_block_diagonal_grad():
 
 
 def test_block_diagonal_batched_grad():
-    # The batched ARange that sliced out each block is gone (#2702). The
-    # Blockwise(AdvancedSubtensor) left on the output gradient should go too (#2704)
+    # Only the forward BlockDiagonal is left. The batched ARange (#2702) and the
+    # Blockwise(AdvancedSubtensor) on the output gradient (#2704) are gone
     A = pt.tensor3("A")
     B = pt.matrix("B")
     grad = pytensor.grad((block_diag(A, B) ** 2).sum(), A)
@@ -55,7 +55,7 @@ def test_block_diagonal_batched_grad():
         for node in fn.maker.fgraph.apply_nodes
         if isinstance(node.op, Blockwise)
     )
-    assert blockwise_core_ops == ["AdvancedSubtensor", "BlockDiagonal"]
+    assert blockwise_core_ops == ["BlockDiagonal"]
 
 
 def test_block_diagonal_blockwise():
