@@ -2,6 +2,7 @@ from contextlib import ExitStack
 
 import numpy as np
 import pytest
+import scipy.sparse as scipy_sparse
 from scipy.sparse.csr import csr_matrix
 
 import pytensor
@@ -220,6 +221,37 @@ class TestSparseVariable:
             [[-1], [2], [1]],
         )
         assert isinstance(exp_res, csr_matrix)
+
+    @pytest.mark.parametrize("format", ["csr", "csc"])
+    @pytest.mark.parametrize(
+        "dot_fn",
+        [
+            pytest.param(lambda s, v: s.dot(v), id="sparse_dot"),
+            pytest.param(pt.dot, id="tensor_dot"),
+            pytest.param(sparse.structured_dot, id="structured_dot"),
+            pytest.param(lambda s, v: pt.dot(v, s.T), id="tensor_dot_dense_left"),
+            pytest.param(
+                lambda s, v: sparse.structured_dot(v, s.T),
+                id="structured_dot_dense_left",
+            ),
+        ],
+    )
+    def test_dot_vector(self, format, dot_fn):
+        matrix = SparseTensorType(format, dtype="float64")("matrix")
+        vector = pt.dvector("vector")
+        output = dot_fn(matrix, vector)
+        assert output.ndim == 1
+        f = pytensor.function([matrix, vector], output)
+
+        matrix_value = scipy_sparse.csr_matrix([[1.0, 0.0, 2.0], [-1.0, 0.0, 0.0]])
+        singleton = scipy_sparse.csr_matrix([[0.0]])
+        for value, vector_value, expected in [
+            (matrix_value, np.array([-1.0, 2.0, 1.0]), np.array([1.0, 1.0])),
+            (singleton, np.array([2.0]), np.array([0.0])),
+        ]:
+            result = f(value.asformat(format), vector_value)
+            assert result.shape == expected.shape
+            np.testing.assert_allclose(result, expected)
 
     def test_repeat(self):
         x = pt.dmatrix("x")
