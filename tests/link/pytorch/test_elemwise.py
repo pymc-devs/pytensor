@@ -88,6 +88,132 @@ def test_pytorch_careduce(fn, axis):
     compare_pytorch_and_py([a_pt], [x], [test_value])
 
 
+@pytest.mark.parametrize(
+    "axis, dtype, acc_dtype",
+    [
+        ((0, 1), None, None),
+        (None, "float16", "float64"),
+        ((0, 1), "float16", "float64"),
+        (None, "float32", "float64"),
+    ],
+)
+def test_pytorch_prod_acc_dtype(axis, dtype, acc_dtype):
+    from pytensor.link.pytorch.dispatch import pytorch_funcify
+
+    x = matrix("x", dtype="float16")
+    out = pt.prod(x, axis=axis, dtype=dtype, acc_dtype=acc_dtype)
+    values = np.array([[256, 256], [1 / 256, 1]], dtype="float16")
+    fn = pytorch_funcify(out.owner_op, node=out.owner)
+    actual = fn(torch.from_numpy(values)).numpy()
+    expected = np.array(256, dtype=dtype or "float16")
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    "values, axis, dtype, acc_dtype, expected",
+    [
+        pytest.param(
+            np.array([16, 16], dtype="int8"),
+            None,
+            "int8",
+            "int64",
+            np.array(0, dtype="int8"),
+            id="integer-output",
+        ),
+        pytest.param(
+            np.empty((2, 0), dtype="float16"),
+            (1,),
+            "float32",
+            "float64",
+            np.ones(2, dtype="float32"),
+            id="empty-product",
+        ),
+        pytest.param(
+            np.array([[2**100, 2**100], [2**-100, 2**-100]], dtype="float32"),
+            (0, 1),
+            "float32",
+            "float64",
+            np.array(1, dtype="float32"),
+            id="float32-accumulator",
+        ),
+    ],
+)
+def test_pytorch_prod_output_dtype(values, axis, dtype, acc_dtype, expected):
+    from pytensor.link.pytorch.dispatch import pytorch_funcify
+
+    x = pt.tensor(dtype=values.dtype.name, shape=(None,) * values.ndim)
+    out = pt.prod(x, axis=axis, dtype=dtype, acc_dtype=acc_dtype)
+    fn = pytorch_funcify(out.owner_op, node=out.owner)
+    actual = fn(torch.from_numpy(values)).numpy()
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    "values, axis, dtype, acc_dtype",
+    [
+        (np.array([[16, 16], [1, 1]], dtype="uint8"), None, "uint64", None),
+        (np.array([[255, 255], [1, 1]], dtype="uint8"), (0, 1), "float64", "uint16"),
+        (
+            np.array([[2**31, 2], [1, 1]], dtype="uint32"),
+            (0, 1),
+            "float64",
+            "uint32",
+        ),
+        (
+            np.array([[2**63 + 1, 1], [1, 1]], dtype="uint64"),
+            (0, 1),
+            "float64",
+            "uint64",
+        ),
+        (np.full((2, 2), 255, dtype="uint8"), None, "uint64", "uint8"),
+        (np.empty((2, 0), dtype="uint8"), (1,), "uint64", None),
+    ],
+)
+def test_pytorch_prod_unsigned_acc_dtype(values, axis, dtype, acc_dtype):
+    from pytensor.link.pytorch.dispatch import pytorch_funcify
+
+    x = matrix("x", dtype=values.dtype.name)
+    out = pt.prod(x, axis=axis, dtype=dtype, acc_dtype=acc_dtype)
+    fn = pytorch_funcify(out.owner_op, node=out.owner)
+    actual = fn(torch.from_numpy(values)).numpy()
+    expected = np.prod(values, axis=axis, dtype=acc_dtype).astype(dtype)
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    "values, dtype, acc_dtype",
+    [
+        (np.array([[256, 256], [1 / 256, 1]], dtype="float16"), "float16", "float64"),
+        (
+            np.array([[2**63 + 1, 1], [1, 1]], dtype="uint64").T,
+            "float64",
+            "uint64",
+        ),
+        (np.array([[16, 16], [1, 1]], dtype="uint8"), "uint64", None),
+        (
+            np.array([[2**31, 2], [1, 1]], dtype="uint32"),
+            "float64",
+            "uint32",
+        ),
+    ],
+)
+def test_pytorch_prod_acc_dtype_compiled(values, dtype, acc_dtype):
+    x = matrix("x", dtype=values.dtype.name)
+    out = pt.prod(x, axis=(0, 1), dtype=dtype, acc_dtype=acc_dtype)
+
+    def assert_result(actual, expected):
+        assert actual.dtype == expected.dtype
+        np.testing.assert_array_equal(actual, expected)
+
+    compare_pytorch_and_py([x], out, [values], assert_fn=assert_result)
+
+
 def test_prod_without_zeros():
     x = matrix("x")
     outs = [ProdWithoutZeros(axis=None)(x), ProdWithoutZeros(axis=(1,))(x)]
