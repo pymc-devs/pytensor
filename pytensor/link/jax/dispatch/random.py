@@ -9,6 +9,7 @@ from numpy.random.bit_generator import (  # type: ignore[attr-defined]
 )
 
 import pytensor.tensor.random.basic as ptr
+from pytensor.compile.executor import reseeded_rng_value
 from pytensor.graph import Constant
 from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
 from pytensor.link.jax.dispatch.shape import JAXShapeTuple
@@ -78,6 +79,12 @@ def jax_typify_Generator(rng, **kwargs):
     state["state"]["inc"] = inc_32[0] << 32 | inc_32[1]
     state["state"]["state"] = state_32[0] << 32 | state_32[1]
     return state
+
+
+@reseeded_rng_value.register(dict)
+def reseeded_rng_value_jax(current, generator):
+    # JAX stores RNGs as the typified state dict produced by `jax_typify_Generator`.
+    return jax_typify_Generator(generator)
 
 
 @jax_funcify.register(ptr.RandomVariable)
