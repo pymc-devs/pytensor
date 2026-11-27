@@ -2980,22 +2980,36 @@ compile.optdb.register(
 
 @register_stabilize
 @register_specialize
-@node_rewriter([blockwise_of(Subtensor)])
+@node_rewriter([blockwise_of(Subtensor | AdvancedSubtensor)])
 def local_blockwise_of_subtensor(fgraph, node):
-    """Rewrite Blockwise of Subtensor, where the only batch input is the indexed tensor.
+    """Rewrite Blockwise of (Advanced)Subtensor, where the only batch input is the indexed tensor.
 
     Blockwise(Subtensor{a: b})(x, a, b) -> x[:, a:b] when x has one batch dimension, and a/b none
+    Blockwise(AdvancedSubtensor)(x, idx) -> x[:, idx] when idx only has broadcastable batch dims
 
     TODO: Handle batched indices like we do with blockwise of inc_subtensor
-    TODO: Extend to AdvanceSubtensor
     """
     x, *idxs = node.inputs
-    if not all(all(idx.type.broadcastable) for idx in idxs):
+    idxs_batch_ndim = [
+        idx.type.ndim - len(sig)
+        for idx, sig in zip(idxs, node.op.inputs_sig[1:], strict=True)
+    ]
+    if not all(
+        all(idx.type.broadcastable[:batch_ndim])
+        for idx, batch_ndim in zip(idxs, idxs_batch_ndim, strict=True)
+    ):
         return
 
     core_idxs = indices_from_subtensor(
-        [idx.squeeze() for idx in idxs], node.op.core_op.idx_list
+        [
+            _squeeze_left(idx, stop_at_dim=batch_ndim)
+            for idx, batch_ndim in zip(idxs, idxs_batch_ndim, strict=True)
+        ],
+        node.op.core_op.idx_list,
     )
+    if _non_consecutive_adv_indexing(core_idxs):
+        # The advanced index dims would move to the left of the batch dims
+        return
     # Add empty slices for the batch dims
     none_slices = (slice(None),) * node.op.batch_ndim(node)
     return [x[(*none_slices, *core_idxs)]]

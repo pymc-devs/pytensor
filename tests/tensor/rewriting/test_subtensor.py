@@ -25,6 +25,7 @@ from pytensor.tensor.rewriting.subtensor import (
     local_adv_idx_to_slice,
     local_advanced_read_of_write_constant_indices,
     local_blockwise_inc_subtensor,
+    local_blockwise_of_subtensor,
     local_inc_subtensor_remove_broadcastable_index,
     local_join_subtensors,
     local_read_of_write_same_indices,
@@ -3052,6 +3053,39 @@ def test_local_uint_constant_indices():
     new_index = subtensor_node.inputs[1]
     assert isinstance(new_index, Constant)
     assert new_index.type.dtype == "uint8"
+
+
+@pytest.mark.parametrize(
+    "idx_batch_shape, non_consecutive, rewritten",
+    [((1,), False, True), ((None,), False, False), ((1,), True, False)],
+    ids=["broadcast_batch_idx", "batched_idx", "non_consecutive"],
+)
+def test_local_blockwise_of_advanced_subtensor(
+    idx_batch_shape, non_consecutive, rewritten
+):
+    core_x = pt.tensor3("core_x")
+    core_i = pt.lvector("core_i")
+    core_j = pt.lvector("core_j")
+    core_out = (
+        core_x[core_i, :, core_j] if non_consecutive else core_x[:, core_i, core_j]
+    )
+    x = pt.tensor4("x")
+    i = pt.tensor("i", shape=(*idx_batch_shape, None), dtype="int64")
+    j = pt.tensor("j", shape=(*idx_batch_shape, None), dtype="int64")
+    out = vectorize_graph(core_out, {core_x: x, core_i: i, core_j: j})
+    assert isinstance(out.owner.op, Blockwise)
+
+    result = utt.RewriteTester(
+        [x, i, j], [out], include=None, custom_rewrite=local_blockwise_of_subtensor
+    )
+    result.assert_graph(x[:, :, i.squeeze(0), j.squeeze(0)] if rewritten else out)
+    rng = np.random.default_rng(2704)
+    idx_shape = (2 if idx_batch_shape == (None,) else 1, 2)
+    result.assert_eval(
+        rng.normal(size=(2, 3, 4, 5)).astype(x.dtype),
+        rng.integers(3, size=idx_shape),
+        rng.integers(3, size=idx_shape),
+    )
 
 
 class TestBlockwiseIncSubtensor:
