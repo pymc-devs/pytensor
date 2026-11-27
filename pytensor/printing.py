@@ -15,7 +15,7 @@ from typing import Any, Literal, TextIO
 import numpy as np
 
 from pytensor.compile import SharedVariable
-from pytensor.compile.debug.profiling import ProfileStats
+from pytensor.compile.debug.profiling import ProfileStats, _native_graph_annotations
 from pytensor.compile.executor import Function
 from pytensor.compile.io import In, Out
 from pytensor.configdefaults import config
@@ -203,6 +203,7 @@ def _build_label(
     print_op_info: bool,
     op_information: dict,
     assumption_tags: dict | None = None,
+    node_annotations: dict | None = None,
 ) -> str:
     """Return the formatted label string for a single `GraphNode`.
 
@@ -324,6 +325,10 @@ def _build_label(
     ) or op_information.get(node)
     if node_info and var in node_info:
         label = f"{label} ({node_info[var]})"
+
+    if node_annotations and not gnode.is_already_done:
+        if annotation := node_annotations.get(node):
+            label = f"{label} [{annotation}]"
 
     return label
 
@@ -692,6 +697,7 @@ def _model_from_stream(
     topo_order: Sequence[Apply] | None = None,
     storage_map: "StorageMapType | None" = None,
     assumption_tags: dict | None = None,
+    node_annotations: dict | None = None,
 ) -> GraphModelNode:
     """Consume the node stream for one root and build a `GraphModelNode`."""
     holder = GraphModelNode(label="", key="<root>", kind="root")
@@ -725,6 +731,7 @@ def _model_from_stream(
             print_op_info=print_op_info,
             op_information=op_information,
             assumption_tags=assumption_tags,
+            node_annotations=node_annotations,
         )
 
         if gnode.is_repeat and not gnode.is_inner_graph_header:
@@ -779,6 +786,7 @@ def build_graph_model(
     topo_orders: list[Sequence[Apply] | None] | None = None,
     storage_maps: list["StorageMapType | None"] | None = None,
     assumption_tags: dict | None = None,
+    node_annotations: dict | None = None,
 ) -> GraphModel:
     """Build a neutral, renderer-agnostic `GraphModel` for one or more outputs.
 
@@ -791,6 +799,8 @@ def build_graph_model(
     Pass the same ``node_keys``/``owner_keys`` dicts to multiple calls to
     keep node identity stable across graph states (e.g. before/after a
     rewrite), which turns state comparison into a set operation.
+
+    ``node_annotations`` maps `Apply` nodes to text appended to their labels.
 
     .. note::
 
@@ -852,6 +862,7 @@ def build_graph_model(
             topo_order=topo_order,
             storage_map=storage_map,
             assumption_tags=assumption_tags,
+            node_annotations=node_annotations,
         )
         for var, topo_order, storage_map in zip(
             outputs, topo_orders, storage_maps, strict=True
@@ -889,6 +900,7 @@ def build_graph_model(
             inner_graph_node=ig_var.owner,
             is_inner_graph_header=True,
             assumption_tags=assumption_tags,
+            node_annotations=node_annotations,
         )
         header.meta = {**header.meta, "outer_node": node_keys[ig_var]}
 
@@ -922,6 +934,7 @@ def build_graph_model(
                         parent_node=ig_var.owner,
                         inner_graph_node=ig_var.owner,
                         assumption_tags=assumption_tags,
+                        node_annotations=node_annotations,
                     )
                 )
         inner_graphs.append(header)
@@ -971,6 +984,7 @@ def debugprint(
     print_inner_graphs: bool | Literal["auto"] = "auto",
     print_fgraph_inputs: bool = False,
     print_assumptions: bool = False,
+    print_profile: bool = True,
 ) -> "str | TextIO | Any":  # rich.tree.Tree when file="rich"
     r"""Print a graph as text.
 
@@ -1042,6 +1056,11 @@ def debugprint(
         assumptions with an ``a={...}`` tag, e.g. ``a={diag}`` or ``a={!sym}``.
         Implied facts are pruned, so a diagonal matrix shows ``{diag}`` rather
         than every property it entails.
+    print_profile
+        Show available profiling information. Completed native sampling windows
+        annotate nodes with sampled self percentages. Shared percentages appear
+        on each candidate node and overlap. Uses the latest completed window
+        for each profile; ``False`` hides both profiling annotations and legends.
 
     Returns
     -------
@@ -1093,6 +1112,7 @@ def debugprint(
     profile_list: list[Any | None] = []
     topo_orders: list[list[Apply] | None] = []
     storage_maps: list[StorageMapType | None] = []
+    graph_profiles = []
 
     if isinstance(graph_like, list | tuple | set):
         graphs = graph_like
@@ -1114,7 +1134,9 @@ def debugprint(
             if print_fgraph_inputs:
                 inputs_to_print.extend(obj.maker.fgraph.inputs)
             outputs_to_print.extend(obj.maker.fgraph.outputs)
-            profile_list.extend(obj.profile for item in obj.maker.fgraph.outputs)
+            profile = obj.profile if print_profile else None
+            profile_list.extend(profile for item in obj.maker.fgraph.outputs)
+            graph_profiles.append((obj.maker.fgraph, profile))
             if print_storage:
                 storage_maps.extend(
                     obj.vm.storage_map for item in obj.maker.fgraph.outputs
@@ -1127,7 +1149,9 @@ def debugprint(
             if print_fgraph_inputs:
                 inputs_to_print.extend(obj.inputs)
             outputs_to_print.extend(obj.outputs)
-            profile_list.extend(getattr(obj, "profile", None) for item in obj.outputs)
+            profile = getattr(obj, "profile", None) if print_profile else None
+            profile_list.extend(profile for item in obj.outputs)
+            graph_profiles.append((obj, profile))
             storage_maps.extend(
                 getattr(obj, "storage_map", None) for item in obj.outputs
             )
@@ -1152,6 +1176,10 @@ def debugprint(
     else:
         assumption_tags = None
 
+    node_annotations, native_legend, node_costs = _native_graph_annotations(
+        graph_profiles
+    )
+
     if file == "rich":
         return _build_rich_tree(
             outputs_to_print,
@@ -1167,11 +1195,14 @@ def debugprint(
             profiles=profile_list,
             storage_maps=storage_maps,
             assumption_tags=assumption_tags,
+            node_annotations=node_annotations,
+            native_legend=native_legend,
+            node_costs=node_costs if native_legend else None,
         )
 
     inner_graph_vars: list[Variable] = []
 
-    if any(p for p in profile_list if p is not None and p.fct_callcount > 0):
+    if any(p for p in profile_list if p is not None and p.apply_time):
         print(
             """
 Timing Info
@@ -1214,6 +1245,7 @@ N.B.:
             print_op_info=print_op_info,
             print_destroy_map=print_destroy_map,
             print_view_map=print_view_map,
+            node_annotations=node_annotations,
         )
 
     for var, profile, storage_map, topo_order in zip(
@@ -1248,6 +1280,7 @@ N.B.:
             print_op_info=print_op_info,
             print_destroy_map=print_destroy_map,
             print_view_map=print_view_map,
+            node_annotations=node_annotations,
         )
 
     inner_graph_vars = [
@@ -1334,6 +1367,7 @@ N.B.:
                             print_destroy_map=print_destroy_map,
                             print_view_map=print_view_map,
                             inner_graph_node=ig_var.owner,
+                            node_annotations=node_annotations,
                         )
                     inner_to_outer_inputs = None
 
@@ -1365,7 +1399,13 @@ N.B.:
                         print_destroy_map=print_destroy_map,
                         print_view_map=print_view_map,
                         inner_graph_node=ig_var.owner,
+                        node_annotations=node_annotations,
                     )
+
+    if native_legend:
+        print("\nNative sampling (self event weight):", file=_file)
+        for line in native_legend:
+            print(f"  {line}", file=_file)
 
     if file is _file:
         return file
@@ -1402,6 +1442,7 @@ def _debugprint(
     inner_graph_node: Apply | None = None,
     is_inner_graph_header: bool = False,
     assumption_tags: dict | None = None,
+    node_annotations: dict | None = None,
 ) -> TextIO:
     r"""Print the graph represented by `var`.
 
@@ -1519,6 +1560,7 @@ def _debugprint(
             print_op_info=print_op_info,
             op_information=op_information,
             assumption_tags=assumption_tags,
+            node_annotations=node_annotations,
         )
 
         if gnode.is_repeat and not gnode.is_inner_graph_header:
@@ -1562,6 +1604,9 @@ def _build_rich_tree(
     profiles: list | None = None,
     storage_maps: list["StorageMapType | None"] | None = None,
     assumption_tags: dict | None = None,
+    node_annotations: dict | None = None,
+    native_legend: list[str] | None = None,
+    node_costs: dict[Apply, float] | None = None,
 ) -> Any:  # rich.tree.Tree when rich is installed
     """Build a ``rich.Tree`` for one or more output `Variable`s.
 
@@ -1579,7 +1624,8 @@ def _build_rich_tree(
     topo_orders, storage_maps, assumption_tags
         Metadata affecting the labels; same semantics as in `debugprint`.
     profiles
-        Unused.  Profile timing is only rendered by the text renderer.
+        Unused. Elapsed Op timings are only rendered by the text renderer;
+        native sampling annotations are passed separately.
     """
     try:
         import rich.markup
@@ -1589,6 +1635,7 @@ def _build_rich_tree(
             "rich is required for file='rich'. Install it with: pip install rich"
         ) from e
 
+    owner_keys = {}
     model = build_graph_model(
         outputs,
         depth=depth,
@@ -1602,7 +1649,27 @@ def _build_rich_tree(
         topo_orders=topo_orders,
         storage_maps=storage_maps,
         assumption_tags=assumption_tags,
+        node_annotations=node_annotations,
+        owner_keys=owner_keys,
     )
+
+    heat_colors = {}
+    if node_costs is not None:
+        peak = max(node_costs.values(), default=0)
+        palette = ((156, 163, 175), (251, 191, 36), (255, 107, 107))
+        for node, cost in node_costs.items():
+            if id(node) not in owner_keys or not peak:
+                continue
+            position = 2 * cost / peak
+            step = min(int(position), 1)
+            blend = position - step
+            rgb = tuple(
+                round(low + blend * (high - low))
+                for low, high in zip(palette[step], palette[step + 1], strict=True)
+            )
+            heat_colors[owner_keys[id(node)]] = "#" + "".join(
+                f"{channel:02x}" for channel in rgb
+            )
 
     # Colors assigned to shared (repeated) nodes so all occurrences are
     # visually linked.  Assigned lazily when a repeat is first seen, and
@@ -1630,6 +1697,16 @@ def _build_rich_tree(
 
     def walk(node: GraphModelNode, base: rich.tree.Tree) -> None:
         ck = _color_key(node)
+        if node_costs is not None:
+            color = heat_colors.get(ck, "dim")
+            child_tree = base.add(_color_label(rich.markup.escape(node.label), color))
+            if node.is_reference:
+                if node.meta.get("owner_key"):
+                    child_tree.add(_color_label("···", color))
+            else:
+                for child in node.children:
+                    walk(child, child_tree)
+            return
         if node.is_reference:
             # Repeated node: colored label with a ··· sentinel child when its
             # subtree is omitted (owned vars only; leaves have no subtree).
@@ -1656,6 +1733,15 @@ def _build_rich_tree(
         inner_root = root.add("[bold]Inner graphs:[/bold]")
         for header in model.inner_graphs:
             walk(header, inner_root)
+
+    if native_legend:
+        legend = root.add("[bold]Native sampling (self event weight):[/bold]")
+        legend.add(
+            "Heat: [#9ca3af]low[/] → [#fbbf24]medium[/] → [#ff6b6b]high[/]; "
+            "sampled cost (self + shared), scaled to the hottest node."
+        )
+        for line in native_legend:
+            legend.add(rich.markup.escape(line))
 
     return root
 
