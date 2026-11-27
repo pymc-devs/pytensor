@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Number
 from types import UnionType
@@ -340,6 +340,43 @@ def convert_strs_to_vars(
         return y
 
     return _convert(x)
+
+
+def matches_op(op_match, op: Op) -> bool:
+    """Whether a pattern head (Op or OpPattern) can match ``op``."""
+    if isinstance(op_match, OpPattern):
+        return op_match.match_op(op)
+    return bool(op_match == op)
+
+
+def pattern_tokens(pattern) -> frozenset[str]:
+    """Tokens of all PatternVars and Asterisks in a converted pattern tree."""
+    if isinstance(pattern, PatternVar | Asterisk):
+        return frozenset((pattern.token,))
+    if isinstance(pattern, PatternNode):
+        return pattern_tokens(pattern.op_match).union(
+            *(pattern_tokens(inp) for inp in pattern.inputs)
+        )
+    if isinstance(pattern, OpPattern):
+        return frozenset().union(
+            *(pattern_tokens(param) for _, param in pattern.parameters)
+        )
+    return frozenset()
+
+
+def pattern_anchor_depths(
+    pattern: PatternNode, depth: int = 0
+) -> Generator[tuple[Any, int], None, None]:
+    """Enumerate ``(head, depth)`` pairs for every PatternNode in the tree.
+
+    ``head`` is the sub-pattern's Op (or OpPattern) and ``depth`` its distance
+    from the pattern root. A node matching ``head`` can reach candidate pattern
+    roots by walking up through its clients ``depth`` times.
+    """
+    yield pattern.op_match, depth
+    for inp in pattern.inputs:
+        if isinstance(inp, PatternNode):
+            yield from pattern_anchor_depths(inp, depth + 1)
 
 
 def match_pattern(
