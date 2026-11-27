@@ -13,6 +13,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import CLinker
 from pytensor.scalar import ScalarLoop, float32, float64, int32
 from pytensor.scalar.math import (
+    GammaIncGrad,
     betainc,
     betainc_grad,
     gammainc,
@@ -145,8 +146,6 @@ def test_betainc_derivative_nan():
 @pytest.mark.parametrize(
     "op, scalar_loop_grads",
     [
-        (gammainc, [0]),
-        (gammaincc, [0]),
         (betainc, [0, 1]),
         (hyp2f1, [0, 1, 2]),
     ],
@@ -168,6 +167,24 @@ def test_scalarloop_grad_mixed_dtypes(op, scalar_loop_grads):
         assert any(
             (var.owner and isinstance(var.owner.op, ScalarLoop))
             for var in ancestors(grad)
+        )
+
+
+@pytest.mark.parametrize("op", [gammainc, gammaincc])
+def test_gammainc_grad_mixed_dtypes(op):
+    for k_type, x_type in itertools.product(
+        (float32, float64), (float32, float64, int32)
+    ):
+        k = k_type()
+        grad = pt.grad(op(k, x_type()), wrt=k)
+        [grad_node] = [
+            var.owner
+            for var in ancestors([grad])
+            if isinstance(var.owner_op, GammaIncGrad)
+        ]
+        # The ScalarLoop in the graph will fail if the input types are different from the updates
+        assert any(
+            isinstance(node.op, ScalarLoop) for node in grad_node.op.fgraph.apply_nodes
         )
 
 

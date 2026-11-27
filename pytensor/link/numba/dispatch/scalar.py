@@ -10,7 +10,9 @@ from numba.core.extending import get_cython_function_address
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.cache import _call_cached_ptr, compile_numba_function_src
 from pytensor.link.numba.dispatch import _gamma_tables as gamma_tables
+from pytensor.link.numba.dispatch import _gammainc_tables as gammainc_tables
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch._gammainc import make_gammainc_kernel
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
     numba_funcify_and_cache_key,
@@ -23,9 +25,9 @@ from pytensor.link.utils import (
 from pytensor.scalar import ScalarLoop
 from pytensor.scalar.basic import (
     Add,
+    BaseComposite,
     Cast,
     Clip,
-    Composite,
     Identity,
     Mul,
     Pow,
@@ -34,15 +36,20 @@ from pytensor.scalar.basic import (
     Second,
     Sign,
     Switch,
+    float64,
 )
 from pytensor.scalar.math import (
     Erf,
     Erfc,
+    GammaIncAndGrad,
+    GammaIncGrad,
     GammaLn,
     Log1mexp,
     Psi,
     Sigmoid,
     Softplus,
+    gammainc,
+    gammaincc,
 )
 
 
@@ -364,7 +371,7 @@ def numba_funcify_Clip(op, **kwargs):
     return clip, scalar_op_cache_key(op)
 
 
-@register_scalar_funcify(Composite)
+@register_scalar_funcify(BaseComposite)
 def numba_funcify_Composite(op, node, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
@@ -544,6 +551,286 @@ def numba_funcify_Psi(op, node, **kwargs):
         return kernel(x) if x > 0 else real(scipy_psi(x))
 
     return psi, scalar_op_cache_key(op, cache_version=3, scipy=scipy_key)
+
+
+def _dyadic_cells(cuts, counts):
+    """Put each zone's cuts on the coarsest dyadic grid that holds them all, so finding
+    a patch is one floor: per zone the low end, the fine width, the last fine cell and
+    its first row; per fine cell its patch interval and that interval's ends."""
+    lo, width, last, first, cell, cell_lo, cell_hi = [], [], [], [], [], [], []
+    for row, n in zip(cuts, counts, strict=True):
+        row = [float(c) for c in row[: n + 1]]
+        span = row[-1] - row[0]
+        fine = 1
+        while any(
+            abs((c - row[0]) / span * fine - round((c - row[0]) / span * fine)) > 1e-6
+            for c in row
+        ):
+            fine *= 2
+        marks = [round((c - row[0]) / span * fine) for c in row]
+        lo.append(row[0])
+        width.append(span / fine)
+        last.append(fine - 1)
+        first.append(len(cell))
+        for m in range(fine):
+            i = max(q for q in range(n) if marks[q] <= m)
+            cell.append(i)
+            cell_lo.append(row[i])
+            cell_hi.append(row[i + 1])
+    return lo, width, last, first, cell, cell_lo, cell_hi
+
+
+def _chebyshev_2d_src(n_arg, n_par):
+    """Source of ``cheb(c, sy, sp)``: the sum of c[a, b] T_a(sy) T_b(sp) and its sy and
+    sp derivatives, unrolled."""
+    lines = ["def cheb(c, sy, sp):"]
+    for v, s, n in (("p", "sp", n_par), ("y", "sy", n_arg)):
+        lines += [
+            f"    {v}0 = one",
+            f"    {v}1 = {s}",
+            f"    d{v}0 = zero",
+            f"    d{v}1 = one",
+        ]
+        for i in range(2, n):
+            lines.append(f"    {v}{i} = two * {s} * {v}{i - 1} - {v}{i - 2}")
+            lines.append(
+                f"    d{v}{i} = two * {v}{i - 1} + two * {s} * d{v}{i - 1} - d{v}{i - 2}"
+            )
+    for a in range(n_arg):
+        lines.append(
+            f"    r{a} = " + " + ".join(f"c[{a}, {b}] * p{b}" for b in range(n_par))
+        )
+        lines.append(
+            f"    q{a} = " + " + ".join(f"c[{a}, {b}] * dp{b}" for b in range(n_par))
+        )
+    lines.append("    f = " + " + ".join(f"y{a} * r{a}" for a in range(n_arg)))
+    lines.append("    fy = " + " + ".join(f"dy{a} * r{a}" for a in range(n_arg)))
+    lines.append("    fp = " + " + ".join(f"y{a} * q{a}" for a in range(n_arg)))
+    lines.append("    return f, fy, fp")
+    return "\n".join(lines)
+
+
+@cache
+def _gammainc_patch_kernel(njit, dtype):
+    """``(v, dv/dk, is_p)`` with v = ln P (is_p) or ln Q, for k >= ALO and finite x > 0.
+
+    chebax's gammainc_array: the zone, set by k and x / k, fixes an analytic leading
+    term of ln P or ln Q and the patch grid of its Chebyshev correction. A0 and B0 are
+    k < 1 (P below x = k + 1, Q above), L1 and L2 the lower tail x / k <= LAM_LO, U1
+    and U2 the upper tail x / k >= LAM_HI (L2 and U2 for k > ASPLIT), and T the rest,
+    around x = k. float32 computes in float32 on the leading KY32 x KP32 coefficients
+    of each patch.
+    """
+    t = gammainc_tables
+    A0, B0, L1, U1, L2, U2, T = map(
+        t.NAMES.index, ("A0", "B0", "L1", "U1", "L2", "U2", "T")
+    )
+    real = np.dtype(dtype).type
+    n_arg, n_par = (t.KY32, t.KP32) if dtype == "float32" else t.TABLE.shape[1:]
+    table = np.ascontiguousarray(t.TABLE[:, :n_arg, :n_par], dtype)
+    narg, offset = np.array(t.NARG, np.int64), np.array(t.OFFSET, np.int64)
+    luts = []
+    for cuts, counts in ((t.PCUTS, t.NPAR), (t.YCUTS, t.NARG)):
+        lo, width, last, first, cell, cell_lo, cell_hi = _dyadic_cells(cuts, counts)
+        luts.append(
+            (
+                *(np.array(v, dtype) for v in (lo, width, cell_lo, cell_hi)),
+                *(np.array(v, np.int64) for v in (last, first, cell)),
+            )
+        )
+    (p_lo, p_width, p_cell_lo, p_cell_hi, p_last, p_first, p_cell) = luts[0]
+    (y_lo, y_width, y_cell_lo, y_cell_hi, y_last, y_first, y_cell) = luts[1]
+    erfcx_p = np.ascontiguousarray(
+        t.ERFCX_P[:, : 5 if dtype == "float32" else 9], dtype
+    )
+    erfcx_k, erfcx_n = real(t.K), int(t.NP)
+    asplit = real(t.ASPLIT)
+    lam_lo, lam_hi = real(t.LAM_LO), real(t.LAM_HI)
+    zero, half, one, two = real(0), real(0.5), real(1), real(2)
+    tiny = real(np.finfo(dtype).tiny)
+    phi_series = np.array(
+        [1.0 if i % 2 == 0 else (i + 1) / (i + 2) for i in range(25)], dtype
+    )
+    z_series = real(0.2)
+    sqrt_2pi, two_rsqrtpi = real(np.sqrt(2 * np.pi)), real(2 / np.sqrt(np.pi))
+    half_ln_2pi = real(0.5 * np.log(2 * np.pi))
+
+    def strict(fn):
+        return njit(fn, fastmath={"contract"}, forceinline=True)
+
+    cheb = strict(
+        compile_numba_function_src(
+            _chebyshev_2d_src(n_arg, n_par),
+            "cheb",
+            global_env={"one": one, "two": two, "zero": zero},
+        )
+    )
+
+    @strict
+    def locate(val, z, lo, width, cell_lo, cell_hi, last, first, cell):
+        g = (val - lo[z]) / width[z]
+        m = min(int(np.floor(g)) if g >= zero else 0, last[z]) + first[z]
+        c0, c1 = cell_lo[m], cell_hi[m]
+        h = c1 - c0
+        return cell[m], two * (val - c0) / h - one, two / h
+
+    @strict
+    def erfcx_pos(x):
+        # x >= 0: t h(t), t = K / (K + x), h on NP panels in t
+        tt = erfcx_k / (erfcx_k + x)
+        u = real(erfcx_n) * tt
+        i = min(int(u), erfcx_n - 1)
+        v = two * (u - real(i)) - one
+        b1 = b2 = zero
+        for j in range(erfcx_p.shape[1] - 1, 0, -1):
+            b1, b2 = erfcx_p[i, j] - b2 + two * v * b1, b1
+        return tt * (erfcx_p[i, 0] - b2 + v * b1)
+
+    @strict
+    def phi_eta(d):
+        # phi = d - log1p(d), eta = sign(d) sqrt(2 phi) and d eta / d d
+        z = d / (two + d)
+        if abs(z) <= z_series:
+            s = phi_series[24]
+            ds = zero
+            for i in range(23, -1, -1):
+                ds = ds * z + s
+                s = s * z + phi_series[i]
+            rs = np.sqrt(s)
+            deta_dz = two * rs + z * ds / rs
+            return (
+                two * z * z * s,
+                two * z * rs,
+                deta_dz * two / ((two + d) * (two + d)),
+            )
+        phi = d - np.log1p(d)
+        eta = np.sqrt(two * phi) if d > zero else -np.sqrt(two * phi)
+        return phi, eta, d / ((one + d) * eta)
+
+    @strict
+    def direct(k, x):
+        lam = x / k
+        big = k > asplit
+        if k < one:
+            z = A0 if x <= k + one else B0
+        elif lam <= lam_lo:
+            z = L2 if big else L1
+        elif lam >= lam_hi:
+            z = U2 if big else U1
+        else:
+            z = T
+        if z == T:
+            par, dpar = one / k, -one / (k * k)
+        elif z == L2 or z == U2:
+            par, dpar = asplit / k, -asplit / (k * k)
+        else:
+            par, dpar = np.log1p(k), one / (one + k)
+        eta = phi = deta_dd = zero
+        if z == A0:
+            arg = x / (k + one)
+            darg = -arg / (k + one)
+        elif z == B0:
+            arg = (k + one) / x
+            darg = one / x
+        elif z == L1 or z == L2:
+            arg, darg = lam, -lam / k
+        elif z == U1 or z == U2:
+            arg, darg = k / x, one / x
+        else:
+            phi, eta, deta_dd = phi_eta((x - k) / k)
+            arg, darg = eta, -deta_dd * lam / k
+        i, sp, cp = locate(
+            par, z, p_lo, p_width, p_cell_lo, p_cell_hi, p_last, p_first, p_cell
+        )
+        j, sy, cy = locate(
+            arg, z, y_lo, y_width, y_cell_lo, y_cell_hi, y_last, y_first, y_cell
+        )
+        f, fsy, fsp = cheb(table[offset[z] + i * narg[z] + j], sy, sp)
+        fk = fsp * cp * dpar + fsy * cy * darg
+        if z == A0:
+            lx = np.log(x)
+            return k * lx - x + f, lx + fk, True
+        if z == B0:
+            lx = np.log(x)
+            return (k - one) * lx - x + np.log(k) + f, lx + one / k + fk, False
+        if z == T:
+            hk = np.sqrt(half * k)
+            y = eta * hk
+            sg = -one if y < zero else one
+            rt = sqrt_2pi * np.sqrt(k)
+            e = erfcx_pos(abs(y))
+            sm = half * e + sg * f / rt
+            dy = hk * (darg + eta / (two * k))
+            de = two * abs(y) * e - two_rsqrtpi
+            dsm = half * de * sg * dy + sg * (fk / rt - f / (two * k * rt))
+            return -k * phi + np.log(sm), -two * y * dy + dsm / sm, y < zero
+        # x / k loses digits or is 0 below tiny (x = 5e-324, k = 10)
+        lnlam = np.log(lam) if lam >= tiny else np.log(x) - np.log(k)
+        pre = -(x - k) - half * np.log(k) - half_ln_2pi
+        if z == L1 or z == L2:
+            return k * lnlam + pre + f, lnlam - half / k + fk, True
+        return (k - one) * lnlam + pre + f, lnlam + half / k + fk, False
+
+    return direct
+
+
+@cache
+def _gammainc_kernel(njit, dtype):
+    """``(P, Q, dP/dk)`` in `dtype`: chebax's patches where they apply, the series and
+    continued fraction of `make_gammainc_kernel` (in float64) elsewhere. Also returns
+    the cache keys of the scipy calls in the latter."""
+    lgamma, digamma = _gamma_kernels(njit, "float64")
+    scipy_fns, scipy_keys = zip(
+        *(
+            numba_funcify_ScalarOp(op, node=op.make_node(float64(), float64()))
+            for op in (gammainc, gammaincc)
+        ),
+        strict=True,
+    )
+    classical = make_gammainc_kernel(
+        lgamma, digamma, *scipy_fns, lambda fn: njit(fn, fastmath={"contract"})
+    )
+    direct = _gammainc_patch_kernel(njit, dtype)
+    real = np.dtype(dtype).type
+    alo, zero, one, inf = real(gammainc_tables.ALO), real(0), real(1), real(np.inf)
+
+    def kernel(k, x):
+        if k >= alo and k < inf and x > zero and x < inf:
+            v, dv, is_p = direct(k, x)
+            e = np.exp(v)
+            if is_p:
+                return e, one - e, e * dv
+            return one - e, e, -(e * dv)
+        p, q, dp = classical(np.float64(k), np.float64(x))
+        return real(p), real(q), real(dp)
+
+    return njit(kernel, fastmath={"contract"}), scipy_keys
+
+
+@register_scalar_funcify(GammaIncGrad)
+def numba_funcify_GammaIncGrad(op, node, **kwargs):
+    dtype = node.outputs[0].type.dtype
+    kernel, scipy_keys = _gammainc_kernel(numba_basic.numba_njit, dtype)
+    real = np.dtype(dtype).type
+
+    @numba_basic.numba_njit
+    def gammainc_grad(k, x):
+        return kernel(real(k), real(x))[2]
+
+    return gammainc_grad, scalar_op_cache_key(op, cache_version=3, scipy=scipy_keys)
+
+
+@register_scalar_funcify(GammaIncAndGrad)
+def numba_funcify_GammaIncAndGrad(op, node, **kwargs):
+    dtype = node.outputs[0].type.dtype
+    kernel, scipy_keys = _gammainc_kernel(numba_basic.numba_njit, dtype)
+    real = np.dtype(dtype).type
+
+    @numba_basic.numba_njit
+    def gammainc_and_grad(k, x):
+        return kernel(real(k), real(x))
+
+    return gammainc_and_grad, scalar_op_cache_key(op, cache_version=3, scipy=scipy_keys)
 
 
 @register_scalar_funcify(Log1mexp)

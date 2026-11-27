@@ -3,6 +3,7 @@ from math import comb
 
 import numpy as np
 import pytest
+import scipy.special
 
 import pytensor
 import pytensor.tensor as pt
@@ -16,6 +17,7 @@ from pytensor.link.numba.dispatch.elemwise import MAX_CAREDUCE_LOOPS
 from pytensor.scalar import Composite, and_, float64, or_, xor
 from pytensor.scalar import add as scalar_add
 from pytensor.scalar import mul as scalar_mul
+from pytensor.scalar.math import GammaIncAndGrad
 from pytensor.tensor import blas, matrix, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
@@ -745,6 +747,42 @@ def test_gammainc_wrt_k_grad():
         # gammainc is backed by scipy.special.cython_special, whose funcified kernel is njit-only
         eval_obj_mode=False,
     )
+
+
+@pytest.mark.parametrize("dtype, rtol", [("float64", 1e-12), ("float32", 1e-4)])
+def test_gammainc_value_and_grad(dtype, rtol):
+    k = pt.vector("k", dtype=dtype)
+    x = pt.vector("x", dtype=dtype)
+    p, q = pt.gammainc(k, x), pt.gammaincc(k, x)
+    dp_dk = grad(p.sum(), k)
+    fn = function([k, x], [p, q, dp_dk], mode="NUMBA")
+    assert [
+        type(node.op.scalar_op)
+        for node in fn.maker.fgraph.apply_nodes
+        if isinstance(node.op, Elemwise)
+    ] == [GammaIncAndGrad]
+
+    # A point in each zone of the tables, one where x / k underflows, then k < 0.1,
+    # which they do not cover, with P near 1, where Q is not 1 - P
+    tiny = np.finfo(dtype).smallest_subnormal
+    test_k = np.array(
+        [0.5, 0.5, 5.0, 5.0, 50.0, 20.0, 5.0, 1000.0, 10.0, 0.05, 1e-20], dtype=dtype
+    )
+    test_x = np.array(
+        [0.3, 3.0, 1.0, 40.0, 10.0, 130.0, 5.0, 1010.0, tiny, 0.5, 1e-3], dtype=dtype
+    )
+    p_val, q_val, dp_val = fn(test_k, test_x)
+    np.testing.assert_allclose(p_val, scipy.special.gammainc(test_k, test_x), rtol=rtol)
+    np.testing.assert_allclose(
+        q_val, scipy.special.gammaincc(test_k, test_x), rtol=rtol
+    )
+    # The loops in float64 at the same points, since in float32 they are less accurate
+    k64, x64 = pt.dvectors("k64", "x64")
+    ref_fn = function(
+        [k64, x64], grad(pt.gammainc(k64, x64).sum(), k64), mode="FAST_COMPILE"
+    )
+    ref_dp = ref_fn(test_k.astype("float64"), test_x.astype("float64"))
+    np.testing.assert_allclose(dp_val, ref_dp, rtol=rtol)
 
 
 @pytest.mark.parametrize(
