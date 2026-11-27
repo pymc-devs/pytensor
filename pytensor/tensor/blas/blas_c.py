@@ -44,7 +44,7 @@ class CGemv(BaseBLAS, Gemv):
         return gemv_c_code(node, name, inp, out, sub)
 
     def c_code_cache_version(self):
-        return (18, blas_header_version(), must_initialize_y_gemv())
+        return (19, blas_header_version(), must_initialize_y_gemv())
 
 
 cgemv_inplace = CGemv(inplace=True)
