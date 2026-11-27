@@ -6,6 +6,12 @@
 ==================================
 
 
+.. note::
+
+   The user-facing ``pytensor.scan`` function is deprecated. Use
+   :ref:`the structured looping API <lib_looping>` for new code. The underlying
+   Scan operation and its compiler rewrites continue to power the new API.
+
 Guide
 =====
 
