@@ -710,7 +710,7 @@ class GammaInc(BinaryScalarOp):
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
-            return (2, *v)
+            return (3, *v)
         else:
             return v
 
@@ -761,7 +761,7 @@ class GammaIncC(BinaryScalarOp):
     def c_code_cache_version(self):
         v = super().c_code_cache_version()
         if v:
-            return (2, *v)
+            return (3, *v)
         else:
             return v
 
