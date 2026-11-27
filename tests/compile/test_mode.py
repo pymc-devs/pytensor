@@ -76,7 +76,7 @@ class TestBunchOfModes:
         # to check that all the current modes can still be used.
         linker_classes_involved = []
 
-        predef_modes = ["FAST_COMPILE", "FAST_RUN", "DEBUG_MODE"]
+        predef_modes = ["FAST_COMPILE", "FAST_RUN", "DEBUG_MODE", "PYTHON"]
 
         # Linkers to use with regular Mode
         if config.cxx:
@@ -169,3 +169,11 @@ def test_optimizer_sets_active_compile_mode():
     mode.optimizer.rewrite(fg)
     assert seen == [mode]
     assert getattr(fg, "_compile_mode", None) is None
+
+
+def test_python_mode():
+    x = matrix()
+    y = matrix()
+    f = function([x, y], dot(x, y), mode="python")
+    assert "blas_opt" in f.maker.mode._optimizer.exclude
+    assert f([[1, 2]], [[3], [4]]).tolist() == [[11.0]]
