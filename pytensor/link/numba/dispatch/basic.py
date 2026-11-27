@@ -230,6 +230,12 @@ def generate_fallback_impl(op, node, storage_map=None, **kwargs):
 
     Note limitations: https://numba.pydata.org/numba-doc/dev/user/withobjmode.html#the-objmode-context-manager
     """
+    from pytensor.compile.inner_function import HasInnerFunction
+
+    if isinstance(op, HasInnerFunction):
+        # ``perform`` runs in objmode, but its inner function can still be
+        # linked with numba (lazily, on first call -- not at dispatch time).
+        op = op.with_inner_fn_for("numba")
 
     warnings.warn(
         f"Numba will use object mode to run {op}'s perform method. "
